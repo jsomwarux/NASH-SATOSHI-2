@@ -21,7 +21,12 @@
       "Bash(cat:*)",
       "Bash(npx tsx:*)",
       "Bash(pkill:*)",
-      "Bash(PGPASSWORD=password psql:*)"
+      "Bash(PGPASSWORD=password psql:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx typescript:*)",
+      "Bash(./node_modules/.bin/tsc:*)",
+      "Bash(timeout 10 npm run dev:*)",
+      "Bash(lsof:*)"
     ]
   }
 }

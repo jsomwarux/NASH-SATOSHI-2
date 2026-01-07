@@ -15,12 +15,13 @@ export function useSubscriptionTiers() {
     queryKey: ["subscriptionTiers"],
     queryFn: getSubscriptionTiers,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    retry: 1,
   });
 }
 
 // Get current user's subscription status
 export function useSubscriptionStatus() {
-  const { getAccessToken, user } = useAuth();
+  const { getAccessToken, user, isConfigured } = useAuth();
 
   return useQuery({
     queryKey: ["subscriptionStatus", user?.id],
@@ -30,6 +31,9 @@ export function useSubscriptionStatus() {
     },
     staleTime: 30 * 1000, // Cache for 30 seconds
     refetchOnWindowFocus: true,
+    // Always fetch - returns free tier status for unauthenticated users
+    enabled: isConfigured,
+    retry: 1,
   });
 }
 

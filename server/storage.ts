@@ -1,11 +1,642 @@
-export interface IStorage {}
+import { eq, and, desc, sql, gte, lte, ilike, or, count } from "drizzle-orm";
+import { getDb } from "./db";
+import {
+  userSubscriptions,
+  dailyUsage,
+  creditPurchases,
+  tokenAnalyses,
+  SUBSCRIPTION_TIERS,
+  type UserSubscription,
+  type InsertUserSubscription,
+  type TokenAnalysis,
+  type InsertTokenAnalysis,
+  type SubscriptionTierId,
+} from "@shared/schema";
 
-export class MemStorage implements IStorage {
-  constructor() {}
+export interface IStorage {
+  // Subscription methods
+  getUserSubscription(userId: string): Promise<UserSubscription | null>;
+  getSubscriptionByStripeCustomerId(customerId: string): Promise<UserSubscription | null>;
+  getSubscriptionByStripeSubscriptionId(subscriptionId: string): Promise<UserSubscription | null>;
+  createOrUpdateSubscription(data: Partial<InsertUserSubscription> & { userId: string }): Promise<UserSubscription>;
+  updateSubscription(userId: string, data: Partial<InsertUserSubscription>): Promise<UserSubscription | null>;
+  resetMonthlyUsage(userId: string): Promise<void>;
+  incrementMonthlyUsage(userId: string): Promise<void>;
+
+  // Daily usage methods (for free tier trial)
+  getDailyUsage(userId: string, date: string): Promise<number>;
+  incrementDailyUsage(userId: string, date: string): Promise<void>;
+
+  // Weekly usage methods (for free tier post-trial)
+  getWeeklyUsage(userId: string): Promise<number>;
+  incrementWeeklyUsage(userId: string): Promise<void>;
+  resetWeeklyUsage(userId: string): Promise<void>;
+
+  // Credit methods
+  addCredits(userId: string, credits: number, packId: string, amountPaid: number, paymentIntentId?: string): Promise<void>;
+  useCredit(userId: string): Promise<boolean>;
+
+  // Analysis methods
+  createAnalysis(data: InsertTokenAnalysis): Promise<TokenAnalysis>;
+  getAnalysis(id: number): Promise<TokenAnalysis | null>;
+  getAnalysisByToken(tokenId: string): Promise<TokenAnalysis | null>;
+  getUserAnalyses(userId: string, limit?: number, offset?: number): Promise<{ items: TokenAnalysis[]; total: number }>;
+  updateAnalysis(id: number, data: Partial<InsertTokenAnalysis>): Promise<TokenAnalysis | null>;
+
+  // Leaderboard methods
+  getLeaderboard(options: {
+    limit?: number;
+    offset?: number;
+    sortBy?: string;
+    order?: "asc" | "desc";
+    filters?: {
+      tier?: string;
+      narrative?: string;
+      chain?: string;
+      search?: string;
+    };
+  }): Promise<{ items: any[]; total: number }>;
+  getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[] }>;
 }
 
-export async function initStorage(): Promise<IStorage> {
-  return new MemStorage();
+export class PostgresStorage implements IStorage {
+  // ==================== SUBSCRIPTION METHODS ====================
+
+  async getUserSubscription(userId: string): Promise<UserSubscription | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(userSubscriptions)
+      .where(eq(userSubscriptions.userId, userId))
+      .limit(1);
+    return result[0] || null;
+  }
+
+  async getSubscriptionByStripeCustomerId(customerId: string): Promise<UserSubscription | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(userSubscriptions)
+      .where(eq(userSubscriptions.stripeCustomerId, customerId))
+      .limit(1);
+    return result[0] || null;
+  }
+
+  async getSubscriptionByStripeSubscriptionId(subscriptionId: string): Promise<UserSubscription | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(userSubscriptions)
+      .where(eq(userSubscriptions.stripeSubscriptionId, subscriptionId))
+      .limit(1);
+    return result[0] || null;
+  }
+
+  async createOrUpdateSubscription(data: Partial<InsertUserSubscription> & { userId: string }): Promise<UserSubscription> {
+    const db = getDb();
+    const existing = await this.getUserSubscription(data.userId);
+
+    if (existing) {
+      const result = await db
+        .update(userSubscriptions)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(userSubscriptions.userId, data.userId))
+        .returning();
+      return result[0];
+    } else {
+      const result = await db
+        .insert(userSubscriptions)
+        .values({
+          userId: data.userId,
+          tier: data.tier || "free",
+          status: data.status || "active",
+          stripeCustomerId: data.stripeCustomerId,
+          stripeSubscriptionId: data.stripeSubscriptionId,
+          stripePriceId: data.stripePriceId,
+          currentPeriodStart: data.currentPeriodStart,
+          currentPeriodEnd: data.currentPeriodEnd,
+          cancelAtPeriodEnd: data.cancelAtPeriodEnd,
+          monthlyAnalysesUsed: data.monthlyAnalysesUsed || 0,
+          monthlyResetDate: data.monthlyResetDate,
+          creditBalance: data.creditBalance || 0,
+          trialStartDate: data.trialStartDate,
+          weeklyAnalysesUsed: data.weeklyAnalysesUsed || 0,
+          weeklyResetDate: data.weeklyResetDate,
+        })
+        .returning();
+      return result[0];
+    }
+  }
+
+  async updateSubscription(userId: string, data: Partial<InsertUserSubscription>): Promise<UserSubscription | null> {
+    const db = getDb();
+    const result = await db
+      .update(userSubscriptions)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(userSubscriptions.userId, userId))
+      .returning();
+    return result[0] || null;
+  }
+
+  async resetMonthlyUsage(userId: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(userSubscriptions)
+      .set({
+        monthlyAnalysesUsed: 0,
+        monthlyResetDate: new Date().toISOString().split("T")[0],
+        updatedAt: new Date(),
+      })
+      .where(eq(userSubscriptions.userId, userId));
+  }
+
+  async incrementMonthlyUsage(userId: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(userSubscriptions)
+      .set({
+        monthlyAnalysesUsed: sql`${userSubscriptions.monthlyAnalysesUsed} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(userSubscriptions.userId, userId));
+  }
+
+  // ==================== DAILY USAGE METHODS ====================
+
+  async getDailyUsage(userId: string, date: string): Promise<number> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(dailyUsage)
+      .where(and(eq(dailyUsage.userId, userId), eq(dailyUsage.date, date)))
+      .limit(1);
+    return result[0]?.analysesCount || 0;
+  }
+
+  async incrementDailyUsage(userId: string, date: string): Promise<void> {
+    const db = getDb();
+    const existing = await this.getDailyUsage(userId, date);
+
+    if (existing > 0) {
+      await db
+        .update(dailyUsage)
+        .set({ analysesCount: sql`${dailyUsage.analysesCount} + 1` })
+        .where(and(eq(dailyUsage.userId, userId), eq(dailyUsage.date, date)));
+    } else {
+      await db.insert(dailyUsage).values({
+        userId,
+        date,
+        analysesCount: 1,
+      });
+    }
+  }
+
+  // ==================== WEEKLY USAGE METHODS ====================
+
+  async getWeeklyUsage(userId: string): Promise<number> {
+    const sub = await this.getUserSubscription(userId);
+    return sub?.weeklyAnalysesUsed || 0;
+  }
+
+  async incrementWeeklyUsage(userId: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(userSubscriptions)
+      .set({
+        weeklyAnalysesUsed: sql`${userSubscriptions.weeklyAnalysesUsed} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(userSubscriptions.userId, userId));
+  }
+
+  async resetWeeklyUsage(userId: string): Promise<void> {
+    const db = getDb();
+    await db
+      .update(userSubscriptions)
+      .set({
+        weeklyAnalysesUsed: 0,
+        weeklyResetDate: new Date().toISOString().split("T")[0],
+        updatedAt: new Date(),
+      })
+      .where(eq(userSubscriptions.userId, userId));
+  }
+
+  // ==================== CREDIT METHODS ====================
+
+  async addCredits(userId: string, credits: number, packId: string, amountPaid: number, paymentIntentId?: string): Promise<void> {
+    const db = getDb();
+
+    // Add credits to user's balance
+    await db
+      .update(userSubscriptions)
+      .set({
+        creditBalance: sql`${userSubscriptions.creditBalance} + ${credits}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(userSubscriptions.userId, userId));
+
+    // Record the purchase
+    await db.insert(creditPurchases).values({
+      userId,
+      packId,
+      credits,
+      amountPaid,
+      stripePaymentIntentId: paymentIntentId,
+    });
+  }
+
+  async useCredit(userId: string): Promise<boolean> {
+    const db = getDb();
+    const sub = await this.getUserSubscription(userId);
+
+    if (!sub || (sub.creditBalance || 0) <= 0) {
+      return false;
+    }
+
+    await db
+      .update(userSubscriptions)
+      .set({
+        creditBalance: sql`${userSubscriptions.creditBalance} - 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(userSubscriptions.userId, userId));
+
+    return true;
+  }
+
+  // ==================== ANALYSIS METHODS ====================
+
+  async createAnalysis(data: InsertTokenAnalysis): Promise<TokenAnalysis> {
+    const db = getDb();
+    const result = await db.insert(tokenAnalyses).values(data as any).returning();
+    return result[0];
+  }
+
+  async getAnalysis(id: number): Promise<TokenAnalysis | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(tokenAnalyses)
+      .where(eq(tokenAnalyses.id, id))
+      .limit(1);
+    return result[0] || null;
+  }
+
+  async getAnalysisByToken(tokenId: string): Promise<TokenAnalysis | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(tokenAnalyses)
+      .where(eq(tokenAnalyses.tokenId, tokenId))
+      .orderBy(desc(tokenAnalyses.createdAt))
+      .limit(1);
+    return result[0] || null;
+  }
+
+  async getUserAnalyses(userId: string, limit = 20, offset = 0): Promise<{ items: TokenAnalysis[]; total: number }> {
+    const db = getDb();
+
+    const [items, countResult] = await Promise.all([
+      db
+        .select()
+        .from(tokenAnalyses)
+        .where(eq(tokenAnalyses.userId, userId))
+        .orderBy(desc(tokenAnalyses.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db
+        .select({ count: count() })
+        .from(tokenAnalyses)
+        .where(eq(tokenAnalyses.userId, userId)),
+    ]);
+
+    return {
+      items,
+      total: countResult[0]?.count || 0,
+    };
+  }
+
+  async updateAnalysis(id: number, data: Partial<InsertTokenAnalysis>): Promise<TokenAnalysis | null> {
+    const db = getDb();
+    const result = await db
+      .update(tokenAnalyses)
+      .set({ ...data, updatedAt: new Date() } as any)
+      .where(eq(tokenAnalyses.id, id))
+      .returning();
+    return result[0] || null;
+  }
+
+  // ==================== LEADERBOARD METHODS ====================
+
+  async getLeaderboard(options: {
+    limit?: number;
+    offset?: number;
+    sortBy?: string;
+    order?: "asc" | "desc";
+    filters?: {
+      tier?: string;
+      narrative?: string;
+      chain?: string;
+      search?: string;
+    };
+  }): Promise<{ items: any[]; total: number }> {
+    const db = getDb();
+    const { limit = 50, offset = 0, sortBy = "score7d", order = "desc", filters } = options;
+
+    // Build WHERE conditions
+    const conditions = [eq(tokenAnalyses.status, "completed")];
+
+    if (filters?.tier) {
+      conditions.push(eq(tokenAnalyses.tier, filters.tier));
+    }
+    if (filters?.narrative) {
+      conditions.push(eq(tokenAnalyses.narrative, filters.narrative));
+    }
+    if (filters?.chain) {
+      conditions.push(eq(tokenAnalyses.chain, filters.chain));
+    }
+    if (filters?.search) {
+      conditions.push(
+        or(
+          ilike(tokenAnalyses.tokenName, `%${filters.search}%`),
+          ilike(tokenAnalyses.tokenSymbol, `%${filters.search}%`)
+        )!
+      );
+    }
+
+    // Get aggregated data per token
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // For simplicity, get the latest analysis per token
+    const query = db
+      .select({
+        tokenId: tokenAnalyses.tokenId,
+        tokenSymbol: tokenAnalyses.tokenSymbol,
+        tokenName: tokenAnalyses.tokenName,
+        tokenImage: tokenAnalyses.tokenImage,
+        chain: tokenAnalyses.chain,
+        finalScore: tokenAnalyses.finalScore,
+        tier: tokenAnalyses.tier,
+        narrative: tokenAnalyses.narrative,
+        id: tokenAnalyses.id,
+        createdAt: tokenAnalyses.createdAt,
+      })
+      .from(tokenAnalyses)
+      .where(and(...conditions))
+      .orderBy(desc(tokenAnalyses.createdAt));
+
+    const allResults = await query;
+
+    // Aggregate by tokenId (get latest for each token)
+    const tokenMap = new Map<string, any>();
+    for (const row of allResults) {
+      if (!tokenMap.has(row.tokenId)) {
+        tokenMap.set(row.tokenId, {
+          tokenId: row.tokenId,
+          tokenSymbol: row.tokenSymbol,
+          tokenName: row.tokenName,
+          tokenImage: row.tokenImage,
+          chain: row.chain,
+          averageScore: parseFloat(row.finalScore as string),
+          analysisCount: 1,
+          latestTier: row.tier,
+          latestNarrative: row.narrative,
+          latestAnalysisId: row.id,
+          latestAnalysisDate: row.createdAt.toISOString(),
+        });
+      } else {
+        const existing = tokenMap.get(row.tokenId);
+        existing.analysisCount += 1;
+        // Recalculate average
+        existing.averageScore =
+          (existing.averageScore * (existing.analysisCount - 1) + parseFloat(row.finalScore as string)) /
+          existing.analysisCount;
+      }
+    }
+
+    const items = Array.from(tokenMap.values());
+
+    // Sort
+    items.sort((a, b) => {
+      const aVal = a.averageScore;
+      const bVal = b.averageScore;
+      return order === "desc" ? bVal - aVal : aVal - bVal;
+    });
+
+    // Paginate
+    const paginatedItems = items.slice(offset, offset + limit);
+
+    return {
+      items: paginatedItems,
+      total: items.length,
+    };
+  }
+
+  async getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[] }> {
+    const db = getDb();
+
+    const [tiersResult, narrativesResult, chainsResult] = await Promise.all([
+      db.selectDistinct({ tier: tokenAnalyses.tier }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
+      db.selectDistinct({ narrative: tokenAnalyses.narrative }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
+      db.selectDistinct({ chain: tokenAnalyses.chain }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
+    ]);
+
+    return {
+      tiers: tiersResult.map((r) => r.tier).filter(Boolean) as string[],
+      narratives: narrativesResult.map((r) => r.narrative).filter(Boolean) as string[],
+      chains: chainsResult.map((r) => r.chain).filter(Boolean) as string[],
+    };
+  }
+}
+
+// In-memory fallback for when DATABASE_URL is not set
+export class MemStorage implements IStorage {
+  private subscriptions = new Map<string, UserSubscription>();
+  private dailyUsageMap = new Map<string, number>();
+  private analyses = new Map<number, TokenAnalysis>();
+  private analysisCounter = 1;
+
+  async getUserSubscription(userId: string): Promise<UserSubscription | null> {
+    return this.subscriptions.get(userId) || null;
+  }
+
+  async getSubscriptionByStripeCustomerId(customerId: string): Promise<UserSubscription | null> {
+    for (const sub of Array.from(this.subscriptions.values())) {
+      if (sub.stripeCustomerId === customerId) return sub;
+    }
+    return null;
+  }
+
+  async getSubscriptionByStripeSubscriptionId(subscriptionId: string): Promise<UserSubscription | null> {
+    for (const sub of Array.from(this.subscriptions.values())) {
+      if (sub.stripeSubscriptionId === subscriptionId) return sub;
+    }
+    return null;
+  }
+
+  async createOrUpdateSubscription(data: Partial<InsertUserSubscription> & { userId: string }): Promise<UserSubscription> {
+    const existing = this.subscriptions.get(data.userId);
+    const now = new Date();
+
+    const sub: UserSubscription = {
+      id: existing?.id || Math.floor(Math.random() * 100000),
+      userId: data.userId,
+      tier: data.tier || existing?.tier || "free",
+      status: data.status || existing?.status || "active",
+      stripeCustomerId: data.stripeCustomerId ?? existing?.stripeCustomerId ?? null,
+      stripeSubscriptionId: data.stripeSubscriptionId ?? existing?.stripeSubscriptionId ?? null,
+      stripePriceId: data.stripePriceId ?? existing?.stripePriceId ?? null,
+      currentPeriodStart: data.currentPeriodStart ?? existing?.currentPeriodStart ?? null,
+      currentPeriodEnd: data.currentPeriodEnd ?? existing?.currentPeriodEnd ?? null,
+      cancelAtPeriodEnd: data.cancelAtPeriodEnd ?? existing?.cancelAtPeriodEnd ?? false,
+      monthlyAnalysesUsed: data.monthlyAnalysesUsed ?? existing?.monthlyAnalysesUsed ?? 0,
+      monthlyResetDate: data.monthlyResetDate ?? existing?.monthlyResetDate ?? null,
+      creditBalance: data.creditBalance ?? existing?.creditBalance ?? 0,
+      trialStartDate: data.trialStartDate ?? existing?.trialStartDate ?? null,
+      weeklyAnalysesUsed: data.weeklyAnalysesUsed ?? existing?.weeklyAnalysesUsed ?? 0,
+      weeklyResetDate: data.weeklyResetDate ?? existing?.weeklyResetDate ?? null,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+
+    this.subscriptions.set(data.userId, sub);
+    return sub;
+  }
+
+  async updateSubscription(userId: string, data: Partial<InsertUserSubscription>): Promise<UserSubscription | null> {
+    const existing = this.subscriptions.get(userId);
+    if (!existing) return null;
+    return this.createOrUpdateSubscription({ ...data, userId });
+  }
+
+  async resetMonthlyUsage(userId: string): Promise<void> {
+    const sub = this.subscriptions.get(userId);
+    if (sub) {
+      sub.monthlyAnalysesUsed = 0;
+      sub.monthlyResetDate = new Date().toISOString().split("T")[0];
+      sub.updatedAt = new Date();
+    }
+  }
+
+  async incrementMonthlyUsage(userId: string): Promise<void> {
+    const sub = this.subscriptions.get(userId);
+    if (sub) {
+      sub.monthlyAnalysesUsed = (sub.monthlyAnalysesUsed || 0) + 1;
+      sub.updatedAt = new Date();
+    }
+  }
+
+  async getDailyUsage(userId: string, date: string): Promise<number> {
+    return this.dailyUsageMap.get(`${userId}:${date}`) || 0;
+  }
+
+  async incrementDailyUsage(userId: string, date: string): Promise<void> {
+    const key = `${userId}:${date}`;
+    this.dailyUsageMap.set(key, (this.dailyUsageMap.get(key) || 0) + 1);
+  }
+
+  async getWeeklyUsage(userId: string): Promise<number> {
+    const sub = this.subscriptions.get(userId);
+    return sub?.weeklyAnalysesUsed || 0;
+  }
+
+  async incrementWeeklyUsage(userId: string): Promise<void> {
+    const sub = this.subscriptions.get(userId);
+    if (sub) {
+      sub.weeklyAnalysesUsed = (sub.weeklyAnalysesUsed || 0) + 1;
+      sub.updatedAt = new Date();
+    }
+  }
+
+  async resetWeeklyUsage(userId: string): Promise<void> {
+    const sub = this.subscriptions.get(userId);
+    if (sub) {
+      sub.weeklyAnalysesUsed = 0;
+      sub.weeklyResetDate = new Date().toISOString().split("T")[0];
+      sub.updatedAt = new Date();
+    }
+  }
+
+  async addCredits(userId: string, credits: number, _packId: string, _amountPaid: number, _paymentIntentId?: string): Promise<void> {
+    const sub = this.subscriptions.get(userId);
+    if (sub) {
+      sub.creditBalance = (sub.creditBalance || 0) + credits;
+      sub.updatedAt = new Date();
+    }
+  }
+
+  async useCredit(userId: string): Promise<boolean> {
+    const sub = this.subscriptions.get(userId);
+    if (!sub || (sub.creditBalance || 0) <= 0) return false;
+    sub.creditBalance = (sub.creditBalance || 0) - 1;
+    sub.updatedAt = new Date();
+    return true;
+  }
+
+  async createAnalysis(data: InsertTokenAnalysis): Promise<TokenAnalysis> {
+    const id = this.analysisCounter++;
+    const now = new Date();
+    const analysis: TokenAnalysis = {
+      id,
+      ...data,
+      createdAt: now,
+      updatedAt: now,
+    } as TokenAnalysis;
+    this.analyses.set(id, analysis);
+    return analysis;
+  }
+
+  async getAnalysis(id: number): Promise<TokenAnalysis | null> {
+    return this.analyses.get(id) || null;
+  }
+
+  async getAnalysisByToken(tokenId: string): Promise<TokenAnalysis | null> {
+    for (const analysis of Array.from(this.analyses.values())) {
+      if (analysis.tokenId === tokenId) return analysis;
+    }
+    return null;
+  }
+
+  async getUserAnalyses(userId: string, limit = 20, offset = 0): Promise<{ items: TokenAnalysis[]; total: number }> {
+    const userAnalyses = Array.from(this.analyses.values())
+      .filter((a) => a.userId === userId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    return {
+      items: userAnalyses.slice(offset, offset + limit),
+      total: userAnalyses.length,
+    };
+  }
+
+  async updateAnalysis(id: number, data: Partial<InsertTokenAnalysis>): Promise<TokenAnalysis | null> {
+    const existing = this.analyses.get(id);
+    if (!existing) return null;
+    const updated = { ...existing, ...data, updatedAt: new Date() } as TokenAnalysis;
+    this.analyses.set(id, updated);
+    return updated;
+  }
+
+  async getLeaderboard(_options: any): Promise<{ items: any[]; total: number }> {
+    return { items: [], total: 0 };
+  }
+
+  async getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[] }> {
+    return { tiers: [], narratives: [], chains: [] };
+  }
 }
 
 export let storage: IStorage = new MemStorage();
+
+export async function initStorage(): Promise<IStorage> {
+  if (process.env.DATABASE_URL) {
+    console.log("Initializing PostgreSQL storage...");
+    storage = new PostgresStorage();
+  } else {
+    console.log("DATABASE_URL not set, using in-memory storage");
+    storage = new MemStorage();
+  }
+  return storage;
+}
