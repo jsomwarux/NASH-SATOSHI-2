@@ -747,7 +747,7 @@ async function pollGumloopStatus(
   apiKey: string
 ): Promise<void> {
   const GUMLOOP_USER_ID = process.env.GUMLOOP_USER_ID;
-  const maxAttempts = 120; // 10 minutes with 5s intervals
+  const maxAttempts = 540; // 45 minutes with 5s intervals
   let attempts = 0;
 
   while (attempts < maxAttempts) {
@@ -824,15 +824,20 @@ async function pollGumloopStatus(
         throw new Error(`Gumloop run ${state.toLowerCase()}`);
       }
       // Continue polling for RUNNING, QUEUED states
+      // Log progress every 2 minutes (24 attempts)
+      if (attempts % 24 === 0) {
+        console.log(`Analysis ${analysisId}: Still polling Gumloop (${Math.floor(attempts * 5 / 60)} min), state: ${state}`);
+      }
     } catch (pollError) {
       console.error("Gumloop poll error:", pollError);
     }
   }
 
-  // Timeout
+  // Timeout - this should rarely happen now with 45 min timeout
+  console.error(`Analysis ${analysisId}: Polling timed out after 45 minutes`);
   await storage.updateAnalysis(analysisId, {
     status: "failed",
-    displaySummary: "Analysis timed out",
+    displaySummary: "Analysis timed out after 45 minutes. Please try again.",
   });
 }
 

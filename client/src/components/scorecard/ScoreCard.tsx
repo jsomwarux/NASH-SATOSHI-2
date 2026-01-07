@@ -313,14 +313,22 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
   const initialElapsed = Math.floor((Date.now() - analysisStartTime) / 1000);
 
   const [localElapsed, setLocalElapsed] = useState(initialElapsed);
-  const [estimatedTotalTime, setEstimatedTotalTime] = useState<number | null>(null);
+
+  // OPTIMAL SOLUTION: Start with realistic 20-minute estimate
+  // Key insight: Never increase the displayed remaining time - only decrease or hold steady
+  const DEFAULT_TOTAL_TIME = 20 * 60; // 20 minutes - realistic based on actual Gumloop runs
+
+  // Track the minimum remaining time we've ever calculated - we'll never show MORE than this
+  const [minRemainingEverShown, setMinRemainingEverShown] = useState<number>(() => {
+    // On initial load, calculate based on elapsed time
+    return Math.max(0, DEFAULT_TOTAL_TIME - initialElapsed);
+  });
 
   // Use server elapsed time if available, otherwise use local tracking from createdAt
   const elapsedTime = serverElapsed ?? localElapsed;
 
-  // Initialize progress based on elapsed time
-  const fallbackTotal = 15 * 60;
-  const initialProgress = Math.min(90, (initialElapsed / fallbackTotal) * 100);
+  // Initialize progress based on elapsed time with 20-minute assumption
+  const initialProgress = Math.min(90, (initialElapsed / DEFAULT_TOTAL_TIME) * 100);
   const [progress, setProgress] = useState(Math.max(5, initialProgress));
   const [currentStep, setCurrentStep] = useState(() => {
     return Math.min(7, Math.floor((initialProgress / 100) * 8));
@@ -351,48 +359,35 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
   }, [serverElapsed]);
 
   useEffect(() => {
-    // Calculate progress and estimated time based on nodes completed
-    if (nodesCompleted !== undefined && nodesCompleted > 0 && elapsedTime > 0) {
-      // Calculate progress percentage
-      const nodeProgress = Math.min(95, (nodesCompleted / estimatedTotalNodes) * 100);
-      setProgress(nodeProgress);
+    // Calculate progress based on elapsed time with 20-minute baseline
+    // Use a slight curve to make progress feel more natural (slower at end)
+    const linearProgress = elapsedTime / DEFAULT_TOTAL_TIME;
+    // Apply easing: progress appears faster at start, slower near end
+    const easedProgress = Math.min(0.95, linearProgress * (2 - linearProgress));
+    const progressPercent = Math.max(5, Math.min(95, easedProgress * 100));
 
-      // Estimate total time based on current pace
-      // If we've completed X nodes in Y seconds, total time = Y / (X/totalNodes)
-      const progressFraction = nodesCompleted / estimatedTotalNodes;
-      if (progressFraction > 0.05) { // Only estimate after some progress
-        const projectedTotal = Math.round(elapsedTime / progressFraction);
-        // Clamp to reasonable range (5-30 minutes)
-        const clampedTotal = Math.max(5 * 60, Math.min(30 * 60, projectedTotal));
-        setEstimatedTotalTime(clampedTotal);
-      }
+    setProgress(progressPercent);
 
-      // Map nodes to steps
-      const stepIndex = Math.min(steps.length - 1, Math.floor((nodesCompleted / estimatedTotalNodes) * steps.length));
-      setCurrentStep(stepIndex);
-    } else {
-      // Fall back to time-based progress - assume ~15 min average
-      const fallbackTotal = 15 * 60;
-      const baseProgress = Math.min(90, (elapsedTime / fallbackTotal) * 100);
-      const randomVariance = Math.sin(elapsedTime * 0.1) * 2;
-      setProgress(Math.min(90, baseProgress + randomVariance));
+    // Update current step based on progress (maps to 8 steps)
+    const stepIndex = Math.min(steps.length - 1, Math.floor((progressPercent / 100) * steps.length));
+    setCurrentStep(stepIndex);
 
-      // Update current step based on progress
-      const stepIndex = Math.min(steps.length - 1, Math.floor((baseProgress / 100) * steps.length));
-      setCurrentStep(stepIndex);
+    // Calculate remaining time - KEY: never increase from what we've shown before
+    const calculatedRemaining = Math.max(0, DEFAULT_TOTAL_TIME - elapsedTime);
 
-      // Use fallback estimate if no node data
-      if (estimatedTotalTime === null) {
-        setEstimatedTotalTime(fallbackTotal);
-      }
-    }
-  }, [elapsedTime, nodesCompleted, estimatedTotalTime]);
+    // Only update minRemainingEverShown if the new value is LOWER
+    // This ensures the timer only goes down, never up
+    setMinRemainingEverShown(prev => Math.min(prev, calculatedRemaining));
+  }, [elapsedTime]);
 
-  // Calculate remaining time
-  const totalTime = estimatedTotalTime ?? 15 * 60; // Default 15 min if no estimate
-  const remainingSeconds = Math.max(0, totalTime - elapsedTime);
+  // Use the minimum remaining time we've ever calculated
+  // This ensures users never see the timer go UP
+  const remainingSeconds = minRemainingEverShown;
   const remainingMinutes = Math.floor(remainingSeconds / 60);
   const remainingSecs = remainingSeconds % 60;
+
+  // Show "Finalizing..." if we've exceeded our estimate but analysis isn't done
+  const isPastEstimate = elapsedTime > DEFAULT_TOTAL_TIME;
 
   return (
     <motion.div
@@ -449,7 +444,7 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
               </div>
             </div>
             <div className="text-right">
-              {remainingSeconds <= 0 ? (
+              {isPastEstimate || remainingSeconds <= 0 ? (
                 <>
                   <div className="text-xl font-mono font-bold text-amber-400 animate-pulse">
                     Finalizing...
@@ -459,7 +454,7 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
               ) : (
                 <>
                   <div className="text-2xl font-mono font-bold text-primary">
-                    {remainingMinutes}:{remainingSecs.toString().padStart(2, '0')}
+                    ~{remainingMinutes}:{remainingSecs.toString().padStart(2, '0')}
                   </div>
                   <div className="text-xs text-muted-foreground">estimated remaining</div>
                 </>
@@ -532,7 +527,7 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
       <p className="text-center text-sm text-muted-foreground mt-6">
         Our 4-LLM ensemble provides unbiased consensus scoring through game theory analysis.
         <br />
-        <span className="text-xs">You can navigate away - we'll save your results.</span>
+        <span className="text-xs">Analysis typically takes 15-25 minutes. You can navigate away - we'll save your results.</span>
       </p>
     </motion.div>
   );
