@@ -127,7 +127,7 @@ export default function Home() {
   const [selectedToken, setSelectedToken] = useState<TokenSearchResult | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [pendingToken, setPendingToken] = useState<TokenSearchResult | null>(null);
-  const { displayText, isComplete } = useTypingEffect("Crypto Game Theory Token Analyzer Hi", 35);
+  const { displayText, isComplete } = useTypingEffect("Crypto Game Theory Analyzer Hiii", 35);
 
   // Check if error is an auth required error
   const isAuthError = error?.message?.includes("Sign up to analyze") ||
