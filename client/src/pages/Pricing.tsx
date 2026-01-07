@@ -31,6 +31,8 @@ import {
   useCreateCheckout,
   useCreateBillingPortal,
   useVerifyCheckout,
+  useCreateCreditCheckout,
+  useVerifyCreditPurchase,
 } from "@/hooks/useSubscription";
 import { CREDIT_PACKS } from "@shared/schema";
 
@@ -77,34 +79,63 @@ export default function Pricing() {
   const createCheckout = useCreateCheckout();
   const createPortal = useCreateBillingPortal();
   const verifyCheckout = useVerifyCheckout();
+  const createCreditCheckout = useCreateCreditCheckout();
+  const verifyCreditPurchase = useVerifyCreditPurchase();
   const [processingTier, setProcessingTier] = useState<string | null>(null);
+  const [processingCreditPack, setProcessingCreditPack] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   // Track if we've already processed the checkout to prevent double-processing
   const [checkoutProcessed, setCheckoutProcessed] = useState(false);
 
-  // Verify and sync subscription when returning from Stripe checkout
+  // Verify and sync subscription/credits when returning from Stripe checkout
   useEffect(() => {
     // Only run once and only when we have the necessary conditions
     if (checkoutProcessed) return;
 
     const urlParams = new URLSearchParams(window.location.search);
     const sessionId = urlParams.get("session_id");
-    const canceled = urlParams.get("subscription") === "canceled";
+    const subscriptionCanceled = urlParams.get("subscription") === "canceled";
+    const creditsCanceled = urlParams.get("credits") === "canceled";
+    const isCreditsSuccess = urlParams.get("credits") === "success";
 
-    // Handle canceled checkout
-    if (canceled) {
+    // Handle canceled checkouts
+    if (subscriptionCanceled || creditsCanceled) {
       setCheckoutProcessed(true);
       toast({
         title: "Checkout canceled",
-        description: "No changes were made to your subscription.",
+        description: creditsCanceled
+          ? "Credit purchase was canceled."
+          : "No changes were made to your subscription.",
         variant: "destructive",
       });
       navigate("/pricing", { replace: true });
       return;
     }
 
-    // Handle successful checkout - need user to be logged in
+    // Handle successful credit purchase
+    if (sessionId && user && isCreditsSuccess) {
+      setCheckoutProcessed(true);
+
+      verifyCreditPurchase.mutateAsync(sessionId)
+        .then((result) => {
+          if (result.success) {
+            toast({
+              title: "Credits added!",
+              description: `${result.credits} analysis credits have been added to your account.`,
+            });
+          }
+        })
+        .catch((error) => {
+          console.error("Failed to verify credit purchase:", error);
+        })
+        .finally(() => {
+          navigate("/pricing", { replace: true });
+        });
+      return;
+    }
+
+    // Handle successful subscription checkout - need user to be logged in
     if (sessionId && user) {
       setCheckoutProcessed(true);
 
@@ -162,6 +193,30 @@ export default function Pricing() {
       }
     } catch (error) {
       console.error("Portal error:", error);
+    }
+  };
+
+  const handleBuyCredits = async (packId: string) => {
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+
+    setProcessingCreditPack(packId);
+    try {
+      const { url } = await createCreditCheckout.mutateAsync(packId);
+      if (url) {
+        window.location.href = url;
+      }
+    } catch (error) {
+      console.error("Credit checkout error:", error);
+      toast({
+        title: "Error",
+        description: "Failed to start checkout. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setProcessingCreditPack(null);
     }
   };
 
@@ -498,9 +553,16 @@ export default function Pricing() {
                   <Button
                     variant={pack.popular ? "default" : "outline"}
                     className="w-full font-mono"
-                    disabled={!stripeConfigured}
+                    disabled={!stripeConfigured || processingCreditPack === pack.id}
+                    onClick={() => handleBuyCredits(pack.id)}
                   >
-                    {stripeConfigured ? "BUY NOW" : "COMING SOON"}
+                    {processingCreditPack === pack.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : stripeConfigured ? (
+                      "BUY NOW"
+                    ) : (
+                      "COMING SOON"
+                    )}
                   </Button>
                 </div>
               </motion.div>

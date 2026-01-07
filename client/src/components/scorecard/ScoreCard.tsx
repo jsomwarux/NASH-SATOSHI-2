@@ -330,23 +330,33 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
   // Initialize progress based on elapsed time with 20-minute assumption
   const initialProgress = Math.min(90, (initialElapsed / DEFAULT_TOTAL_TIME) * 100);
   const [progress, setProgress] = useState(Math.max(5, initialProgress));
-  const [currentStep, setCurrentStep] = useState(() => {
-    return Math.min(7, Math.floor((initialProgress / 100) * 8));
-  });
 
-  const steps = [
-    { label: "Fetching market data", icon: TrendingUpIcon },
-    { label: "ChatGPT analyzing", icon: Brain },
-    { label: "Claude analyzing", icon: Brain },
-    { label: "Gemini analyzing", icon: Brain },
-    { label: "Grok analyzing", icon: Brain },
-    { label: "Building consensus", icon: Users },
-    { label: "Computing game theory", icon: Activity },
-    { label: "Finalizing score", icon: CheckCircle },
+  // Define the actual pipeline phases (reflecting real Gumloop flow)
+  // Phase thresholds as percentages of total time:
+  // - Data Collection: 0-15% (~3 min)
+  // - Parallel LLM Analysis: 15-55% (~8 min) - all 4 models run simultaneously
+  // - Cross-Validation: 55-80% (~5 min) - models check each other's work
+  // - Final Aggregation: 80-100% (~4 min) - score computation and finalization
+  const PHASE_DATA_COLLECTION = 15;
+  const PHASE_LLM_ANALYSIS = 55;
+  const PHASE_CROSS_VALIDATION = 80;
+
+  // Determine current phase based on progress
+  const getCurrentPhase = (prog: number) => {
+    if (prog < PHASE_DATA_COLLECTION) return 0; // Data Collection
+    if (prog < PHASE_LLM_ANALYSIS) return 1;    // Parallel LLM Analysis
+    if (prog < PHASE_CROSS_VALIDATION) return 2; // Cross-Validation
+    return 3;                                     // Final Aggregation
+  };
+
+  const [currentPhase, setCurrentPhase] = useState(() => getCurrentPhase(initialProgress));
+
+  const phases = [
+    { label: "Collecting Data", description: "Gathering market data & social signals", icon: TrendingUpIcon },
+    { label: "LLM Analysis", description: "4 AI models analyzing in parallel", icon: Brain },
+    { label: "Cross-Validation", description: "Models checking each other's findings", icon: Users },
+    { label: "Score Aggregation", description: "Computing final consensus score", icon: CheckCircle },
   ];
-
-  // Estimated total nodes in the Gumloop workflow
-  const estimatedTotalNodes = 12;
 
   useEffect(() => {
     // Only use local timer if server elapsed isn't available
@@ -368,9 +378,8 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
 
     setProgress(progressPercent);
 
-    // Update current step based on progress (maps to 8 steps)
-    const stepIndex = Math.min(steps.length - 1, Math.floor((progressPercent / 100) * steps.length));
-    setCurrentStep(stepIndex);
+    // Update current phase based on progress
+    setCurrentPhase(getCurrentPhase(progressPercent));
 
     // Calculate remaining time - KEY: never increase from what we've shown before
     const calculatedRemaining = Math.max(0, DEFAULT_TOTAL_TIME - elapsedTime);
@@ -440,7 +449,7 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
               </div>
               <div>
                 <h3 className="font-semibold">Analyzing {analysis.tokenSymbol}</h3>
-                <p className="text-sm text-muted-foreground">{steps[currentStep]?.label || "Processing..."}</p>
+                <p className="text-sm text-muted-foreground">{phases[currentPhase]?.label || "Processing..."}</p>
               </div>
             </div>
             <div className="text-right">
@@ -471,61 +480,160 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
         </CardContent>
       </Card>
 
-      {/* Model Analysis Steps */}
-      <Card className="glass-card">
+      {/* Pipeline Phases */}
+      <Card className="glass-card mb-4">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Brain className="w-4 h-4 text-primary" />
-            Multi-Model Analysis Pipeline
+            <Activity className="w-4 h-4 text-primary" />
+            Analysis Pipeline
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              { name: "ChatGPT", color: "emerald" },
-              { name: "Claude", color: "orange" },
-              { name: "Gemini", color: "blue" },
-              { name: "Grok", color: "purple" },
-            ].map((model, i) => {
-              const isActive = currentStep >= i + 1 && currentStep <= i + 2;
-              const isComplete = currentStep > i + 2;
+          <div className="space-y-3">
+            {phases.map((phase, i) => {
+              const isComplete = currentPhase > i;
+              const isActive = currentPhase === i;
+              const PhaseIcon = phase.icon;
 
               return (
-                <motion.div
-                  key={model.name}
-                  className={`p-3 rounded-lg border transition-all ${
+                <div
+                  key={phase.label}
+                  className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
                     isComplete
-                      ? `bg-${model.color}-500/10 border-${model.color}-500/30`
+                      ? 'bg-green-500/10 border-green-500/30'
                       : isActive
                         ? 'bg-primary/10 border-primary/30'
-                        : 'bg-secondary/50 border-white/5'
+                        : 'bg-secondary/30 border-white/5'
                   }`}
-                  animate={isActive ? { scale: [1, 1.02, 1] } : {}}
-                  transition={{ repeat: Infinity, duration: 1.5 }}
                 >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium">{model.name}</span>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                    isComplete
+                      ? 'bg-green-500/20'
+                      : isActive
+                        ? 'bg-primary/20'
+                        : 'bg-secondary/50'
+                  }`}>
                     {isComplete ? (
                       <CheckCircle className="w-4 h-4 text-green-400" />
                     ) : isActive ? (
                       <Loader2 className="w-4 h-4 text-primary animate-spin" />
                     ) : (
-                      <Clock className="w-4 h-4 text-muted-foreground" />
+                      <PhaseIcon className="w-4 h-4 text-muted-foreground" />
                     )}
                   </div>
-                  <div className={`text-xs ${isComplete ? 'text-green-400' : isActive ? 'text-primary' : 'text-muted-foreground'}`}>
-                    {isComplete ? 'Complete' : isActive ? 'Analyzing...' : 'Waiting'}
+                  <div className="flex-1">
+                    <div className={`text-sm font-medium ${
+                      isComplete ? 'text-green-400' : isActive ? 'text-primary' : 'text-muted-foreground'
+                    }`}>
+                      {phase.label}
+                    </div>
+                    <div className="text-xs text-muted-foreground">{phase.description}</div>
                   </div>
-                </motion.div>
+                  {isActive && (
+                    <motion.div
+                      animate={{ opacity: [0.5, 1, 0.5] }}
+                      transition={{ repeat: Infinity, duration: 1.5 }}
+                      className="text-xs text-primary font-mono"
+                    >
+                      IN PROGRESS
+                    </motion.div>
+                  )}
+                </div>
               );
             })}
           </div>
         </CardContent>
       </Card>
 
+      {/* 4-LLM Ensemble Status */}
+      <Card className="glass-card">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <Brain className="w-4 h-4 text-accent" />
+            4-LLM Consensus Engine
+            <Badge variant="outline" className="text-xs ml-auto">
+              {currentPhase >= 2 ? "Cross-Checking" : currentPhase >= 1 ? "Analyzing" : "Standby"}
+            </Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { name: "ChatGPT", color: "emerald", bgClass: "bg-emerald-500/10", borderClass: "border-emerald-500/30", textClass: "text-emerald-400" },
+              { name: "Claude", color: "orange", bgClass: "bg-orange-500/10", borderClass: "border-orange-500/30", textClass: "text-orange-400" },
+              { name: "Gemini", color: "blue", bgClass: "bg-blue-500/10", borderClass: "border-blue-500/30", textClass: "text-blue-400" },
+              { name: "Grok", color: "purple", bgClass: "bg-purple-500/10", borderClass: "border-purple-500/30", textClass: "text-purple-400" },
+            ].map((model) => {
+              // Models are in standby during data collection (phase 0)
+              // All models analyze in parallel during phase 1
+              // Models cross-check during phase 2
+              // Models provide final input during phase 3
+              const isStandby = currentPhase < 1;
+              const isAnalyzing = currentPhase === 1;
+              const isCrossChecking = currentPhase === 2;
+              const isComplete = currentPhase >= 3;
+
+              return (
+                <motion.div
+                  key={model.name}
+                  className={`p-3 rounded-lg border transition-all ${
+                    isComplete
+                      ? `${model.bgClass} ${model.borderClass}`
+                      : isAnalyzing || isCrossChecking
+                        ? 'bg-primary/10 border-primary/30'
+                        : 'bg-secondary/50 border-white/5'
+                  }`}
+                  animate={(isAnalyzing || isCrossChecking) ? { scale: [1, 1.02, 1] } : {}}
+                  transition={{ repeat: Infinity, duration: 1.5, delay: Math.random() * 0.5 }}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-sm font-medium ${isComplete ? model.textClass : ''}`}>{model.name}</span>
+                    {isComplete ? (
+                      <CheckCircle className={`w-4 h-4 ${model.textClass}`} />
+                    ) : (isAnalyzing || isCrossChecking) ? (
+                      <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                    ) : (
+                      <Clock className="w-4 h-4 text-muted-foreground" />
+                    )}
+                  </div>
+                  <div className={`text-xs ${
+                    isComplete ? model.textClass :
+                    isCrossChecking ? 'text-accent' :
+                    isAnalyzing ? 'text-primary' :
+                    'text-muted-foreground'
+                  }`}>
+                    {isComplete ? 'Consensus Ready' :
+                     isCrossChecking ? 'Cross-Checking' :
+                     isAnalyzing ? 'Analyzing...' :
+                     'Standby'}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+
+          {/* Cross-checking explanation when in that phase */}
+          {currentPhase === 2 && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 p-3 rounded-lg bg-accent/10 border border-accent/30"
+            >
+              <div className="flex items-center gap-2 text-accent text-sm">
+                <Users className="w-4 h-4" />
+                <span className="font-medium">Cross-Validation in Progress</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Each AI is reviewing the others' analyses to identify blind spots and build consensus.
+              </p>
+            </motion.div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Info text */}
       <p className="text-center text-sm text-muted-foreground mt-6">
-        Our 4-LLM ensemble provides unbiased consensus scoring through game theory analysis.
+        Our 4-LLM ensemble cross-validates findings to eliminate bias and provide trusted consensus scores.
         <br />
         <span className="text-xs">Analysis typically takes 15-25 minutes. You can navigate away - we'll save your results.</span>
       </p>

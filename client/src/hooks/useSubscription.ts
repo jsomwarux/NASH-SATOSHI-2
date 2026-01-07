@@ -7,6 +7,8 @@ import {
   createBillingPortal,
   verifyCheckoutSession,
   syncSubscription,
+  createCreditCheckout,
+  verifyCreditPurchase,
   type SubscriptionStatus,
   type SubscriptionTier,
 } from "@/lib/api";
@@ -130,4 +132,39 @@ export function useLeaderboardLimit() {
     isLoading,
     isSubscribed: status?.isSubscribed ?? false,
   };
+}
+
+// Create credit checkout session mutation
+export function useCreateCreditCheckout() {
+  const { getAccessToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (packId: string) => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Authentication required");
+      return createCreditCheckout(packId, token);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["subscriptionStatus"] });
+    },
+  });
+}
+
+// Verify credit purchase mutation
+export function useVerifyCreditPurchase() {
+  const { getAccessToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (sessionId: string) => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Authentication required");
+      return verifyCreditPurchase(sessionId, token);
+    },
+    onSuccess: () => {
+      // Invalidate subscription status to refetch with updated credit balance
+      queryClient.invalidateQueries({ queryKey: ["subscriptionStatus"] });
+    },
+  });
 }

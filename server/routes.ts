@@ -10,8 +10,10 @@ import {
   handleWebhookEvent,
   verifyAndSyncCheckoutSession,
   syncSubscriptionFromStripe,
+  createCreditCheckoutSession,
+  verifyAndCompleteCreditPurchase,
 } from "./stripe";
-import { SUBSCRIPTION_TIERS, type SubscriptionTierId } from "@shared/schema";
+import { CREDIT_PACKS, SUBSCRIPTION_TIERS, type CreditPackId, type SubscriptionTierId } from "@shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -361,6 +363,74 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== CREDIT PACK CHECKOUT (Auth Required) ====================
+  app.post("/api/credits/checkout", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const userEmail = req.userEmail!;
+      const { packId } = req.body;
+
+      if (!packId || !CREDIT_PACKS[packId as CreditPackId]) {
+        res.status(400).json({ message: "Invalid credit pack" });
+        return;
+      }
+
+      if (!isStripeConfigured()) {
+        res.status(503).json({ message: "Payment processing not configured" });
+        return;
+      }
+
+      const pack = CREDIT_PACKS[packId as CreditPackId];
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const successUrl = `${baseUrl}/pricing?credits=success&session_id={CHECKOUT_SESSION_ID}`;
+      const cancelUrl = `${baseUrl}/pricing?credits=canceled`;
+
+      const checkoutUrl = await createCreditCheckoutSession(
+        userId,
+        userEmail,
+        packId,
+        pack.credits,
+        pack.price,
+        successUrl,
+        cancelUrl
+      );
+
+      res.json({ url: checkoutUrl });
+    } catch (error) {
+      console.error("Error creating credit checkout session:", error);
+      res.status(500).json({ message: "Failed to create checkout session" });
+    }
+  });
+
+  // ==================== VERIFY CREDIT PURCHASE (Auth Required) ====================
+  app.post("/api/credits/verify", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const { sessionId } = req.body;
+
+      if (!sessionId) {
+        res.status(400).json({ message: "Session ID required" });
+        return;
+      }
+
+      if (!isStripeConfigured()) {
+        res.status(503).json({ message: "Payment processing not configured" });
+        return;
+      }
+
+      const result = await verifyAndCompleteCreditPurchase(sessionId, userId);
+
+      if (result.success) {
+        res.json({ success: true, credits: result.credits });
+      } else {
+        res.status(400).json({ success: false, message: result.error });
+      }
+    } catch (error) {
+      console.error("Error verifying credit purchase:", error);
+      res.status(500).json({ message: "Failed to verify credit purchase" });
+    }
+  });
+
   // ==================== STRIPE WEBHOOK ====================
   app.post("/api/webhook/stripe", async (req: Request, res: Response) => {
     try {
@@ -527,7 +597,34 @@ export async function registerRoutes(
         return;
       }
 
-      // Create the analysis record with pending status
+      // Fetch current price data from CoinGecko
+      let currentPrice: string | null = null;
+      let marketCap: string | null = null;
+      let priceChange24h: string | null = null;
+      let priceChange7d: string | null = null;
+
+      try {
+        const coinGeckoResponse = await fetch(
+          `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(tokenId)}?localization=false&tickers=false&community_data=false&developer_data=false&sparkline=false`,
+          {
+            headers: { 'Accept': 'application/json' },
+          }
+        );
+        if (coinGeckoResponse.ok) {
+          const coinData = await coinGeckoResponse.json();
+          const marketData = coinData.market_data;
+          if (marketData) {
+            currentPrice = marketData.current_price?.usd?.toString() || null;
+            marketCap = marketData.market_cap?.usd?.toString() || null;
+            priceChange24h = marketData.price_change_percentage_24h?.toString() || null;
+            priceChange7d = marketData.price_change_percentage_7d?.toString() || null;
+          }
+        }
+      } catch (priceError) {
+        console.error("Error fetching price data from CoinGecko:", priceError);
+      }
+
+      // Create the analysis record with pending status and price data
       const analysis = await storage.createAnalysis({
         tokenId,
         tokenSymbol,
@@ -539,9 +636,15 @@ export async function registerRoutes(
         status: "pending",
         finalScore: "0",
         tier: "PENDING",
+        currentPrice,
+        marketCap,
+        priceChange24h,
+        priceChange7d,
       });
 
-      // Track usage
+      // Track usage - determine if we should use subscription allocation or credits
+      let usedCredit = false;
+
       if (tier === "free") {
         const sub = await storage.getUserSubscription(userId);
         const trialStart = sub?.trialStartDate ? new Date(sub.trialStartDate) : null;
@@ -552,16 +655,42 @@ export async function registerRoutes(
         const isInTrial = daysSinceTrialStart < SUBSCRIPTION_TIERS.free.trialDays;
 
         if (isInTrial) {
-          await storage.incrementDailyUsage(userId, today);
+          // Check if under daily limit
+          const dailyUsed = await storage.getDailyUsage(userId, today);
+          if (dailyUsed < SUBSCRIPTION_TIERS.free.trialAnalysesPerDay) {
+            await storage.incrementDailyUsage(userId, today);
+          } else if (creditBalance > 0) {
+            // Over daily limit, use credit
+            await storage.useCredit(userId);
+            usedCredit = true;
+          }
         } else {
-          await storage.incrementWeeklyUsage(userId);
+          // Post-trial: check weekly limit
+          const weeklyUsed = await storage.getWeeklyUsage(userId);
+          if (weeklyUsed < SUBSCRIPTION_TIERS.free.postTrialAnalysesPerWeek) {
+            await storage.incrementWeeklyUsage(userId);
+          } else if (creditBalance > 0) {
+            // Over weekly limit, use credit
+            await storage.useCredit(userId);
+            usedCredit = true;
+          }
         }
-      } else if (creditBalance > 0 && !(await canUseSubscription(subscription, tierConfig))) {
-        // Use credit if subscription limit reached
-        await storage.useCredit(userId);
       } else {
-        await storage.incrementMonthlyUsage(userId);
+        // Paid tier
+        const monthlyUsed = subscription?.monthlyAnalysesUsed || 0;
+        const monthlyLimit = tierConfig.analysesPerMonth || 0;
+
+        if (monthlyUsed < monthlyLimit) {
+          // Under monthly limit, use subscription allocation
+          await storage.incrementMonthlyUsage(userId);
+        } else if (creditBalance > 0) {
+          // Over monthly limit, use credit
+          await storage.useCredit(userId);
+          usedCredit = true;
+        }
       }
+
+      console.log(`Analysis started for user ${userId}: tier=${tier}, usedCredit=${usedCredit}`);
 
       // Start the Gumloop analysis asynchronously
       startGumloopAnalysis(analysis.id, tokenId, tokenSymbol, tokenName).catch((err) => {
@@ -776,12 +905,69 @@ async function pollGumloopStatus(
       const state = statusData.state;
 
       if (state === "DONE") {
-        // Get the output
-        const output = statusData.outputs?.output || statusData.outputs?.result || "";
+        // Get the output - check various possible field names
+        const outputs = statusData.outputs || {};
+        console.log(`Analysis ${analysisId}: Gumloop DONE. Output keys:`, Object.keys(outputs));
+        console.log(`Analysis ${analysisId}: Raw outputs preview:`, JSON.stringify(outputs).substring(0, 1000));
+
+        // Try to find the output text - it could be named differently
+        let output = "";
+        const possibleKeys = ["output", "result", "text", "response", "final_output", "aggregated_output", "analysis"];
+
+        // First, try known keys
+        for (const key of possibleKeys) {
+          if (outputs[key] && typeof outputs[key] === "string") {
+            output = outputs[key];
+            console.log(`Analysis ${analysisId}: Found output in field "${key}", length: ${output.length}`);
+            break;
+          }
+        }
+
+        // If not found, take the first string value from outputs that looks like analysis content
+        if (!output) {
+          for (const [key, value] of Object.entries(outputs)) {
+            if (typeof value === "string" && value.length > 100 && key !== "narrative") {
+              output = value;
+              console.log(`Analysis ${analysisId}: Using output from field "${key}", length: ${output.length}`);
+              break;
+            }
+          }
+        }
+
+        // If still not found, try to stringify the entire outputs object
+        if (!output && Object.keys(outputs).length > 0) {
+          const firstKey = Object.keys(outputs)[0];
+          const firstValue = outputs[firstKey];
+          if (typeof firstValue === "object") {
+            output = JSON.stringify(firstValue);
+            console.log(`Analysis ${analysisId}: Stringified object from "${firstKey}", length: ${output.length}`);
+          } else if (firstValue) {
+            output = String(firstValue);
+            console.log(`Analysis ${analysisId}: Converted value from "${firstKey}", length: ${output.length}`);
+          }
+        }
+
+        if (!output || output.length < 50) {
+          console.error(`Analysis ${analysisId}: No valid output found. Raw outputs:`, JSON.stringify(outputs).substring(0, 500));
+        }
+
+        // Check for separate narrative field from Gumloop outputs
+        let narrativeFromOutput: string | undefined;
+        if (outputs["narrative"] && typeof outputs["narrative"] === "string") {
+          narrativeFromOutput = outputs["narrative"].trim();
+          console.log(`Analysis ${analysisId}: Found separate narrative field: "${narrativeFromOutput}"`);
+        }
 
         // Parse the Gumloop response
         const { parseGumloopResponse } = await import("./gumloop-parser");
         const parsed = parseGumloopResponse(output);
+
+        // Use the separate narrative field if it exists and parsed one doesn't
+        if (narrativeFromOutput && (!parsed.narrative || parsed.narrative.length < 3)) {
+          parsed.narrative = narrativeFromOutput;
+        }
+
+        console.log(`Analysis ${analysisId}: Parsed - score: ${parsed.finalScore}, tier: ${parsed.tier}, narrative: ${parsed.narrative}`);
 
         // Update the analysis with parsed results
         await storage.updateAnalysis(analysisId, {

@@ -133,6 +133,11 @@ export default function Home() {
   const isAuthError = error?.message?.includes("Sign up to analyze") ||
                       error?.message?.includes("AUTH_REQUIRED");
 
+  // Check if error is a limit reached error
+  const isLimitError = error?.message?.includes("limit reached") ||
+                       error?.message?.includes("LIMIT_REACHED") ||
+                       error?.message?.includes("upgrade your plan");
+
   const handleTokenSelect = async (token: TokenSearchResult) => {
     setSelectedToken(token);
 
@@ -279,9 +284,24 @@ export default function Home() {
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="font-mono text-red-400 text-sm mt-4 p-3 border border-red-500/30 bg-red-500/10 rounded"
+                className={`font-mono text-sm mt-4 p-3 border rounded ${
+                  isLimitError
+                    ? "text-amber-400 border-amber-500/30 bg-amber-500/10"
+                    : "text-red-400 border-red-500/30 bg-red-500/10"
+                }`}
               >
-                ERROR: Analysis failed. Please retry.
+                {isLimitError ? (
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                    <span>Analysis limit reached for today.</span>
+                    <Link href="/pricing">
+                      <Button size="sm" variant="outline" className="font-mono text-xs border-amber-500/30 text-amber-400 hover:bg-amber-500/10">
+                        UPGRADE PLAN
+                      </Button>
+                    </Link>
+                  </div>
+                ) : (
+                  <>ERROR: Analysis failed. Please retry.</>
+                )}
               </motion.div>
             )}
 

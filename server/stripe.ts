@@ -154,7 +154,12 @@ export async function handleWebhookEvent(
   switch (event.type) {
     case 'checkout.session.completed': {
       const session = event.data.object as Stripe.Checkout.Session;
-      await handleCheckoutComplete(session);
+      // Check if this is a credit purchase or subscription
+      if (session.metadata?.type === 'credit_purchase') {
+        await handleCreditPurchase(session);
+      } else {
+        await handleCheckoutComplete(session);
+      }
       break;
     }
 
@@ -486,6 +491,132 @@ export async function verifyAndSyncCheckoutSession(sessionId: string, userId: st
   } catch (error) {
     console.error('Error verifying checkout session:', error);
     return { success: false, error: 'Failed to verify session' };
+  }
+}
+
+/**
+ * Create a checkout session for credit pack purchase (one-time)
+ */
+export async function createCreditCheckoutSession(
+  userId: string,
+  email: string,
+  packId: string,
+  credits: number,
+  price: number,
+  successUrl: string,
+  cancelUrl: string
+): Promise<string> {
+  if (!stripe) throw new Error('Stripe not configured');
+
+  const customerId = await getOrCreateCustomer(userId, email);
+
+  const session = await stripe.checkout.sessions.create({
+    customer: customerId,
+    mode: 'payment',
+    payment_method_types: ['card'],
+    line_items: [
+      {
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: `${credits} Analysis Credits`,
+            description: `Top up your account with ${credits} additional analyses that never expire.`,
+          },
+          unit_amount: price * 100, // Convert to cents
+        },
+        quantity: 1,
+      },
+    ],
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    metadata: {
+      userId,
+      type: 'credit_purchase',
+      packId,
+      credits: credits.toString(),
+    },
+  });
+
+  return session.url || '';
+}
+
+/**
+ * Handle credit purchase completion
+ */
+export async function handleCreditPurchase(session: Stripe.Checkout.Session): Promise<void> {
+  const userId = session.metadata?.userId;
+  const packId = session.metadata?.packId;
+  const credits = parseInt(session.metadata?.credits || '0', 10);
+
+  if (!userId || !packId || !credits) {
+    console.error('Missing metadata in credit purchase session');
+    return;
+  }
+
+  // Add credits to user's account
+  await storage.addCredits(
+    userId,
+    credits,
+    packId,
+    session.amount_total || 0,
+    session.payment_intent as string
+  );
+
+  console.log(`Added ${credits} credits to user ${userId} (pack: ${packId})`);
+}
+
+/**
+ * Verify and complete a credit purchase from checkout session
+ */
+export async function verifyAndCompleteCreditPurchase(sessionId: string, userId: string): Promise<{
+  success: boolean;
+  credits?: number;
+  error?: string;
+}> {
+  if (!stripe) {
+    return { success: false, error: 'Stripe not configured' };
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    // Verify this session belongs to this user
+    if (session.metadata?.userId !== userId) {
+      return { success: false, error: 'Session does not belong to this user' };
+    }
+
+    // Verify this is a credit purchase
+    if (session.metadata?.type !== 'credit_purchase') {
+      return { success: false, error: 'Not a credit purchase session' };
+    }
+
+    // Check if payment was successful
+    if (session.payment_status !== 'paid') {
+      return { success: false, error: 'Payment not completed' };
+    }
+
+    const packId = session.metadata.packId;
+    const credits = parseInt(session.metadata.credits || '0', 10);
+
+    if (!credits) {
+      return { success: false, error: 'No credits in session' };
+    }
+
+    // Add credits to user's account
+    await storage.addCredits(
+      userId,
+      credits,
+      packId,
+      session.amount_total || 0,
+      session.payment_intent as string
+    );
+
+    console.log(`Verified and added ${credits} credits to user ${userId}`);
+
+    return { success: true, credits };
+  } catch (error) {
+    console.error('Error verifying credit purchase:', error);
+    return { success: false, error: 'Failed to verify purchase' };
   }
 }
 

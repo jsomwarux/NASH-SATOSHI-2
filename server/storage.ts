@@ -364,13 +364,12 @@ export class PostgresStorage implements IStorage {
       );
     }
 
-    // Get aggregated data per token
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    // Get aggregated data per token with time-based metrics
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    // For simplicity, get the latest analysis per token
+    // Get all completed analyses
     const query = db
       .select({
         tokenId: tokenAnalyses.tokenId,
@@ -390,9 +389,32 @@ export class PostgresStorage implements IStorage {
 
     const allResults = await query;
 
-    // Aggregate by tokenId (get latest for each token)
-    const tokenMap = new Map<string, any>();
+    // Aggregate by tokenId with 7D/30D metrics
+    const tokenMap = new Map<string, {
+      tokenId: string;
+      tokenSymbol: string;
+      tokenName: string;
+      tokenImage: string | null;
+      chain: string | null;
+      score7d: number;
+      runs7d: number;
+      score30d: number;
+      runs30d: number;
+      confidence: 'high' | 'medium' | 'low';
+      latestTier: string;
+      latestNarrative: string | null;
+      latestAnalysisId: number;
+      latestAnalysisDate: string;
+      scores7d: number[];
+      scores30d: number[];
+    }>();
+
     for (const row of allResults) {
+      const score = parseFloat(row.finalScore as string) || 0;
+      const analysisDate = new Date(row.createdAt);
+      const isWithin7d = analysisDate >= sevenDaysAgo;
+      const isWithin30d = analysisDate >= thirtyDaysAgo;
+
       if (!tokenMap.has(row.tokenId)) {
         tokenMap.set(row.tokenId, {
           tokenId: row.tokenId,
@@ -400,29 +422,97 @@ export class PostgresStorage implements IStorage {
           tokenName: row.tokenName,
           tokenImage: row.tokenImage,
           chain: row.chain,
-          averageScore: parseFloat(row.finalScore as string),
-          analysisCount: 1,
-          latestTier: row.tier,
+          score7d: 0,
+          runs7d: 0,
+          score30d: 0,
+          runs30d: 0,
+          confidence: 'low',
+          latestTier: row.tier || 'B',
           latestNarrative: row.narrative,
           latestAnalysisId: row.id,
           latestAnalysisDate: row.createdAt.toISOString(),
+          scores7d: [],
+          scores30d: [],
         });
-      } else {
-        const existing = tokenMap.get(row.tokenId);
-        existing.analysisCount += 1;
-        // Recalculate average
-        existing.averageScore =
-          (existing.averageScore * (existing.analysisCount - 1) + parseFloat(row.finalScore as string)) /
-          existing.analysisCount;
+      }
+
+      const item = tokenMap.get(row.tokenId)!;
+
+      // Add to 7D metrics if within 7 days
+      if (isWithin7d) {
+        item.scores7d.push(score);
+        item.runs7d = item.scores7d.length;
+      }
+
+      // Add to 30D metrics if within 30 days
+      if (isWithin30d) {
+        item.scores30d.push(score);
+        item.runs30d = item.scores30d.length;
       }
     }
 
-    const items = Array.from(tokenMap.values());
+    // Calculate averages and confidence for each token
+    const items: any[] = [];
+    const tokenEntries = Array.from(tokenMap.values());
+    for (const item of tokenEntries) {
+      // Calculate 7D average score
+      if (item.scores7d.length > 0) {
+        item.score7d = item.scores7d.reduce((a: number, b: number) => a + b, 0) / item.scores7d.length;
+      } else {
+        // If no 7D runs, use latest score
+        item.score7d = item.scores30d.length > 0
+          ? item.scores30d[0] // Most recent score from 30D
+          : 0;
+      }
 
-    // Sort
+      // Calculate 30D average score
+      if (item.scores30d.length > 0) {
+        item.score30d = item.scores30d.reduce((a: number, b: number) => a + b, 0) / item.scores30d.length;
+      } else {
+        item.score30d = item.score7d; // Fallback to 7D score
+      }
+
+      // Calculate confidence based on run count
+      const totalRuns = item.runs30d;
+      if (totalRuns >= 5) {
+        item.confidence = 'high';
+      } else if (totalRuns >= 2) {
+        item.confidence = 'medium';
+      } else {
+        item.confidence = 'low';
+      }
+
+      // Remove temporary arrays before adding to result
+      const { scores7d, scores30d, ...cleanItem } = item;
+      items.push(cleanItem);
+    }
+
+    // Sort based on sortBy parameter
     items.sort((a, b) => {
-      const aVal = a.averageScore;
-      const bVal = b.averageScore;
+      let aVal: number, bVal: number;
+
+      switch (sortBy) {
+        case 'score7d':
+          aVal = a.score7d;
+          bVal = b.score7d;
+          break;
+        case 'score30d':
+          aVal = a.score30d;
+          bVal = b.score30d;
+          break;
+        case 'runs7d':
+          aVal = a.runs7d;
+          bVal = b.runs7d;
+          break;
+        case 'latestAnalysis':
+          aVal = new Date(a.latestAnalysisDate).getTime();
+          bVal = new Date(b.latestAnalysisDate).getTime();
+          break;
+        default:
+          aVal = a.score7d;
+          bVal = b.score7d;
+      }
+
       return order === "desc" ? bVal - aVal : aVal - bVal;
     });
 

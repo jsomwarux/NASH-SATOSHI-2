@@ -295,12 +295,20 @@ export default function Account() {
               )}
 
               {/* Credit Balance */}
-              {status.creditBalance > 0 && (
-                <div className="flex items-center justify-between p-3 rounded border border-primary/30 bg-primary/10">
+              <div className="flex items-center justify-between p-3 rounded border border-primary/30 bg-primary/10">
+                <div>
                   <span className="font-mono text-sm">Credit Balance</span>
-                  <span className="font-mono font-bold text-primary">{status.creditBalance} credits</span>
+                  <p className="text-xs text-muted-foreground font-mono">Never expire</p>
                 </div>
-              )}
+                <div className="flex items-center gap-3">
+                  <span className="font-mono font-bold text-primary">{status.creditBalance} credits</span>
+                  <Link href="/pricing">
+                    <Button variant="outline" size="sm" className="font-mono text-xs">
+                      BUY MORE
+                    </Button>
+                  </Link>
+                </div>
+              </div>
 
               {/* Subscription Status Details */}
               {status.subscription?.cancelAtPeriodEnd && (

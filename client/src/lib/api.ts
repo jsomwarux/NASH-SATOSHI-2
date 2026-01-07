@@ -279,3 +279,32 @@ export async function syncSubscription(
     }
   );
 }
+
+// ==================== CREDIT PACK API ====================
+
+// Create checkout session for credit pack
+export async function createCreditCheckout(
+  packId: string,
+  authToken: string
+): Promise<{ url: string }> {
+  return fetchApi<{ url: string }>("/api/credits/checkout", {
+    method: "POST",
+    body: JSON.stringify({ packId }),
+    authToken,
+  });
+}
+
+// Verify credit purchase and add credits
+export async function verifyCreditPurchase(
+  sessionId: string,
+  authToken: string
+): Promise<{ success: boolean; credits?: number; message?: string }> {
+  return fetchApi<{ success: boolean; credits?: number; message?: string }>(
+    "/api/credits/verify",
+    {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
+      authToken,
+    }
+  );
+}
