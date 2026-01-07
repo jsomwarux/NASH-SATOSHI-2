@@ -190,12 +190,18 @@ export interface SubscriptionStatus {
   tier: string;
   tierName: string;
   isSubscribed: boolean;
+  isInTrial: boolean;
+  trialDaysRemaining: number | null;
   dailyLimit: number | null;
   dailyUsed: number;
   dailyRemaining: number | null;
+  weeklyLimit: number | null;
+  weeklyUsed: number;
+  weeklyRemaining: number | null;
   monthlyLimit: number | null;
   monthlyUsed: number;
   monthlyRemaining: number | null;
+  creditBalance: number;
   canAnalyze: boolean;
   leaderboardLimit: number | null;
   subscription: {

@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -48,6 +49,15 @@ const TIER_COLORS: Record<string, { border: string; bg: string; icon: string }> 
   desk: { border: "border-amber-500/50", bg: "bg-amber-500/10", icon: "text-amber-400" },
 };
 
+// Tier order for comparison (0 = lowest, 4 = highest)
+const TIER_ORDER: Record<string, number> = {
+  free: 0,
+  starter: 1,
+  trader: 2,
+  pro: 3,
+  desk: 4,
+};
+
 // Shared features for all plans
 const SHARED_FEATURES = [
   { icon: BarChart3, text: "Full community leaderboard access" },
@@ -58,14 +68,26 @@ const SHARED_FEATURES = [
 
 export default function Pricing() {
   const { user } = useAuth();
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { data: tiersData, isLoading: tiersLoading } = useSubscriptionTiers();
-  const { data: status, isLoading: statusLoading } = useSubscriptionStatus();
+  const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useSubscriptionStatus();
   const createCheckout = useCreateCheckout();
   const createPortal = useCreateBillingPortal();
   const [processingTier, setProcessingTier] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+
+  // Invalidate subscription status when returning from Stripe checkout
+  useEffect(() => {
+    if (location.includes("subscription/success") || location.includes("session_id")) {
+      // Invalidate and refetch subscription status
+      queryClient.invalidateQueries({ queryKey: ["subscriptionStatus"] });
+      refetchStatus();
+      // Redirect to clean URL
+      navigate("/pricing", { replace: true });
+    }
+  }, [location, queryClient, refetchStatus, navigate]);
 
   const handleSubscribe = async (tierId: string) => {
     if (!user) {
@@ -286,42 +308,78 @@ export default function Pricing() {
 
                   {/* CTA Button */}
                   <div>
-                    {tier.id === "free" ? (
-                      <Button
-                        variant="outline"
-                        className="w-full font-mono text-sm"
-                        onClick={handleStartFree}
-                      >
-                        {isCurrentPlan ? "CURRENT PLAN" : user ? "START FREE" : "CREATE ACCOUNT"}
-                      </Button>
-                    ) : isCurrentPlan ? (
-                      <Button
-                        variant="outline"
-                        className="w-full font-mono text-sm"
-                        onClick={handleManageSubscription}
-                        disabled={createPortal.isPending}
-                      >
-                        {createPortal.isPending ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          "MANAGE PLAN"
-                        )}
-                      </Button>
-                    ) : (
-                      <Button
-                        className={`w-full font-mono text-sm ${isPopular ? "neon-button" : ""}`}
-                        onClick={() => handleSubscribe(tier.id)}
-                        disabled={processingTier === tier.id || !stripeConfigured || !tier.priceId}
-                      >
-                        {processingTier === tier.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : !stripeConfigured ? (
-                          "COMING SOON"
-                        ) : (
-                          "SUBSCRIBE"
-                        )}
-                      </Button>
-                    )}
+                    {(() => {
+                      const tierOrder = TIER_ORDER[tier.id] ?? 0;
+                      const currentTierOrder = TIER_ORDER[currentTier] ?? 0;
+                      const isUpgrade = tierOrder > currentTierOrder;
+                      const isDowngrade = tierOrder < currentTierOrder;
+
+                      if (tier.id === "free") {
+                        return (
+                          <Button
+                            variant="outline"
+                            className={`w-full font-mono text-sm ${isCurrentPlan ? "border-green-500/30 text-green-400" : ""}`}
+                            onClick={isCurrentPlan ? undefined : handleStartFree}
+                            disabled={isCurrentPlan}
+                          >
+                            {isCurrentPlan ? "CURRENT PLAN" : user ? "START FREE" : "CREATE ACCOUNT"}
+                          </Button>
+                        );
+                      }
+
+                      if (isCurrentPlan) {
+                        return (
+                          <Button
+                            variant="outline"
+                            className="w-full font-mono text-sm border-green-500/30 text-green-400"
+                            onClick={handleManageSubscription}
+                            disabled={createPortal.isPending}
+                          >
+                            {createPortal.isPending ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              "CURRENT PLAN"
+                            )}
+                          </Button>
+                        );
+                      }
+
+                      if (isDowngrade) {
+                        return (
+                          <Button
+                            variant="outline"
+                            className="w-full font-mono text-sm opacity-50"
+                            onClick={handleManageSubscription}
+                            disabled={createPortal.isPending}
+                          >
+                            {createPortal.isPending ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              "DOWNGRADE"
+                            )}
+                          </Button>
+                        );
+                      }
+
+                      // Upgrade case
+                      return (
+                        <Button
+                          className={`w-full font-mono text-sm ${isPopular ? "neon-button" : ""}`}
+                          onClick={() => handleSubscribe(tier.id)}
+                          disabled={processingTier === tier.id || !stripeConfigured || !tier.priceId}
+                        >
+                          {processingTier === tier.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : !stripeConfigured ? (
+                            "COMING SOON"
+                          ) : status?.isSubscribed ? (
+                            "UPGRADE"
+                          ) : (
+                            "SUBSCRIBE"
+                          )}
+                        </Button>
+                      );
+                    })()}
                   </div>
                 </motion.div>
               );

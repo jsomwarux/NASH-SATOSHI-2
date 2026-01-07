@@ -10,6 +10,7 @@ import Analyze from "@/pages/Analyze";
 import Analyses from "@/pages/Analyses";
 import Leaderboard from "@/pages/Leaderboard";
 import Pricing from "@/pages/Pricing";
+import Account from "@/pages/Account";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -20,6 +21,7 @@ function Router() {
       <Route path="/analyses" component={Analyses} />
       <Route path="/leaderboard" component={Leaderboard} />
       <Route path="/pricing" component={Pricing} />
+      <Route path="/account" component={Account} />
       <Route path="/subscription/success" component={Pricing} />
       <Route component={NotFound} />
     </Switch>

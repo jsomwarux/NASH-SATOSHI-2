@@ -1,9 +1,21 @@
+import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { BarChart3, Home, History, Terminal, Cpu, Wifi, Shield, Loader2, Crown } from "lucide-react";
+import { BarChart3, Home, History, Terminal, Cpu, Wifi, Shield, Loader2, Crown, User, LogOut, CreditCard, ChevronDown } from "lucide-react";
 import { CyberBackground } from "../CyberBackground";
 import { useAnalysisTracker } from "@/contexts/AnalysisTrackerContext";
-import { useSubscriptionStatus } from "@/hooks/useSubscription";
+import { useSubscriptionStatus, useCreateBillingPortal } from "@/hooks/useSubscription";
+import { useAuth } from "@/contexts/AuthContext";
+import { AuthModal } from "@/components/auth/AuthModal";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -11,8 +23,37 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   const [location] = useLocation();
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const { trackedAnalyses } = useAnalysisTracker();
   const { data: subscriptionStatus } = useSubscriptionStatus();
+  const { user, signOut, isConfigured } = useAuth();
+  const createPortal = useCreateBillingPortal();
+
+  const handleSignOut = async () => {
+    await signOut();
+    window.location.href = "/";
+  };
+
+  const handleManageBilling = async () => {
+    try {
+      const { url } = await createPortal.mutateAsync();
+      if (url) {
+        window.location.href = url;
+      }
+    } catch (error) {
+      console.error("Portal error:", error);
+    }
+  };
+
+  // Truncate email for display
+  const truncateEmail = (email: string) => {
+    if (email.length <= 20) return email;
+    const [local, domain] = email.split("@");
+    if (local.length > 10) {
+      return `${local.slice(0, 8)}...@${domain}`;
+    }
+    return email;
+  };
 
   const navLinks = [
     { href: "/", label: "HOME", icon: Home },
@@ -107,7 +148,7 @@ export function Layout({ children }: LayoutProps) {
               })}
             </div>
 
-            {/* Status Badges */}
+            {/* Right Side - Status Badges + User Menu */}
             <div className="flex items-center gap-3">
               {/* System Status */}
               <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded border border-green-500/30 bg-green-500/5 text-green-400 text-[10px] font-mono tracking-wider">
@@ -120,6 +161,65 @@ export function Layout({ children }: LayoutProps) {
                 <Shield className="w-3 h-3" />
                 BETA
               </div>
+
+              {/* User Account Menu */}
+              {isConfigured && (
+                user ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        className="flex items-center gap-2 px-3 py-1.5 h-auto rounded border border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary text-[11px] font-mono tracking-wider"
+                      >
+                        <User className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline max-w-[120px] truncate">
+                          {truncateEmail(user.email || "Account")}
+                        </span>
+                        <ChevronDown className="w-3 h-3 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56 font-mono">
+                      <DropdownMenuLabel className="text-xs text-muted-foreground">
+                        {user.email}
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <Link href="/account">
+                        <DropdownMenuItem className="cursor-pointer">
+                          <User className="w-4 h-4 mr-2" />
+                          Account
+                        </DropdownMenuItem>
+                      </Link>
+                      {subscriptionStatus?.isSubscribed && (
+                        <DropdownMenuItem
+                          className="cursor-pointer"
+                          onClick={handleManageBilling}
+                          disabled={createPortal.isPending}
+                        >
+                          <CreditCard className="w-4 h-4 mr-2" />
+                          {createPortal.isPending ? "Loading..." : "Manage Billing"}
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="cursor-pointer text-red-400 focus:text-red-400"
+                        onClick={handleSignOut}
+                      >
+                        <LogOut className="w-4 h-4 mr-2" />
+                        Sign Out
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    onClick={() => setShowAuthModal(true)}
+                    className="flex items-center gap-2 px-3 py-1.5 h-auto rounded border border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary text-[11px] font-mono tracking-wider"
+                  >
+                    <User className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">SIGN IN</span>
+                  </Button>
+                )
+              )}
             </div>
           </div>
         </div>
@@ -246,6 +346,13 @@ export function Layout({ children }: LayoutProps) {
           </span>
         </div>
       </div>
+
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        defaultMode="signin"
+      />
     </div>
   );
 }
