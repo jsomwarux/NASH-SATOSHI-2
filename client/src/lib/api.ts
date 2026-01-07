@@ -251,3 +251,31 @@ export async function createBillingPortal(
     authToken,
   });
 }
+
+// Verify checkout session and sync subscription
+export async function verifyCheckoutSession(
+  sessionId: string,
+  authToken: string
+): Promise<{ success: boolean; tier?: string; message?: string }> {
+  return fetchApi<{ success: boolean; tier?: string; message?: string }>(
+    "/api/subscription/verify",
+    {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
+      authToken,
+    }
+  );
+}
+
+// Sync subscription from Stripe (for after billing portal changes)
+export async function syncSubscription(
+  authToken: string
+): Promise<{ success: boolean; tier?: string; status?: string; message?: string }> {
+  return fetchApi<{ success: boolean; tier?: string; status?: string; message?: string }>(
+    "/api/subscription/sync",
+    {
+      method: "POST",
+      authToken,
+    }
+  );
+}

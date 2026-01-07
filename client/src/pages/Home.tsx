@@ -552,6 +552,7 @@ export default function Home() {
         onClose={handleAuthModalClose}
         defaultMode="signup"
         promptMessage={pendingToken ? `Sign up to analyze ${pendingToken.name}` : "Sign up to analyze tokens"}
+        tokenName={pendingToken?.name}
       />
     </Layout>
   );

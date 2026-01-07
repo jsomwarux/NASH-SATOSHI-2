@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { Link } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Mail, Lock, Loader2, AlertCircle, CheckCircle, Terminal, UserPlus, LogIn } from 'lucide-react';
+import { X, Mail, Lock, Loader2, AlertCircle, CheckCircle, Terminal, UserPlus, LogIn, Zap, Gift, Clock, ArrowRight, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
@@ -10,9 +11,10 @@ interface AuthModalProps {
   onClose: () => void;
   defaultMode?: 'signin' | 'signup';
   promptMessage?: string; // Custom message to show at the top (e.g., "Sign up to analyze tokens")
+  tokenName?: string; // Name of the token being analyzed (for display)
 }
 
-export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessage }: AuthModalProps) {
+export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessage, tokenName }: AuthModalProps) {
   const [mode, setMode] = useState<'signin' | 'signup'>(defaultMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -83,6 +85,9 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
 
   if (!isOpen) return null;
 
+  // Show enhanced signup flow when there's a pending token analysis
+  const showEnhancedSignup = mode === 'signup' && (promptMessage || tokenName);
+
   return (
     <AnimatePresence>
       <motion.div
@@ -97,7 +102,7 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
           onClick={(e) => e.stopPropagation()}
-          className="cyber-card w-full max-w-md rounded-lg border border-primary/30 overflow-hidden"
+          className={`cyber-card w-full rounded-lg border border-primary/30 overflow-hidden ${showEnhancedSignup ? 'max-w-lg' : 'max-w-md'}`}
         >
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-primary/20 bg-primary/5">
@@ -115,16 +120,76 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
             </button>
           </div>
 
+          {/* Enhanced Signup Content - Shows trial/pricing info */}
+          {showEnhancedSignup && (
+            <div className="px-6 pt-5 pb-2 border-b border-primary/10">
+              {/* Token Analysis Prompt */}
+              {tokenName && (
+                <div className="flex items-center gap-3 p-3 rounded border border-accent/30 bg-accent/5 mb-4">
+                  <Sparkles className="w-5 h-5 text-accent flex-shrink-0" />
+                  <div>
+                    <p className="text-white font-mono text-sm">
+                      Analyze <span className="text-accent font-bold">{tokenName}</span>
+                    </p>
+                    <p className="text-muted-foreground text-xs">
+                      Create an account to start your analysis
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Free Trial Banner */}
+              <div className="p-4 rounded border border-green-500/30 bg-green-500/5 mb-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Gift className="w-5 h-5 text-green-400" />
+                  <span className="font-mono text-green-400 font-bold text-sm">7-DAY FREE TRIAL</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                    <span className="text-muted-foreground">1 analysis per day</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                    <span className="text-muted-foreground">Full leaderboard access</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                    <span className="text-muted-foreground">4-LLM consensus reports</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                    <span className="text-muted-foreground">No credit card required</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* After Trial Info */}
+              <div className="flex items-start gap-3 p-3 rounded border border-white/10 bg-white/5 text-xs">
+                <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-muted-foreground">
+                    <span className="text-white">After trial:</span> Free tier includes 1 analysis/week.
+                    Upgrade anytime for more analyses.
+                  </p>
+                  <Link href="/pricing" onClick={onClose} className="inline-flex items-center gap-1 text-primary hover:underline mt-1">
+                    View pricing plans <ArrowRight className="w-3 h-3" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Form */}
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
-            {/* Prompt Message (e.g., from AUTH_REQUIRED error) */}
-            {promptMessage && (
+            {/* Simple Prompt Message (for signin or when not showing enhanced) */}
+            {promptMessage && !showEnhancedSignup && (
               <div className="flex items-start gap-3 p-4 rounded border border-primary/30 bg-primary/5 text-sm">
                 <Terminal className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="text-white font-mono mb-1">{promptMessage}</p>
                   <p className="text-muted-foreground text-xs">
-                    Your 7-day free trial starts when you run your first analysis.
+                    Sign in to continue to your analysis.
                   </p>
                 </div>
               </div>
@@ -168,6 +233,7 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
                   placeholder="you@example.com"
                   className="pl-10 font-mono bg-background/50 border-primary/20 focus:border-primary"
                   disabled={loading}
+                  autoFocus
                 />
               </div>
             </div>
@@ -229,8 +295,8 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
                 </>
               ) : (
                 <>
-                  <UserPlus className="w-4 h-4 mr-2" />
-                  CREATE_ACCOUNT
+                  <Zap className="w-4 h-4 mr-2" />
+                  {tokenName ? `START TRIAL & ANALYZE` : 'START FREE TRIAL'}
                 </>
               )}
             </Button>

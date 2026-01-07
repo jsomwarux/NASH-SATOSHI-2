@@ -307,6 +307,189 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
 }
 
 /**
+ * Sync subscription status directly from Stripe
+ * This fetches the current subscription for a user and updates our database
+ * Useful when webhooks haven't been received (e.g., after billing portal changes)
+ */
+export async function syncSubscriptionFromStripe(userId: string): Promise<{
+  success: boolean;
+  tier?: string;
+  status?: string;
+  error?: string;
+}> {
+  if (!stripe) {
+    return { success: false, error: 'Stripe not configured' };
+  }
+
+  try {
+    // Get the user's subscription record to find their Stripe customer ID
+    const userSub = await storage.getUserSubscription(userId);
+
+    if (!userSub?.stripeCustomerId) {
+      // No Stripe customer - they're on free tier
+      return { success: true, tier: 'free', status: 'active' };
+    }
+
+    // Fetch active subscriptions for this customer (not canceled ones)
+    const subscriptions = await stripe.subscriptions.list({
+      customer: userSub.stripeCustomerId,
+      status: 'active',
+      limit: 10,
+      expand: ['data.items.data.price'],
+    });
+
+    if (subscriptions.data.length === 0) {
+      // No active subscription - check for trialing
+      const trialingSubscriptions = await stripe.subscriptions.list({
+        customer: userSub.stripeCustomerId,
+        status: 'trialing',
+        limit: 1,
+        expand: ['data.items.data.price'],
+      });
+
+      if (trialingSubscriptions.data.length === 0) {
+        // No active or trialing subscription - downgrade to free
+        await storage.createOrUpdateSubscription({
+          userId,
+          tier: 'free',
+          status: 'active',
+          stripeCustomerId: userSub.stripeCustomerId,
+          stripeSubscriptionId: null,
+          stripePriceId: null,
+          currentPeriodStart: null,
+          currentPeriodEnd: null,
+          cancelAtPeriodEnd: false,
+        });
+        return { success: true, tier: 'free', status: 'active' };
+      }
+
+      // Use trialing subscription
+      subscriptions.data.push(...trialingSubscriptions.data);
+    }
+
+    // Get the most recent/active subscription
+    const subscription = subscriptions.data[0];
+    const firstItem = subscription.items.data[0];
+    const priceId = firstItem?.price.id;
+    const tier = priceId ? (PRICE_TO_TIER[priceId] || 'free') : 'free';
+
+    const status = subscription.status === 'active' || subscription.status === 'trialing'
+      ? 'active'
+      : subscription.status === 'past_due'
+        ? 'past_due'
+        : subscription.status === 'canceled'
+          ? 'canceled'
+          : 'active';
+
+    // Get billing period from subscription item (same as in webhook handler)
+    const periodStart = firstItem?.current_period_start
+      ? new Date(firstItem.current_period_start * 1000)
+      : null;
+    const periodEnd = firstItem?.current_period_end
+      ? new Date(firstItem.current_period_end * 1000)
+      : null;
+
+    // Use createOrUpdateSubscription to handle both new and existing records
+    await storage.createOrUpdateSubscription({
+      userId,
+      tier: tier as SubscriptionTierId,
+      status,
+      stripeCustomerId: userSub.stripeCustomerId,
+      stripeSubscriptionId: subscription.id,
+      stripePriceId: priceId || null,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
+      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+    });
+
+    console.log(`Synced subscription from Stripe for user ${userId}: tier=${tier}, status=${status}`);
+
+    return { success: true, tier, status };
+  } catch (error) {
+    console.error('Error syncing subscription from Stripe:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to sync subscription';
+    return { success: false, error: errorMessage };
+  }
+}
+
+/**
+ * Verify and sync subscription from a checkout session
+ * This is called after the user returns from Stripe checkout
+ * to ensure the subscription is updated even if webhooks haven't arrived
+ */
+export async function verifyAndSyncCheckoutSession(sessionId: string, userId: string): Promise<{
+  success: boolean;
+  tier?: string;
+  error?: string;
+}> {
+  if (!stripe) {
+    return { success: false, error: 'Stripe not configured' };
+  }
+
+  try {
+    // Retrieve the checkout session
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ['subscription'],
+    });
+
+    // Verify this session belongs to this user
+    if (session.metadata?.userId !== userId) {
+      return { success: false, error: 'Session does not belong to this user' };
+    }
+
+    // Check if payment was successful
+    if (session.payment_status !== 'paid') {
+      return { success: false, error: 'Payment not completed' };
+    }
+
+    // Get the subscription
+    const subscription = session.subscription as Stripe.Subscription | null;
+    if (!subscription) {
+      return { success: false, error: 'No subscription found in session' };
+    }
+
+    // Update the user's subscription in our database
+    const firstItem = subscription.items.data[0];
+    const priceId = firstItem?.price.id;
+    const tier = priceId ? (PRICE_TO_TIER[priceId] || 'free') : 'free';
+
+    const status = subscription.status === 'active' || subscription.status === 'trialing'
+      ? 'active'
+      : subscription.status === 'past_due'
+        ? 'past_due'
+        : 'active';
+
+    const periodStart = firstItem?.current_period_start
+      ? new Date(firstItem.current_period_start * 1000)
+      : null;
+    const periodEnd = firstItem?.current_period_end
+      ? new Date(firstItem.current_period_end * 1000)
+      : null;
+
+    await storage.createOrUpdateSubscription({
+      userId,
+      tier: tier as SubscriptionTierId,
+      status,
+      stripeSubscriptionId: subscription.id,
+      stripeCustomerId: subscription.customer as string,
+      stripePriceId: priceId || null,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
+      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      monthlyAnalysesUsed: 0,
+      monthlyResetDate: new Date().toISOString().split('T')[0],
+    });
+
+    console.log(`Verified and synced subscription for user ${userId}: tier=${tier}`);
+
+    return { success: true, tier };
+  } catch (error) {
+    console.error('Error verifying checkout session:', error);
+    return { success: false, error: 'Failed to verify session' };
+  }
+}
+
+/**
  * Get subscription tier info for pricing display
  */
 export function getSubscriptionTiers() {

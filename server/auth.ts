@@ -12,10 +12,15 @@ declare global {
 }
 
 // Initialize Supabase client for token verification
-// Use the same env vars as the frontend for consistency
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
+// Check for various env variable naming conventions (same as frontend)
+const supabaseUrl = process.env.VITE_SUPABASE_URL ||
+                    process.env.VITE_SUPABASE_PROJECT_URL ||
+                    process.env.SUPABASE_PROJECT_URL;
 // Try service role key first, fall back to anon key (both can verify tokens)
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ||
+                    process.env.VITE_SUPABASE_ANON_KEY ||
+                    process.env.VITE_SUPABASE_PUBLIC_KEY ||
+                    process.env.SUPABASE_SECRET_KEY;
 
 // Create Supabase client if URL and key are available
 const supabase = supabaseUrl && supabaseKey
@@ -26,7 +31,7 @@ const supabase = supabaseUrl && supabaseKey
 if (supabase) {
   console.log("Supabase auth configured successfully");
 } else {
-  console.warn("Supabase auth not configured - VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY required");
+  console.warn("Supabase auth not configured - set SUPABASE_PROJECT_URL and SUPABASE_SERVICE_ROLE_KEY (or equivalent VITE_ prefixed vars)");
 }
 
 /**

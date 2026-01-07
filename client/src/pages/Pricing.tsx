@@ -30,6 +30,7 @@ import {
   useSubscriptionStatus,
   useCreateCheckout,
   useCreateBillingPortal,
+  useVerifyCheckout,
 } from "@/hooks/useSubscription";
 import { CREDIT_PACKS } from "@shared/schema";
 
@@ -75,19 +76,56 @@ export default function Pricing() {
   const { data: status, isLoading: statusLoading, refetch: refetchStatus } = useSubscriptionStatus();
   const createCheckout = useCreateCheckout();
   const createPortal = useCreateBillingPortal();
+  const verifyCheckout = useVerifyCheckout();
   const [processingTier, setProcessingTier] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // Invalidate subscription status when returning from Stripe checkout
+  // Track if we've already processed the checkout to prevent double-processing
+  const [checkoutProcessed, setCheckoutProcessed] = useState(false);
+
+  // Verify and sync subscription when returning from Stripe checkout
   useEffect(() => {
-    if (location.includes("subscription/success") || location.includes("session_id")) {
-      // Invalidate and refetch subscription status
-      queryClient.invalidateQueries({ queryKey: ["subscriptionStatus"] });
-      refetchStatus();
-      // Redirect to clean URL
+    // Only run once and only when we have the necessary conditions
+    if (checkoutProcessed) return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionId = urlParams.get("session_id");
+    const canceled = urlParams.get("subscription") === "canceled";
+
+    // Handle canceled checkout
+    if (canceled) {
+      setCheckoutProcessed(true);
+      toast({
+        title: "Checkout canceled",
+        description: "No changes were made to your subscription.",
+        variant: "destructive",
+      });
       navigate("/pricing", { replace: true });
+      return;
     }
-  }, [location, queryClient, refetchStatus, navigate]);
+
+    // Handle successful checkout - need user to be logged in
+    if (sessionId && user) {
+      setCheckoutProcessed(true);
+
+      // Verify the checkout session and sync subscription
+      verifyCheckout.mutateAsync(sessionId)
+        .then((result) => {
+          if (result.success) {
+            toast({
+              title: "Subscription activated!",
+              description: `You're now on the ${result.tier?.charAt(0).toUpperCase()}${result.tier?.slice(1)} plan.`,
+            });
+          }
+        })
+        .catch((error) => {
+          console.error("Failed to verify checkout:", error);
+        })
+        .finally(() => {
+          navigate("/pricing", { replace: true });
+        });
+    }
+  }, [user]); // Only depend on user - other deps are stable or handled via state
 
   const handleSubscribe = async (tierId: string) => {
     if (!user) {

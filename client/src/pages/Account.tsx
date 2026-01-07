@@ -1,4 +1,5 @@
-import { Link } from "wouter";
+import { useState, useEffect } from "react";
+import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -13,22 +14,57 @@ import {
   AlertCircle,
   CheckCircle,
   LogOut,
+  RefreshCw,
 } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   useSubscriptionStatus,
   useCreateBillingPortal,
+  useSyncSubscription,
 } from "@/hooks/useSubscription";
 import { SUBSCRIPTION_TIERS } from "@shared/schema";
 
 export default function Account() {
   const { user, signOut, isConfigured } = useAuth();
+  const [location, navigate] = useLocation();
+  const { toast } = useToast();
   const { data: status, isLoading } = useSubscriptionStatus();
   const createPortal = useCreateBillingPortal();
+  const syncSubscription = useSyncSubscription();
+  const [syncProcessed, setSyncProcessed] = useState(false);
+
+  // Sync subscription when returning from billing portal
+  useEffect(() => {
+    if (syncProcessed) return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const shouldSync = urlParams.get("sync") === "true";
+
+    if (shouldSync && user) {
+      setSyncProcessed(true);
+
+      syncSubscription.mutateAsync()
+        .then((result) => {
+          if (result.success) {
+            toast({
+              title: "Subscription updated",
+              description: `Your subscription has been synced. Current plan: ${result.tier?.charAt(0).toUpperCase()}${result.tier?.slice(1)}`,
+            });
+          }
+        })
+        .catch((error) => {
+          console.error("Failed to sync subscription:", error);
+        })
+        .finally(() => {
+          navigate("/account", { replace: true });
+        });
+    }
+  }, [user]);
 
   const handleManageBilling = async () => {
     try {
@@ -38,6 +74,31 @@ export default function Account() {
       }
     } catch (error) {
       console.error("Portal error:", error);
+    }
+  };
+
+  const handleSyncSubscription = async () => {
+    try {
+      const result = await syncSubscription.mutateAsync();
+      if (result.success) {
+        toast({
+          title: "Subscription synced",
+          description: `Current plan: ${result.tier?.charAt(0).toUpperCase()}${result.tier?.slice(1)}`,
+        });
+      } else {
+        toast({
+          title: "Sync failed",
+          description: result.message || "Could not sync subscription status.",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      console.error("Sync error:", error);
+      toast({
+        title: "Sync failed",
+        description: error?.message || "Could not sync subscription status.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -280,6 +341,19 @@ export default function Account() {
                     </Button>
                   </Link>
                 )}
+                <Button
+                  variant="ghost"
+                  className="font-mono"
+                  onClick={handleSyncSubscription}
+                  disabled={syncSubscription.isPending}
+                  title="Refresh subscription status from Stripe"
+                >
+                  {syncSubscription.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4" />
+                  )}
+                </Button>
                 <Link href="/pricing">
                   <Button variant="ghost" className="font-mono">
                     VIEW ALL PLANS

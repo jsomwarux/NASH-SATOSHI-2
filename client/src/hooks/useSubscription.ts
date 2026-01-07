@@ -5,6 +5,8 @@ import {
   getSubscriptionStatus,
   createCheckoutSession,
   createBillingPortal,
+  verifyCheckoutSession,
+  syncSubscription,
   type SubscriptionStatus,
   type SubscriptionTier,
 } from "@/lib/api";
@@ -26,13 +28,14 @@ export function useSubscriptionStatus() {
   return useQuery({
     queryKey: ["subscriptionStatus", user?.id],
     queryFn: async () => {
-      const token = await getAccessToken();
+      // Only try to get token if auth is configured
+      const token = isConfigured ? await getAccessToken() : null;
       return getSubscriptionStatus(token || undefined);
     },
     staleTime: 30 * 1000, // Cache for 30 seconds
     refetchOnWindowFocus: true,
-    // Always fetch - returns free tier status for unauthenticated users
-    enabled: isConfigured,
+    // Always fetch - API returns free tier status for unauthenticated users
+    // No need to wait for auth config since API handles both cases
     retry: 1,
   });
 }
@@ -63,6 +66,43 @@ export function useCreateBillingPortal() {
       const token = await getAccessToken();
       if (!token) throw new Error("Authentication required");
       return createBillingPortal(token);
+    },
+  });
+}
+
+// Verify checkout session mutation
+export function useVerifyCheckout() {
+  const { getAccessToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (sessionId: string) => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Authentication required");
+      return verifyCheckoutSession(sessionId, token);
+    },
+    onSuccess: () => {
+      // Invalidate subscription status to refetch with updated data
+      queryClient.invalidateQueries({ queryKey: ["subscriptionStatus"] });
+    },
+  });
+}
+
+// Sync subscription from Stripe mutation
+// Used after returning from billing portal to get latest subscription state
+export function useSyncSubscription() {
+  const { getAccessToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Authentication required");
+      return syncSubscription(token);
+    },
+    onSuccess: () => {
+      // Invalidate subscription status to refetch with updated data
+      queryClient.invalidateQueries({ queryKey: ["subscriptionStatus"] });
     },
   });
 }
