@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run check:*)",
+      "Bash(timeout 15 npm run dev)",
+      "mcp__ide__getDiagnostics",
+      "Bash(find:*)",
+      "Bash(npm run build:*)",
+      "WebSearch",
+      "WebFetch(domain:docs.gumloop.com)",
+      "WebFetch(domain:forum.gumloop.com)",
+      "Bash(npm run check:types:*)",
+      "Bash(npm run:*)",
+      "Bash(timeout 5 npm run dev:*)",
+      "Bash(env)",
+      "Bash(curl:*)",
+      "Bash(grep:*)",
+      "Bash(npm install:*)",
+      "Bash(nslookup:*)",
+      "Bash(npx drizzle-kit:*)",
+      "Bash(cat:*)",
+      "Bash(npx tsx:*)",
+      "Bash(pkill:*)",
+      "Bash(PGPASSWORD=password psql:*)"
+    ]
+  }
+}
