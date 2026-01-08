@@ -26,7 +26,6 @@ PORT = "5000"
 deploymentTarget = "autoscale"
 run = ["node", "./dist/index.cjs"]
 build = ["npm", "run", "build"]
-healthcheckPath = "/health"
 
 [workflows]
 runButton = "Project"

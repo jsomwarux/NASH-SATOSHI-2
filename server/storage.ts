@@ -13,6 +13,77 @@ import {
   type SubscriptionTierId,
 } from "@shared/schema";
 
+// ==================== NARRATIVE NORMALIZATION ====================
+// Groups similar narratives together for leaderboard stats
+// e.g., "AI Agents / Autonomous AI" and "AI Agents" both map to "AI Agents"
+
+// Define canonical narratives and their keyword patterns
+const NARRATIVE_MAPPINGS: { canonical: string; keywords: string[] }[] = [
+  // AI & Tech narratives
+  { canonical: "AI Agents", keywords: ["ai agent", "autonomous ai", "ai assistant", "intelligent agent"] },
+  { canonical: "AI Infrastructure", keywords: ["ai infra", "ai infrastructure", "machine learning", "ml infra"] },
+  { canonical: "DePIN", keywords: ["depin", "decentralized physical", "physical infrastructure"] },
+
+  // Finance narratives
+  { canonical: "Payments", keywords: ["payment", "neobank", "spending", "remittance", "transfer"] },
+  { canonical: "DeFi", keywords: ["defi", "decentralized finance", "yield", "lending", "borrowing", "dex"] },
+  { canonical: "RWA", keywords: ["rwa", "real world asset", "tokenized asset", "real-world"] },
+
+  // Privacy & Security
+  { canonical: "Privacy", keywords: ["privacy", "confidential", "anonymous", "zero knowledge", "zk"] },
+
+  // Gaming & Entertainment
+  { canonical: "Gaming", keywords: ["gaming", "gamefi", "play to earn", "p2e", "metaverse game"] },
+  { canonical: "Metaverse", keywords: ["metaverse", "virtual world", "virtual reality", "vr"] },
+  { canonical: "NFT", keywords: ["nft", "collectible", "digital art", "pfp"] },
+
+  // Social & Identity
+  { canonical: "SocialFi", keywords: ["socialfi", "social finance", "social token", "creator"] },
+  { canonical: "Identity", keywords: ["identity", "did", "decentralized identity", "sybil"] },
+
+  // Infrastructure
+  { canonical: "L1/L2", keywords: ["layer 1", "layer 2", "l1 ", "l2 ", "rollup", "scaling", "smart contract platform"] },
+  { canonical: "Interoperability", keywords: ["interop", "cross-chain", "bridge", "multichain"] },
+  { canonical: "Data", keywords: ["data", "oracle", "indexing", "storage", "database"] },
+
+  // Meme & Culture
+  { canonical: "Meme", keywords: ["meme", "memecoin", "doge", "shib", "culture"] },
+];
+
+/**
+ * Normalizes a narrative string to a canonical form for grouping
+ * @param narrative - The raw narrative string (e.g., "AI Agents / Autonomous AI")
+ * @returns The canonical narrative name (e.g., "AI Agents")
+ */
+function normalizeNarrative(narrative: string): string {
+  if (!narrative) return "Unknown";
+
+  const lowerNarrative = narrative.toLowerCase();
+
+  // Check each mapping for keyword matches
+  for (const mapping of NARRATIVE_MAPPINGS) {
+    for (const keyword of mapping.keywords) {
+      if (lowerNarrative.includes(keyword)) {
+        return mapping.canonical;
+      }
+    }
+  }
+
+  // If no mapping found, clean up the narrative:
+  // - Take the first part before "/" or "|"
+  // - Trim whitespace
+  // - Capitalize first letter of each word
+  const firstPart = narrative.split(/[\/|]/)[ 0].trim();
+
+  // Title case the result
+  return firstPart
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+// ==================== END NARRATIVE NORMALIZATION ====================
+
 export interface IStorage {
   // Subscription methods
   getUserSubscription(userId: string): Promise<UserSubscription | null>;
@@ -662,12 +733,12 @@ export class PostgresStorage implements IStorage {
       .orderBy(sql`avg_score DESC`)
       .limit(1);
 
-    // Get narrative with highest average score (no minimum token count requirement)
-    const topNarrativeQuery = await db
+    // Get all narratives with their scores and token IDs for normalization
+    const allNarrativesQuery = await db
       .select({
         narrative: tokenAnalyses.narrative,
-        avgScore: sql<number>`AVG(CAST(${tokenAnalyses.finalScore} AS DECIMAL))`.as('avg_score'),
-        tokenCount: sql<number>`COUNT(DISTINCT ${tokenAnalyses.tokenId})`.as('token_count'),
+        finalScore: tokenAnalyses.finalScore,
+        tokenId: tokenAnalyses.tokenId,
       })
       .from(tokenAnalyses)
       .where(
@@ -676,10 +747,37 @@ export class PostgresStorage implements IStorage {
           isNotNull(tokenAnalyses.narrative),
           sql`${tokenAnalyses.narrative} != ''`
         )
-      )
-      .groupBy(tokenAnalyses.narrative)
-      .orderBy(sql`avg_score DESC`)
-      .limit(1);
+      );
+
+    // Normalize and group narratives
+    const narrativeGroups = new Map<string, { scores: number[]; tokenIds: Set<string> }>();
+
+    for (const row of allNarrativesQuery) {
+      if (!row.narrative) continue;
+      const normalized = normalizeNarrative(row.narrative);
+      if (!narrativeGroups.has(normalized)) {
+        narrativeGroups.set(normalized, { scores: [], tokenIds: new Set() });
+      }
+      const group = narrativeGroups.get(normalized)!;
+      group.scores.push(parseFloat(row.finalScore as string) || 0);
+      group.tokenIds.add(row.tokenId);
+    }
+
+    // Find the narrative with highest average score
+    let topNarrativeData: { narrative: string; avgScore: number; tokenCount: number } | null = null;
+    let highestAvg = -1;
+
+    narrativeGroups.forEach((data, narrative) => {
+      const avgScore = data.scores.reduce((a: number, b: number) => a + b, 0) / data.scores.length;
+      if (avgScore > highestAvg) {
+        highestAvg = avgScore;
+        topNarrativeData = {
+          narrative,
+          avgScore,
+          tokenCount: data.tokenIds.size,
+        };
+      }
+    });
 
     // Get highest rated token from past 24 hours
     const winner24hQuery = await db
@@ -711,15 +809,6 @@ export class PostgresStorage implements IStorage {
       };
     }
 
-    let topNarrative = null;
-    if (topNarrativeQuery[0] && topNarrativeQuery[0].narrative) {
-      topNarrative = {
-        narrative: topNarrativeQuery[0].narrative,
-        avgScore: parseFloat(String(topNarrativeQuery[0].avgScore)) || 0,
-        tokenCount: parseInt(String(topNarrativeQuery[0].tokenCount)) || 0,
-      };
-    }
-
     let winner24h = null;
     if (winner24hQuery[0]) {
       winner24h = {
@@ -729,7 +818,7 @@ export class PostgresStorage implements IStorage {
       };
     }
 
-    return { topToken, topNarrative, winner24h };
+    return { topToken, topNarrative: topNarrativeData, winner24h };
   }
 }
 

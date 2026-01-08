@@ -119,6 +119,261 @@ function cleanTextPreserveStructure(text: string | undefined | null): string {
     .trim();
 }
 
+// ==================== OUTPUT SUMMARY PARSER (PRIMARY STRATEGY) ====================
+// The OUTPUT SUMMARY section at the end of Gumloop output is the most reliable source
+// It uses a consistent `field_name: value` format on each line
+
+// Field name variations mapping - normalize to canonical names
+const FIELD_ALIASES: Record<string, string> = {
+  // Score variations
+  'final_score': 'final_score',
+  'final score': 'final_score',
+  'finalscore': 'final_score',
+  'score': 'final_score',
+
+  // Tier variations
+  'final_tier': 'final_tier',
+  'final tier': 'final_tier',
+  'tier': 'final_tier',
+  'finaltier': 'final_tier',
+
+  // Narrative variations
+  'narrative': 'narrative',
+  'narrative/meta': 'narrative',
+  'meta': 'narrative',
+  'primary_narrative': 'narrative',
+  'primary narrative': 'narrative',
+
+  // Token type variations
+  'token_type': 'token_type',
+  'token type': 'token_type',
+  'tokentype': 'token_type',
+  'type': 'token_type',
+
+  // Phase variations
+  'phase': 'phase',
+  'phase_number': 'phase',
+  'phase number': 'phase',
+
+  'phase_name': 'phase_name',
+  'phase name': 'phase_name',
+  'phasename': 'phase_name',
+
+  // Peak proximity variations
+  'peak_proximity_pct': 'peak_proximity_pct',
+  'peak_proximity': 'peak_proximity_pct',
+  'peak proximity': 'peak_proximity_pct',
+  'peakproximity': 'peak_proximity_pct',
+
+  // Winning side variations
+  'winning_side': 'winning_side',
+  'winning side': 'winning_side',
+  'winningside': 'winning_side',
+
+  // Consensus variations
+  'consensus_level': 'consensus_level',
+  'consensus level': 'consensus_level',
+  'consensus': 'consensus_level',
+
+  // Confidence variations
+  'confidence': 'confidence',
+  'confidence_level': 'confidence',
+
+  // Recommendation variations
+  'recommendation': 'recommendation',
+  'rec': 'recommendation',
+  'signal': 'recommendation',
+
+  // Component scores
+  'coordination_score': 'coordination_score',
+  'coordination score': 'coordination_score',
+  'coordination': 'coordination_score',
+
+  'schelling_score': 'schelling_score',
+  'schelling score': 'schelling_score',
+  'schelling_rank_score': 'schelling_score',
+  'schelling': 'schelling_score',
+
+  'reflexivity_score': 'reflexivity_score',
+  'reflexivity score': 'reflexivity_score',
+  'reflexivity': 'reflexivity_score',
+
+  'virality_score': 'virality_score',
+  'virality score': 'virality_score',
+  'virality': 'virality_score',
+
+  'asymmetry_score': 'asymmetry_score',
+  'asymmetry score': 'asymmetry_score',
+  'asymmetry': 'asymmetry_score',
+
+  'game_theory_score': 'game_theory_score',
+  'game theory score': 'game_theory_score',
+  'game_theory_bonus': 'game_theory_score',
+  'gametheory': 'game_theory_score',
+
+  'base_score': 'base_score',
+  'base score': 'base_score',
+  'basescore': 'base_score',
+
+  // Modifiers
+  'phase_modifier': 'phase_modifier',
+  'phase modifier': 'phase_modifier',
+
+  'narrative_modifier': 'narrative_modifier',
+  'narrative modifier': 'narrative_modifier',
+
+  'narrative_heat': 'narrative_heat',
+  'narrative heat': 'narrative_heat',
+
+  'exit_liquidity_modifier': 'exit_liquidity_modifier',
+  'exit liquidity modifier': 'exit_liquidity_modifier',
+
+  'peak_proximity_modifier': 'peak_proximity_modifier',
+  'peak proximity modifier': 'peak_proximity_modifier',
+
+  'data_quality_modifier': 'data_quality_modifier',
+  'data quality modifier': 'data_quality_modifier',
+
+  'market_cap_modifier': 'market_cap_modifier',
+  'market cap modifier': 'market_cap_modifier',
+
+  'total_modifiers': 'total_modifiers',
+  'total modifiers': 'total_modifiers',
+
+  'penalties': 'penalties',
+  'penalty': 'penalties',
+
+  // Model scores
+  'gpt_score': 'gpt_score',
+  'gpt score': 'gpt_score',
+  'chatgpt_score': 'gpt_score',
+  'chatgpt': 'gpt_score',
+
+  'claude_score': 'claude_score',
+  'claude score': 'claude_score',
+  'claude': 'claude_score',
+
+  'gemini_score': 'gemini_score',
+  'gemini score': 'gemini_score',
+  'gemini': 'gemini_score',
+
+  'grok_score': 'grok_score',
+  'grok score': 'grok_score',
+  'grok': 'grok_score',
+
+  // Other fields
+  'thesis': 'thesis',
+  'project_thesis': 'thesis',
+
+  'verdict': 'verdict',
+  'final_verdict': 'verdict',
+
+  'reasoning': 'reasoning',
+  'rationale': 'reasoning',
+
+  'equilibrium_type': 'equilibrium_type',
+  'equilibrium type': 'equilibrium_type',
+
+  'schelling_position': 'schelling_position',
+  'schelling position': 'schelling_position',
+};
+
+// Normalize a field name to its canonical form
+function normalizeFieldName(name: string): string {
+  const normalized = name.toLowerCase().trim();
+  return FIELD_ALIASES[normalized] || normalized.replace(/\s+/g, '_');
+}
+
+// Extract the OUTPUT SUMMARY section from text
+function extractOutputSummarySection(text: string): string | null {
+  // Look for OUTPUT SUMMARY markers
+  const patterns = [
+    // ════ bordered section
+    /═{3,}[^\n]*OUTPUT\s*SUMMARY[^\n]*═*\s*\n([\s\S]*?)(?=═{3,}|$)/i,
+    // ## OUTPUT SUMMARY or # OUTPUT SUMMARY
+    /#{1,3}\s*OUTPUT\s*SUMMARY\s*\n([\s\S]*?)(?=\n#{1,3}\s|$)/i,
+    // **OUTPUT SUMMARY**
+    /\*\*OUTPUT\s*SUMMARY\*\*\s*\n([\s\S]*?)(?=\n\*\*[A-Z]|\n#{1,3}|$)/i,
+    // OUTPUT SUMMARY: or OUTPUT SUMMARY (plain)
+    /OUTPUT\s*SUMMARY[:\s]*\n([\s\S]*?)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1] && match[1].trim().length > 20) {
+      return match[1].trim();
+    }
+  }
+
+  return null;
+}
+
+// Parse OUTPUT SUMMARY section into key-value pairs
+function parseOutputSummaryToMap(summaryText: string): Map<string, string> {
+  const result = new Map<string, string>();
+
+  // Split into lines and parse each as key: value
+  const lines = summaryText.split('\n');
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('|') || trimmed.startsWith('-')) {
+      continue;
+    }
+
+    // Match pattern: field_name: value (with optional ** around field name)
+    const match = trimmed.match(/^\*?\*?([a-z_\s/]+)\*?\*?\s*:\s*(.+)$/i);
+    if (match && match[1] && match[2]) {
+      const rawKey = match[1].trim();
+      const rawValue = match[2].trim();
+
+      // Skip if value looks like a markdown header or empty
+      if (!rawValue || rawValue === '-' || rawValue === 'N/A' || rawValue.startsWith('#')) {
+        continue;
+      }
+
+      const canonicalKey = normalizeFieldName(rawKey);
+      // Clean the value (remove trailing markdown, extra quotes)
+      const cleanedValue = rawValue
+        .replace(/\*\*/g, '')
+        .replace(/^\s*["']|["']\s*$/g, '')
+        .trim();
+
+      if (cleanedValue) {
+        result.set(canonicalKey, cleanedValue);
+      }
+    }
+  }
+
+  return result;
+}
+
+// Get a string value from the parsed map
+function getStringFromMap(map: Map<string, string>, key: string): string | null {
+  const canonicalKey = normalizeFieldName(key);
+  const value = map.get(canonicalKey);
+  if (value && value !== 'N/A' && value !== 'undefined' && value !== 'null') {
+    return cleanText(value);
+  }
+  return null;
+}
+
+// Get a numeric value from the parsed map
+function getNumberFromMap(map: Map<string, string>, key: string): number | null {
+  const value = getStringFromMap(map, key);
+  if (!value) return null;
+
+  // Extract number from formats like: 72.5, 72.5/100, +5, -3
+  const numMatch = value.match(/([+-]?\d+\.?\d*)/);
+  if (numMatch) {
+    const num = parseFloat(numMatch[1]);
+    if (!isNaN(num)) return num;
+  }
+  return null;
+}
+
+// ==================== END OUTPUT SUMMARY PARSER ====================
+
 // Extract a structured field value from the text
 // Handles formats like: field_name: value, | field_name | value |, **field_name**: value
 // Also handles values inside code blocks (```...```)
@@ -228,6 +483,38 @@ function extractNarrativeField(text: string): string | null {
   return null;
 }
 
+// Dedicated final score extraction - avoids picking up individual model scores from tables
+function extractFinalScoreField(text: string): number | null {
+  // Patterns ordered by specificity - look for CONSENSUS/AGGREGATED final score
+  const patterns = [
+    // "Final Score: 74.25 → Rounded to 74" pattern
+    /Final\s*Score[:\s]+(\d+\.?\d*)\s*[→\->]/i,
+    // "**Final Score: 74.25/100**" pattern
+    /\*\*Final\s*Score[:\s]*\*?\*?\s*(\d+\.?\d*)\s*\/\s*100/i,
+    // "**Final Score:** 74" or "**Final Score: 74**"
+    /\*\*Final\s*Score:?\*\*[:\s]*(\d+\.?\d*)/i,
+    // Section 17 FINAL CONSENSUS SCORE pattern - look for score after "Final Score:" NOT in a table
+    /FINAL\s*CONSENSUS\s*SCORE[\s\S]*?Final\s*Score[:\s]+(\d+\.?\d*)/i,
+    // Standalone "Final Score: 74" not preceded by | (table cell)
+    /(?<!\|[^|\n]*)\bFinal\s*Score[:\s]+(\d+\.?\d*)(?!\s*\|)/i,
+    // "final_score: 74" field format
+    /final[_\s]score[:\s]+(\d+\.?\d*)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const score = parseFloat(match[1]);
+      if (!isNaN(score) && score >= 0 && score <= 100) {
+        console.log(`extractFinalScoreField: Found score ${score} using pattern: ${pattern.source.substring(0, 50)}...`);
+        return score;
+      }
+    }
+  }
+
+  return null;
+}
+
 // Extract OUTPUT SUMMARY section from the full text
 function extractOutputSummary(text: string): { summary: string; fullText: string } {
   // Look for OUTPUT SUMMARY section markers
@@ -256,9 +543,21 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   // Use summary text for field extraction when available
   const parseText = summaryText.length > 100 ? summaryText : text;
 
-  // Core Scores
-  const finalScore = extractNumericField(parseText, 'final_score');
-  if (finalScore !== undefined && finalScore >= 0 && finalScore <= 100) {
+  // Core Scores - Use dedicated final score extraction to avoid picking up model scores
+  // First try the full text (more context for finding consensus score)
+  let finalScore = extractFinalScoreField(text);
+  // Fall back to summary text
+  if (finalScore === null) {
+    finalScore = extractFinalScoreField(parseText);
+  }
+  // Last resort: use generic extraction
+  if (finalScore === null) {
+    const genericScore = extractNumericField(parseText, 'final_score');
+    if (genericScore !== undefined && genericScore >= 0 && genericScore <= 100) {
+      finalScore = genericScore;
+    }
+  }
+  if (finalScore !== null) {
     result.finalScore = finalScore;
   }
 
@@ -656,38 +955,43 @@ function extractCatalysts(text: string): string[] {
 }
 
 // Legacy parser for older format responses
+// NOTE: This function should only FILL IN missing values, not overwrite already-set ones
 function parseLegacyFormat(rawText: string, result: ParsedGumloopResponse): void {
-  // FINAL SCORE
-  const scorePatterns = [
-    /\*\*FINAL SCORE\*\*\s*\|\s*\*\*(\d+\.?\d*)/i,
-    /FINAL\s*SCORE[^\d]*(\d+\.?\d*)/i,
-    /Final\s*Score[:\s|]+(\d+\.?\d*)/i,
-    /\|\s*FINAL\s*SCORE\s*\|\s*\*?\*?(\d+\.?\d*)/i,
-  ];
-  for (const pattern of scorePatterns) {
-    const match = rawText.match(pattern);
-    if (match && match[1]) {
-      const num = parseFloat(match[1]);
-      if (!isNaN(num) && num >= 0 && num <= 100) {
-        result.finalScore = num;
-        break;
+  // FINAL SCORE - only if not already set by parseStructuredOutput
+  if (!result.finalScore || result.finalScore === 0) {
+    const scorePatterns = [
+      /\*\*FINAL SCORE\*\*\s*\|\s*\*\*(\d+\.?\d*)/i,
+      /FINAL\s*SCORE[^\d]*(\d+\.?\d*)/i,
+      /Final\s*Score[:\s|]+(\d+\.?\d*)/i,
+      /\|\s*FINAL\s*SCORE\s*\|\s*\*?\*?(\d+\.?\d*)/i,
+    ];
+    for (const pattern of scorePatterns) {
+      const match = rawText.match(pattern);
+      if (match && match[1]) {
+        const num = parseFloat(match[1]);
+        if (!isNaN(num) && num >= 0 && num <= 100) {
+          result.finalScore = num;
+          break;
+        }
       }
     }
   }
 
-  // TIER
-  const tierPatterns = [
-    /\*\*FINAL\s*TIER\*\*\s*\|\s*\*\*([A-Z+]+)/i,
-    /FINAL\s*TIER[:\s|]+\*?\*?([A-Z+]+)/i,
-    /\|\s*TIER\s*\|\s*\*?\*?([A-Z+]+)/i,
-  ];
-  for (const pattern of tierPatterns) {
-    const match = rawText.match(pattern);
-    if (match && match[1]) {
-      const tier = match[1].replace(/\*/g, '').trim().toUpperCase();
-      if (['S+', 'S', 'A', 'B', 'C'].includes(tier)) {
-        result.tier = tier;
-        break;
+  // TIER - only if not already set
+  if (!result.tier || result.tier === '') {
+    const tierPatterns = [
+      /\*\*FINAL\s*TIER\*\*\s*\|\s*\*\*([A-Z+]+)/i,
+      /FINAL\s*TIER[:\s|]+\*?\*?([A-Z+]+)/i,
+      /\|\s*TIER\s*\|\s*\*?\*?([A-Z+]+)/i,
+    ];
+    for (const pattern of tierPatterns) {
+      const match = rawText.match(pattern);
+      if (match && match[1]) {
+        const tier = match[1].replace(/\*/g, '').trim().toUpperCase();
+        if (['S+', 'S', 'A', 'B', 'C'].includes(tier)) {
+          result.tier = tier;
+          break;
+        }
       }
     }
   }
@@ -914,11 +1218,148 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
   }
 
   try {
-    // First, try to parse the new structured format
-    // Log OUTPUT SUMMARY extraction for debugging
-    const { summary: summaryText } = extractOutputSummary(rawText);
-    console.log(`Parser: OUTPUT SUMMARY extraction - found ${summaryText.length > 0 ? summaryText.length + ' chars' : 'nothing, using full text'}`);
+    // ==================== PRIMARY STRATEGY: Parse OUTPUT SUMMARY section ====================
+    // The OUTPUT SUMMARY section uses a consistent field_name: value format
+    const summarySection = extractOutputSummarySection(rawText);
+    let summaryMap: Map<string, string> | null = null;
 
+    if (summarySection) {
+      summaryMap = parseOutputSummaryToMap(summarySection);
+      console.log(`Parser: OUTPUT SUMMARY found with ${summaryMap.size} fields`);
+
+      // Extract primary fields from OUTPUT SUMMARY (most reliable)
+      const summaryScore = getNumberFromMap(summaryMap, 'final_score');
+      if (summaryScore !== null && summaryScore >= 0 && summaryScore <= 100) {
+        result.finalScore = summaryScore;
+        console.log(`Parser: Got final_score from OUTPUT SUMMARY: ${summaryScore}`);
+      }
+
+      const summaryTier = getStringFromMap(summaryMap, 'final_tier');
+      if (summaryTier) {
+        const cleanTier = summaryTier.toUpperCase().replace(/[^A-Z+]/g, '');
+        if (['S+', 'S', 'A', 'B', 'C'].includes(cleanTier)) {
+          result.tier = cleanTier;
+        }
+      }
+
+      const summaryNarrative = getStringFromMap(summaryMap, 'narrative');
+      if (summaryNarrative && summaryNarrative.length > 2 && summaryNarrative.length < 100) {
+        result.narrative = summaryNarrative;
+        console.log(`Parser: Got narrative from OUTPUT SUMMARY: ${summaryNarrative}`);
+      }
+
+      const summaryTokenType = getStringFromMap(summaryMap, 'token_type');
+      if (summaryTokenType) {
+        const cleanType = summaryTokenType.toUpperCase();
+        result.tokenType = cleanType.includes('MEME') ? 'MEMECOIN' : 'UTILITY';
+      }
+
+      const summaryPhase = getNumberFromMap(summaryMap, 'phase');
+      if (summaryPhase !== null && summaryPhase >= 1 && summaryPhase <= 5) {
+        result.phase = summaryPhase;
+      }
+
+      const summaryPhaseName = getStringFromMap(summaryMap, 'phase_name');
+      if (summaryPhaseName) {
+        result.phaseName = summaryPhaseName;
+      }
+
+      const summaryWinningSide = getStringFromMap(summaryMap, 'winning_side');
+      if (summaryWinningSide) {
+        const side = summaryWinningSide.toUpperCase();
+        if (side.includes('USER')) result.winningSide = 'USER';
+        else if (side.includes('EXIT') || side.includes('LIQ')) result.winningSide = 'EXIT_LIQ';
+        else result.winningSide = 'AT_RISK';
+      }
+
+      const summaryConsensus = getStringFromMap(summaryMap, 'consensus_level');
+      if (summaryConsensus) {
+        const level = summaryConsensus.toUpperCase();
+        if (['HIGH', 'MIXED', 'LOW', 'CONFLICTED'].includes(level)) {
+          result.consensusLevel = level;
+        }
+      }
+
+      const summaryConfidence = getStringFromMap(summaryMap, 'confidence');
+      if (summaryConfidence) {
+        const conf = summaryConfidence.toUpperCase().charAt(0);
+        if (['H', 'M', 'L'].includes(conf)) {
+          result.confidence = conf;
+        }
+      }
+
+      const summaryRec = getStringFromMap(summaryMap, 'recommendation');
+      if (summaryRec) {
+        const rec = summaryRec.toUpperCase();
+        if (rec.includes('BUY') || rec.includes('STRONG')) result.recommendation = 'BUY';
+        else if (rec.includes('AVOID') || rec.includes('SELL')) result.recommendation = 'AVOID';
+        else result.recommendation = 'HOLD';
+      }
+
+      // Component scores from OUTPUT SUMMARY
+      const summaryCoord = getNumberFromMap(summaryMap, 'coordination_score');
+      if (summaryCoord !== null) result.coordinationScore = summaryCoord;
+
+      const summarySchelling = getNumberFromMap(summaryMap, 'schelling_score');
+      if (summarySchelling !== null) result.schellingRankScore = summarySchelling;
+
+      const summaryReflex = getNumberFromMap(summaryMap, 'reflexivity_score');
+      if (summaryReflex !== null) result.reflexivityScore = summaryReflex;
+
+      const summaryViral = getNumberFromMap(summaryMap, 'virality_score');
+      if (summaryViral !== null) result.viralityScore = summaryViral;
+
+      const summaryAsym = getNumberFromMap(summaryMap, 'asymmetry_score');
+      if (summaryAsym !== null) result.asymmetryScore = summaryAsym;
+
+      const summaryGT = getNumberFromMap(summaryMap, 'game_theory_score');
+      if (summaryGT !== null) result.gameTheoryBonus = summaryGT;
+
+      // Other fields from OUTPUT SUMMARY
+      const summaryThesis = getStringFromMap(summaryMap, 'thesis');
+      if (summaryThesis) result.thesis = summaryThesis;
+
+      const summaryVerdict = getStringFromMap(summaryMap, 'verdict');
+      if (summaryVerdict) result.verdict = summaryVerdict;
+
+      const summaryReasoning = getStringFromMap(summaryMap, 'reasoning');
+      if (summaryReasoning) result.reasoning = summaryReasoning;
+
+      const summaryNarrativeHeat = getNumberFromMap(summaryMap, 'narrative_heat');
+      if (summaryNarrativeHeat !== null) result.narrativeHeat = summaryNarrativeHeat;
+
+      const summaryPeakProx = getNumberFromMap(summaryMap, 'peak_proximity_pct');
+      if (summaryPeakProx !== null) result.peakProximity = summaryPeakProx;
+
+      // Model scores
+      const gptScore = getNumberFromMap(summaryMap, 'gpt_score');
+      if (gptScore !== null) result.modelScores.gpt = gptScore;
+
+      const claudeScore = getNumberFromMap(summaryMap, 'claude_score');
+      if (claudeScore !== null) result.modelScores.claude = claudeScore;
+
+      const geminiScore = getNumberFromMap(summaryMap, 'gemini_score');
+      if (geminiScore !== null) result.modelScores.gemini = geminiScore;
+
+      const grokScore = getNumberFromMap(summaryMap, 'grok_score');
+      if (grokScore !== null) result.modelScores.grok = grokScore;
+    } else {
+      console.log(`Parser: No OUTPUT SUMMARY section found, using fallback parsing`);
+    }
+
+    // ==================== FALLBACK: Pattern matching for missing fields ====================
+    // Use existing parsers to fill in any fields not found in OUTPUT SUMMARY
+
+    // If final score not found in OUTPUT SUMMARY, try dedicated extraction
+    if (!result.finalScore || result.finalScore === 0) {
+      const patternScore = extractFinalScoreField(rawText);
+      if (patternScore !== null) {
+        result.finalScore = patternScore;
+        console.log(`Parser: Got final_score from pattern matching: ${patternScore}`);
+      }
+    }
+
+    // Fill in remaining fields with structured output parser
     parseStructuredOutput(rawText, result);
 
     // Log parsed narrative for debugging
@@ -929,7 +1370,7 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
 
     // Log after legacy parsing
     console.log(`Parser: After parseLegacyFormat - narrative: "${result.narrative || 'undefined'}"`);
-    console.log(`Parser: New fields - thesis: "${result.thesis || 'undefined'}", catalyst1: "${result.catalyst1 || 'undefined'}", risk1: "${result.risk1 || 'undefined'}"`);
+    console.log(`Parser: Final values - score: ${result.finalScore}, tier: ${result.tier}, narrative: "${result.narrative || 'undefined'}"`);
 
     // Calculate tier from score if not parsed successfully
     if (!result.tier || result.tier === '') {
