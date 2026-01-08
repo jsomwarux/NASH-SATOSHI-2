@@ -162,6 +162,64 @@ function formatDate(date: Date | string): string {
   });
 }
 
+// Expandable text component for fields that may be truncated
+function ExpandableText({ text, className = "" }: { text: string; className?: string }) {
+  const textRef = useRef<HTMLDivElement>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isTruncated, setIsTruncated] = useState(false);
+
+  useEffect(() => {
+    const checkTruncation = () => {
+      if (textRef.current) {
+        setIsTruncated(textRef.current.scrollWidth > textRef.current.clientWidth);
+      }
+    };
+
+    checkTruncation();
+    // Recheck on window resize
+    window.addEventListener('resize', checkTruncation);
+    return () => window.removeEventListener('resize', checkTruncation);
+  }, [text]);
+
+  if (isExpanded) {
+    return (
+      <div className="relative">
+        <div className={`${className} break-words`}>
+          {text}
+        </div>
+        <button
+          onClick={() => setIsExpanded(false)}
+          className="text-xs text-primary hover:text-primary/80 mt-1 flex items-center gap-1"
+        >
+          <Minimize2 className="w-3 h-3" />
+          Show less
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <div
+        ref={textRef}
+        className={`${className} truncate`}
+        title={text}
+      >
+        {text}
+      </div>
+      {isTruncated && (
+        <button
+          onClick={() => setIsExpanded(true)}
+          className="text-xs text-primary hover:text-primary/80 mt-1 flex items-center gap-1"
+        >
+          <Maximize2 className="w-3 h-3" />
+          Show full
+        </button>
+      )}
+    </div>
+  );
+}
+
 // Extract OUTPUT SUMMARY section from the full response text
 function extractOutputSummary(text: string): string {
   // Look for OUTPUT SUMMARY section markers
@@ -1007,9 +1065,10 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
               <Flame className="w-4 h-4" />
               <span className="text-xs uppercase tracking-wide">{isMemecoin ? 'Meta' : 'Narrative'}</span>
             </div>
-            <div className="text-sm font-medium truncate" title={analysis.narrative || (isMemecoin ? "Meme/Social Token" : "Utility/Infrastructure")}>
-              {analysis.narrative || (isMemecoin ? "Meme/Social Token" : "Utility/Infrastructure")}
-            </div>
+            <ExpandableText
+              text={analysis.narrative || (isMemecoin ? "Meme/Social Token" : "Utility/Infrastructure")}
+              className="text-sm font-medium"
+            />
             {narrativeHeat !== null && (
               <div className="flex items-center gap-2 mt-1">
                 <div className={`flex items-center gap-1 text-sm ${
