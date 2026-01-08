@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Search, Loader2, TrendingUp, Flame, Crown, Star, ArrowRight, Terminal, Scan } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useTokenSearch } from "@/hooks/useAnalysis";
+import { useQueryClient } from "@tanstack/react-query";
 import type { TokenSearchResult } from "@shared/schema";
 
 interface TokenSearchProps {
@@ -55,8 +56,22 @@ export function TokenSearch({ onSelect, isLoading }: TokenSearchProps) {
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const previousQueryRef = useRef<string>("");
+  const queryClient = useQueryClient();
 
   const { data: tokens, isLoading: isSearching } = useTokenSearch(query);
+
+  // Clear old search cache when query changes significantly (first 2 chars differ)
+  useEffect(() => {
+    const prevPrefix = previousQueryRef.current.slice(0, 2).toLowerCase();
+    const currPrefix = query.slice(0, 2).toLowerCase();
+
+    if (prevPrefix && currPrefix && prevPrefix !== currPrefix) {
+      // Different search - invalidate all previous token search queries
+      queryClient.removeQueries({ queryKey: ["tokenSearch"] });
+    }
+    previousQueryRef.current = query;
+  }, [query, queryClient]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -103,6 +118,9 @@ export function TokenSearch({ onSelect, isLoading }: TokenSearchProps) {
   };
 
   const handleSelect = (token: TokenSearchResult) => {
+    // Clear all token search cache to prevent stale data on next search
+    queryClient.removeQueries({ queryKey: ["tokenSearch"] });
+    previousQueryRef.current = "";
     setQuery("");
     setIsOpen(false);
     setSelectedIndex(-1);

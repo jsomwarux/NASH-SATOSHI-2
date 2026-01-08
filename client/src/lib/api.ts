@@ -120,6 +120,17 @@ export async function getFilterOptions(): Promise<{
   return fetchApi<{ tiers: string[]; narratives: string[]; chains: string[] }>("/api/filters");
 }
 
+// Leaderboard Stats
+export interface LeaderboardStats {
+  topToken: { symbol: string; name: string; score: number; daysOnLeaderboard: number } | null;
+  topNarrative: { narrative: string; avgScore: number; tokenCount: number } | null;
+  strongestConviction: { symbol: string; name: string; score: number; consensus: string } | null;
+}
+
+export async function getLeaderboardStats(): Promise<LeaderboardStats> {
+  return fetchApi<LeaderboardStats>("/api/leaderboard/stats");
+}
+
 // Get User's Analyses (requires auth)
 export interface UserAnalysesOptions {
   limit?: number;

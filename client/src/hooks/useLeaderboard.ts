@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getLeaderboard, getFilterOptions, type LeaderboardOptions } from "@/lib/api";
+import { getLeaderboard, getFilterOptions, getLeaderboardStats, type LeaderboardOptions } from "@/lib/api";
 
 export function useLeaderboard(options?: LeaderboardOptions) {
   return useQuery({
@@ -15,5 +15,14 @@ export function useFilterOptions() {
     queryKey: ["filterOptions"],
     queryFn: () => getFilterOptions(),
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+}
+
+export function useLeaderboardStats() {
+  return useQuery({
+    queryKey: ["leaderboardStats"],
+    queryFn: () => getLeaderboardStats(),
+    staleTime: 60 * 1000, // Cache for 1 minute
+    refetchOnWindowFocus: true,
   });
 }

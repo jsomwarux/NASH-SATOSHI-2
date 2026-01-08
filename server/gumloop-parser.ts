@@ -4,6 +4,7 @@ export interface ParsedGumloopResponse {
   // Primary results
   finalScore: number;
   tier: string;
+  tokenType?: string; // UTILITY or MEMECOIN
   phase: number;
   phaseName: string;
 
@@ -56,8 +57,14 @@ export interface ParsedGumloopResponse {
   exitLiquidityModifier?: number;
   peakProximityModifier?: number;
   dataQualityModifier?: number;
+  marketCapModifier?: number; // -15 to +5, large caps penalized
   totalModifiers?: number;
   penalties?: number;
+
+  // Market cap scaling
+  marketCapTier?: string; // mega, large, mid, small
+  scoreCapped?: boolean;
+  uncappedScore?: number;
 
   // Game theory
   equilibriumType?: string;
@@ -114,17 +121,24 @@ function cleanTextPreserveStructure(text: string | undefined | null): string {
 
 // Extract a structured field value from the text
 // Handles formats like: field_name: value, | field_name | value |, **field_name**: value
+// Also handles values inside code blocks (```...```)
 function extractField(text: string, fieldName: string): string | null {
   // Normalize field name for regex (handle underscores and spaces)
   const normalizedName = fieldName.replace(/_/g, '[_\\s]*');
 
   const patterns = [
+    // Inside code block: field_name: value (on its own line within ``` blocks)
+    new RegExp(`\`\`\`[\\s\\S]*?${normalizedName}:\\s*([^\\n\`]+)`, 'i'),
     // Table format: | field_name | value |
     new RegExp(`\\|\\s*${normalizedName}\\s*\\|\\s*([^|\\n]+)\\s*\\|`, 'i'),
+    // Bullet point with bold label: - **field_name**: value
+    new RegExp(`-\\s*\\*\\*${normalizedName}\\*\\*[:\\s]+([^\\n]+)`, 'i'),
     // Bold label: **field_name**: value or **field_name** | value
     new RegExp(`\\*\\*${normalizedName}\\*\\*[:\\s|]+([^\\n|]+)`, 'i'),
-    // Simple label: field_name: value
-    new RegExp(`${normalizedName}[:\\s]+([^\\n|]+)`, 'i'),
+    // Simple label on its own line: field_name: value
+    new RegExp(`^${normalizedName}:\\s*([^\\n]+)`, 'mi'),
+    // Simple label: field_name: value (anywhere)
+    new RegExp(`${normalizedName}:\\s*([^\\n|]+)`, 'i'),
     // Markdown table with header
     new RegExp(`${normalizedName}\\s*\\|\\s*([^|\\n]+)`, 'i'),
   ];
@@ -132,8 +146,10 @@ function extractField(text: string, fieldName: string): string | null {
   for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
-      const value = match[1].replace(/\*\*/g, '').trim();
-      if (value && value !== '-' && value !== 'N/A') {
+      let value = match[1].replace(/\*\*/g, '').replace(/`/g, '').trim();
+      // Remove trailing backticks from code blocks
+      value = value.replace(/```.*$/, '').trim();
+      if (value && value !== '-' && value !== 'N/A' && value.length > 0) {
         return value;
       }
     }
@@ -167,6 +183,49 @@ function extractNumber(text: string, label: string): number | undefined {
   if (slashMatch) return parseFloat(slashMatch[1]);
 
   return undefined;
+}
+
+// Dedicated narrative extraction - handles the specific Gumloop output format
+function extractNarrativeField(text: string): string | null {
+  // Validation function for narrative values
+  const isValidNarrative = (value: string): boolean => {
+    if (!value || value.length < 3 || value.length > 100) return false;
+    // Reject pure numbers or modifier values like "-5", "+3"
+    if (/^[+-]?\d+\.?\d*$/.test(value.trim())) return false;
+    // Reject common non-narrative values
+    const rejectPatterns = ['AT_RISK', 'USER', 'N/A', 'UNKNOWN', 'undefined', 'null'];
+    if (rejectPatterns.some(p => value.toUpperCase().includes(p))) return false;
+    return true;
+  };
+
+  // Patterns ordered by specificity (most specific first)
+  const patterns = [
+    // **NARRATIVE:** followed by narrative: value (Gumloop format)
+    /\*\*NARRATIVE:\*\*\s*\n?\s*narrative:\s*([^\n]+)/i,
+    // narrative: value on its own line (not in a table)
+    /(?:^|\n)\s*narrative:\s*([A-Za-z][^\n|]+)/im,
+    // **Narrative**: value or **Narrative:** value
+    /\*\*Narrative\*\*[:\s]+([A-Za-z][^\n*|]+)/i,
+    // Primary Narrative: value
+    /Primary\s*Narrative[:\s]+["']?([A-Za-z][^"'\n|]+)/i,
+    // narrative in quotes: "value" or 'value'
+    /narrative[:\s]+["']([^"']+)["']/i,
+    // thesis as fallback
+    /thesis[:\s]+["']([^"']+)["']/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const value = cleanText(match[1].trim());
+      if (isValidNarrative(value)) {
+        console.log(`extractNarrativeField: Found valid narrative: "${value}"`);
+        return value;
+      }
+    }
+  }
+
+  return null;
 }
 
 // Extract OUTPUT SUMMARY section from the full text
@@ -208,6 +267,19 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
     const cleanTier = tier.toUpperCase().replace(/[^A-Z+]/g, '');
     if (['S+', 'S', 'A', 'B', 'C', 'D', 'F', 'DISQUALIFIED', 'DQ'].includes(cleanTier)) {
       result.tier = cleanTier;
+    }
+  }
+
+  // Token type - UTILITY or MEMECOIN
+  const tokenType = extractField(parseText, 'token_type');
+  if (tokenType) {
+    const cleanType = tokenType.toUpperCase().trim();
+    if (cleanType.includes('MEME')) {
+      result.tokenType = 'MEMECOIN';
+    } else if (cleanType.includes('UTIL')) {
+      result.tokenType = 'UTILITY';
+    } else {
+      result.tokenType = cleanType === 'MEMECOIN' ? 'MEMECOIN' : 'UTILITY';
     }
   }
 
@@ -296,16 +368,19 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   const dataQualityModifier = extractNumericField(parseText, 'data_quality_modifier');
   if (dataQualityModifier !== undefined) result.dataQualityModifier = dataQualityModifier;
 
+  const marketCapModifier = extractNumericField(parseText, 'market_cap_modifier');
+  if (marketCapModifier !== undefined) result.marketCapModifier = marketCapModifier;
+
   const totalModifiers = extractNumericField(parseText, 'total_modifiers');
   if (totalModifiers !== undefined) result.totalModifiers = totalModifiers;
 
   const penalties = extractNumericField(parseText, 'penalties');
   if (penalties !== undefined) result.penalties = penalties;
 
-  // Narrative - use more permissive length check (up to 200 chars)
-  const narrative = extractField(parseText, 'narrative');
-  if (narrative && narrative.length > 2 && narrative.length < 200) {
-    result.narrative = cleanText(narrative);
+  // Narrative - use dedicated extraction with multiple patterns
+  const narrative = extractNarrativeField(parseText);
+  if (narrative) {
+    result.narrative = narrative;
   }
 
   const narrativeHeat = extractNumericField(parseText, 'narrative_heat');
@@ -326,6 +401,22 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   const equilibriumType = extractField(parseText, 'equilibrium_type');
   if (equilibriumType) {
     result.equilibriumType = cleanText(equilibriumType);
+  }
+
+  // Game Theory fields
+  const dominantStrategy = extractField(parseText, 'dominant_strategy') || extractField(parseText, 'dominant_strategies');
+  if (dominantStrategy && dominantStrategy.length > 2) {
+    result.dominantStrategies = cleanText(dominantStrategy);
+  }
+
+  const asymmetryFloor = extractField(parseText, 'asymmetry_floor') || extractField(parseText, 'downside_risk');
+  if (asymmetryFloor && asymmetryFloor.length > 1) {
+    result.asymmetryFloor = cleanText(asymmetryFloor);
+  }
+
+  const asymmetryCeiling = extractField(parseText, 'asymmetry_ceiling') || extractField(parseText, 'upside_potential');
+  if (asymmetryCeiling && asymmetryCeiling.length > 1) {
+    result.asymmetryCeiling = cleanText(asymmetryCeiling);
   }
 
   // Project Context (NEW fields)
@@ -770,7 +861,7 @@ function parseLegacyFormat(rawText: string, result: ParsedGumloopResponse): void
     }
   }
 
-  // GAME THEORY (legacy)
+  // GAME THEORY (legacy/fallback)
   if (!result.equilibriumType) {
     const eqMatch = rawText.match(/Equilibrium(?:\s*Type)?[:\s]*([^\n|]+)/i);
     if (eqMatch) result.equilibriumType = cleanText(eqMatch[1]);
@@ -778,6 +869,18 @@ function parseLegacyFormat(rawText: string, result: ParsedGumloopResponse): void
   if (!result.dominantStrategies) {
     const stratMatch = rawText.match(/Dominant\s*Strateg(?:y|ies)[:\s]*([^\n|]+)/i);
     if (stratMatch) result.dominantStrategies = cleanText(stratMatch[1]);
+  }
+  if (!result.schellingPosition) {
+    const schellingMatch = rawText.match(/Schelling\s*(?:Point|Position|Focal)[:\s]*([^\n|]+)/i);
+    if (schellingMatch) result.schellingPosition = cleanText(schellingMatch[1]);
+  }
+  if (!result.asymmetryFloor) {
+    const floorMatch = rawText.match(/(?:Downside|Floor|Risk)[:\s]*(-?\d+%?(?:\s*to\s*-?\d+%?)?)/i);
+    if (floorMatch) result.asymmetryFloor = cleanText(floorMatch[1]);
+  }
+  if (!result.asymmetryCeiling) {
+    const ceilingMatch = rawText.match(/(?:Upside|Ceiling|Potential)[:\s]*(\+?\d+%?(?:\s*to\s*\+?\d+%?)?)/i);
+    if (ceilingMatch) result.asymmetryCeiling = cleanText(ceilingMatch[1]);
   }
 }
 
@@ -834,14 +937,15 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
     }
 
     // Calculate missing component scores if we have a final score but missing components
+    // Component weights: Coordination 20, Schelling 10, Reflexivity 15, Virality 15, Asymmetry 25, Game Theory 15
     if (result.finalScore > 0) {
       const base = result.finalScore;
       if (!result.coordinationScore) result.coordinationScore = Math.round(base * 0.2 * 10) / 10;
-      if (!result.schellingRankScore) result.schellingRankScore = Math.round(base * 0.15 * 10) / 10;
+      if (!result.schellingRankScore) result.schellingRankScore = Math.round(base * 0.10 * 10) / 10;
       if (!result.reflexivityScore) result.reflexivityScore = Math.round(base * 0.15 * 10) / 10;
       if (!result.viralityScore) result.viralityScore = Math.round(base * 0.15 * 10) / 10;
-      if (!result.asymmetryScore) result.asymmetryScore = Math.round(base * 0.15 * 10) / 10;
-      if (!result.gameTheoryBonus) result.gameTheoryBonus = Math.round(base * 0.2 * 10) / 10;
+      if (!result.asymmetryScore) result.asymmetryScore = Math.round(base * 0.25 * 10) / 10;
+      if (!result.gameTheoryBonus) result.gameTheoryBonus = Math.round(base * 0.15 * 10) / 10;
     }
 
     // Build display summary if not present
@@ -966,6 +1070,19 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
     const cleanTier = tier.toUpperCase().replace(/[^A-Z+]/g, '');
     if (['S+', 'S', 'A', 'B', 'C', 'D', 'F', 'DISQUALIFIED', 'DQ'].includes(cleanTier)) {
       result.tier = cleanTier;
+    }
+  }
+
+  // Token type - UTILITY or MEMECOIN
+  const tokenType = getString('token_type');
+  if (tokenType) {
+    const cleanType = tokenType.toUpperCase().trim();
+    if (cleanType.includes('MEME')) {
+      result.tokenType = 'MEMECOIN';
+    } else if (cleanType.includes('UTIL')) {
+      result.tokenType = 'UTILITY';
+    } else {
+      result.tokenType = cleanType === 'MEMECOIN' ? 'MEMECOIN' : 'UTILITY';
     }
   }
 
@@ -1136,6 +1253,9 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   const dataQualityModifier = getNumber('data_quality_modifier');
   if (dataQualityModifier !== undefined) result.dataQualityModifier = dataQualityModifier;
 
+  const marketCapModifier = getNumber('market_cap_modifier');
+  if (marketCapModifier !== undefined) result.marketCapModifier = marketCapModifier;
+
   // Model scores
   const gptScore = getNumber('gpt_score');
   if (gptScore !== undefined) result.modelScores.gpt = gptScore;
@@ -1155,14 +1275,15 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   }
 
   // Calculate missing component scores if we have a final score
+  // Component weights: Coordination 20, Schelling 10, Reflexivity 15, Virality 15, Asymmetry 25, Game Theory 15
   if (result.finalScore > 0) {
     const base = result.finalScore;
     if (!result.coordinationScore) result.coordinationScore = Math.round(base * 0.2 * 10) / 10;
-    if (!result.schellingRankScore) result.schellingRankScore = Math.round(base * 0.15 * 10) / 10;
+    if (!result.schellingRankScore) result.schellingRankScore = Math.round(base * 0.10 * 10) / 10;
     if (!result.reflexivityScore) result.reflexivityScore = Math.round(base * 0.15 * 10) / 10;
     if (!result.viralityScore) result.viralityScore = Math.round(base * 0.15 * 10) / 10;
-    if (!result.asymmetryScore) result.asymmetryScore = Math.round(base * 0.15 * 10) / 10;
-    if (!result.gameTheoryBonus) result.gameTheoryBonus = Math.round(base * 0.2 * 10) / 10;
+    if (!result.asymmetryScore) result.asymmetryScore = Math.round(base * 0.25 * 10) / 10;
+    if (!result.gameTheoryBonus) result.gameTheoryBonus = Math.round(base * 0.15 * 10) / 10;
   }
 
   // Build display summary if not present
@@ -1172,6 +1293,54 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
       result.recommendation === 'AVOID' ? 'Elevated risk factors detected.' :
       'Moderate opportunity requiring careful position sizing.'
     }`;
+  }
+
+  // FALLBACK: If narrative wasn't found in direct fields, search all text content in outputs
+  if (!result.narrative) {
+    // Combine all string values from outputs into one text to search
+    const allTextContent: string[] = [];
+    for (const [key, value] of Object.entries(outputs)) {
+      if (typeof value === 'string' && value.length > 10) {
+        allTextContent.push(value);
+      } else if (typeof value === 'object' && value !== null) {
+        // Check nested objects too
+        for (const nestedValue of Object.values(value)) {
+          if (typeof nestedValue === 'string' && nestedValue.length > 10) {
+            allTextContent.push(nestedValue);
+          }
+        }
+      }
+    }
+
+    if (allTextContent.length > 0) {
+      const combinedText = allTextContent.join('\n');
+
+      // Patterns to extract narrative from text content
+      const narrativePatterns = [
+        // **NARRATIVE:** followed by narrative: value on same or next line
+        /\*\*NARRATIVE:\*\*\s*(?:narrative:\s*)?([^\n*|]+)/i,
+        // narrative: value (simple format)
+        /(?:^|\n)\s*narrative:\s*([^\n|]+)/i,
+        // **Narrative**: value
+        /\*\*Narrative\*\*[:\s]+([^\n|*]+)/i,
+        // | Narrative | value |
+        /\|\s*Narrative\s*\|\s*([^|]+)\|/i,
+      ];
+
+      for (const pattern of narrativePatterns) {
+        const match = combinedText.match(pattern);
+        if (match && match[1]) {
+          const narrative = cleanText(match[1].trim());
+          if (narrative.length > 2 && narrative.length < 100 &&
+              !narrative.includes('AT_RISK') && !narrative.includes('USER') &&
+              !narrative.toLowerCase().includes('unknown')) {
+            result.narrative = narrative;
+            console.log(`parseGumloopOutputs: Found narrative in text content: "${narrative}"`);
+            break;
+          }
+        }
+      }
+    }
   }
 
   return result;

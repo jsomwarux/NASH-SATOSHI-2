@@ -50,7 +50,7 @@ function getScoreBorderColor(score: number): string {
 function getTierBadgeStyle(tier: string): string {
   switch (tier) {
     case "S+":
-      return "bg-amber-500/20 text-amber-400 border-amber-500/30";
+      return "bg-purple-500/20 text-purple-400 border-purple-500/30";
     case "S":
       return "bg-green-500/20 text-green-400 border-green-500/30";
     case "A":
@@ -264,7 +264,7 @@ function AnalysisCard({ analysis, index }: { analysis: TokenAnalysis; index: num
                 <div className="bg-black/30 rounded border border-primary/10 p-2.5">
                   <div className="text-[9px] uppercase text-muted-foreground mb-0.5 font-mono tracking-wider">NARRATIVE</div>
                   <div className="font-medium text-sm truncate flex items-center gap-1">
-                    {analysis.narrative || "—"}
+                    {analysis.narrative || (analysis.tokenType === 'MEMECOIN' ? "Meme/Social Token" : "Utility/Infrastructure")}
                     {narrativeHeat !== null && narrativeHeat >= 6 && (
                       <Flame className="w-3 h-3 text-orange-400" />
                     )}

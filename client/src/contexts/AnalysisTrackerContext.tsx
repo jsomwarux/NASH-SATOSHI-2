@@ -121,8 +121,8 @@ export function AnalysisTrackerProvider({ children }: { children: React.ReactNod
     // Poll immediately
     pollStatuses();
 
-    // Then poll every 10 seconds
-    pollingRef.current = setInterval(pollStatuses, 10000);
+    // Then poll every 15 seconds (webhook handles real-time completion)
+    pollingRef.current = setInterval(pollStatuses, 15000);
 
     return () => {
       if (pollingRef.current) {

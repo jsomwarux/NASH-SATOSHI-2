@@ -36,7 +36,8 @@
       "Bash(node:*)",
       "Bash(yes:*)",
       "Bash(psql:*)",
-      "Bash(timeout 20 npm run dev:*)"
+      "Bash(timeout 20 npm run dev:*)",
+      "Bash(/dev/null pkill -9 -f node.*server/index.ts)"
     ]
   }
 }

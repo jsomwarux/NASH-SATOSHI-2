@@ -12,13 +12,16 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAnalysisTracker } from "@/contexts/AnalysisTrackerContext";
 import type { AnalyzeTokenRequest, TokenSearchResult } from "@shared/schema";
 
-// Token Search Hook
+// Token Search Hook - minimal caching to prevent stale results
 export function useTokenSearch(query: string) {
   return useQuery({
     queryKey: ["tokenSearch", query],
     queryFn: () => searchTokens(query),
     enabled: query.length >= 2,
-    staleTime: 30 * 1000, // Cache for 30 seconds
+    staleTime: 0, // Always fetch fresh results
+    gcTime: 10 * 1000, // Garbage collect after 10 seconds
+    refetchOnMount: true,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -57,11 +60,13 @@ export function useAnalysis(analysisId: number | null) {
   }, [analysisQuery.data?.status]);
 
   // Status polling query
+  // With webhook-based completion, we can poll less frequently
+  // The webhook updates the DB immediately, client picks it up on next poll
   const statusQuery = useQuery({
     queryKey: ["analysisStatus", analysisId],
     queryFn: () => getAnalysisStatus(analysisId!),
     enabled: !!analysisId && shouldPoll,
-    refetchInterval: shouldPoll ? 3000 : false, // Poll every 3 seconds
+    refetchInterval: shouldPoll ? 10000 : false, // Poll every 10 seconds (webhook handles real-time)
     staleTime: 0,
   });
 

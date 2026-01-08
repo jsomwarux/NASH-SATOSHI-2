@@ -37,7 +37,7 @@ function getScoreColor(score: number): string {
 function getTierBadgeStyle(tier: string): string {
   switch (tier) {
     case "S+":
-      return "bg-amber-500/20 text-amber-400 border-amber-500/30";
+      return "bg-purple-500/20 text-purple-400 border-purple-500/30";
     case "S":
       return "bg-green-500/20 text-green-400 border-green-500/30";
     case "A":
@@ -139,6 +139,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
           <TableRow className="border-primary/10 hover:bg-transparent">
             <TableHead className="w-12 text-center font-mono text-[10px] tracking-wider">#</TableHead>
             <TableHead className="font-mono text-[10px] tracking-wider">TOKEN</TableHead>
+            <TableHead className="text-center hidden sm:table-cell font-mono text-[10px] tracking-wider">TYPE</TableHead>
             <TableHead className="text-center font-mono text-[10px] tracking-wider">
               <SortButton field="score7d">7D_SCORE</SortButton>
             </TableHead>
@@ -147,10 +148,11 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
             </TableHead>
             <TableHead className="text-center font-mono text-[10px] tracking-wider">TIER</TableHead>
             <TableHead className="text-center hidden sm:table-cell font-mono text-[10px] tracking-wider">SIGNAL</TableHead>
+            <TableHead className="text-center hidden lg:table-cell font-mono text-[10px] tracking-wider">ASYM</TableHead>
             <TableHead className="text-center hidden md:table-cell font-mono text-[10px] tracking-wider">
               <SortButton field="runs7d">RUNS</SortButton>
             </TableHead>
-            <TableHead className="hidden lg:table-cell font-mono text-[10px] tracking-wider">NARRATIVE</TableHead>
+            <TableHead className="hidden xl:table-cell font-mono text-[10px] tracking-wider">NARRATIVE</TableHead>
             <TableHead className="text-center hidden md:table-cell font-mono text-[10px] tracking-wider">
               <SortButton field="latestAnalysis">LATEST</SortButton>
             </TableHead>
@@ -207,6 +209,18 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
                     </div>
                   </div>
                 </TableCell>
+                <TableCell className="text-center hidden sm:table-cell">
+                  <Badge
+                    variant="outline"
+                    className={`text-[9px] px-1.5 py-0 h-4 font-mono ${
+                      item.tokenType === 'MEMECOIN'
+                        ? 'bg-orange-500/10 text-orange-400 border-orange-500/30'
+                        : 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                    }`}
+                  >
+                    {item.tokenType === 'MEMECOIN' ? 'MEME' : 'UTIL'}
+                  </Badge>
+                </TableCell>
                 <TableCell className="text-center">
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -251,6 +265,22 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
                     );
                   })()}
                 </TableCell>
+                <TableCell className="text-center hidden lg:table-cell">
+                  {item.asymmetryScore !== null ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className={`text-sm font-mono font-bold ${getScoreColor(item.asymmetryScore * 4)}`}>
+                          {item.asymmetryScore.toFixed(1)}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="cyber-card border-primary/20">
+                        <p className="text-sm font-mono">Asymmetry Score (out of 25)</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <span className="text-muted-foreground text-sm font-mono">—</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-center hidden md:table-cell">
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -266,7 +296,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
                     </TooltipContent>
                   </Tooltip>
                 </TableCell>
-                <TableCell className="hidden lg:table-cell">
+                <TableCell className="hidden xl:table-cell">
                   {cleanedNarrative ? (
                     <Tooltip>
                       <TooltipTrigger asChild>

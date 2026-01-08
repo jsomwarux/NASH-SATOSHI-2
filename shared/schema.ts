@@ -233,6 +233,7 @@ export const tokenAnalyses = pgTable("token_analyses", {
   // Primary scores
   finalScore: numeric("final_score", { precision: 6, scale: 2 }).notNull(),
   tier: text("tier").notNull(), // S+, S, A, B, DISQUALIFIED
+  tokenType: text("token_type"), // UTILITY or MEMECOIN
 
   // Phase data
   phase: integer("phase"), // 1-5
@@ -275,14 +276,14 @@ export const tokenAnalyses = pgTable("token_analyses", {
 
   // Component scores (out of their max)
   coordinationScore: numeric("coordination_score", { precision: 5, scale: 2 }), // 0-20
-  schellingRankScore: numeric("schelling_rank_score", { precision: 5, scale: 2 }), // 0-15
+  schellingRankScore: numeric("schelling_rank_score", { precision: 5, scale: 2 }), // 0-10
   schellingPosition: text("schelling_position"),
   reflexivityScore: numeric("reflexivity_score", { precision: 5, scale: 2 }), // 0-15
   viralityScore: numeric("virality_score", { precision: 5, scale: 2 }), // 0-15
-  asymmetryScore: numeric("asymmetry_score", { precision: 5, scale: 2 }), // 0-15
+  asymmetryScore: numeric("asymmetry_score", { precision: 5, scale: 2 }), // 0-25
   asymmetryFloor: text("asymmetry_floor"),
   asymmetryCeiling: text("asymmetry_ceiling"),
-  gameTheoryBonus: numeric("game_theory_bonus", { precision: 5, scale: 2 }), // 0-20
+  gameTheoryBonus: numeric("game_theory_bonus", { precision: 5, scale: 2 }), // 0-15
 
   // Modifiers
   phaseModifier: numeric("phase_modifier", { precision: 5, scale: 2 }),
@@ -290,6 +291,12 @@ export const tokenAnalyses = pgTable("token_analyses", {
   exitLiquidityModifier: numeric("exit_liquidity_modifier", { precision: 5, scale: 2 }),
   peakProximityModifier: numeric("peak_proximity_modifier", { precision: 5, scale: 2 }),
   dataQualityModifier: numeric("data_quality_modifier", { precision: 5, scale: 2 }),
+  marketCapModifier: numeric("market_cap_modifier", { precision: 5, scale: 2 }), // -15 to +5, large caps penalized
+
+  // Market cap scaling
+  marketCapTier: text("market_cap_tier"), // mega, large, mid, small
+  scoreCapped: boolean("score_capped"), // true if score was capped due to market cap
+  uncappedScore: numeric("uncapped_score", { precision: 5, scale: 2 }), // original score before cap
 
   // Game theory analysis
   equilibriumType: text("equilibrium_type"),
@@ -441,6 +448,8 @@ export interface LeaderboardFilters {
   narrative?: string;
   chain?: string;
   search?: string;
+  tokenType?: string;
+  marketCapTier?: string;
 }
 
 // Aggregated leaderboard entry - one per token with average score

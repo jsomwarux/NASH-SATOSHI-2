@@ -19,4 +19,8 @@ export interface AggregatedLeaderboardItem {
   latestRecommendation: string | null; // BUY, HOLD, AVOID
   latestAnalysisId: number;
   latestAnalysisDate: string; // ISO date string from API
+  // Token type and asymmetry
+  tokenType: 'UTILITY' | 'MEMECOIN' | null;
+  asymmetryScore: number | null;
+  marketCapTier: 'mega' | 'large' | 'mid' | 'small' | null;
 }

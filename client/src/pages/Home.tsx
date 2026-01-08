@@ -89,11 +89,11 @@ const benefits = [
 
 const scoringComponents = [
   { label: "COORDINATION", max: 20, desc: "Multi-model consensus signals" },
-  { label: "SCHELLING RANK", max: 15, desc: "Focal point positioning" },
+  { label: "SCHELLING RANK", max: 10, desc: "Focal point positioning" },
   { label: "REFLEXIVITY", max: 15, desc: "Self-reinforcing dynamics" },
   { label: "VIRALITY", max: 15, desc: "Narrative spread momentum" },
-  { label: "ASYMMETRY", max: 15, desc: "Risk/reward profile" },
-  { label: "GAME THEORY", max: 20, desc: "Strategic Nash positioning" },
+  { label: "ASYMMETRY", max: 25, desc: "Risk/reward profile" },
+  { label: "GAME THEORY", max: 15, desc: "Strategic Nash positioning" },
 ];
 
 // Typing animation hook
@@ -527,7 +527,7 @@ export default function Home() {
 
               <div className="space-y-2">
                 {[
-                  { range: "85-100", tier: "S+", color: "amber", label: "STRONG BUY", desc: "Exceptional opportunity" },
+                  { range: "85-100", tier: "S+", color: "purple", label: "STRONG BUY", desc: "Exceptional opportunity" },
                   { range: "70-84", tier: "S", color: "green", label: "BUY", desc: "High conviction" },
                   { range: "55-69", tier: "A", color: "emerald", label: "BUY/HOLD", desc: "Solid fundamentals" },
                   { range: "40-54", tier: "B", color: "yellow", label: "HOLD", desc: "Caution advised" },

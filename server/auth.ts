@@ -61,9 +61,14 @@ export async function requireAuth(
   }
 
   if (!supabase) {
-    // If Supabase is not configured, allow requests through for development
-    // In production, you would want to reject these
-    console.warn("Supabase not configured, allowing request through (dev mode)");
+    // In production, reject if Supabase is not configured
+    if (process.env.NODE_ENV === "production") {
+      console.error("CRITICAL: Supabase not configured in production!");
+      res.status(503).json({ message: "Authentication service unavailable" });
+      return;
+    }
+    // Only allow dev bypass in development mode
+    console.warn("Supabase not configured, allowing request through (dev mode only)");
     req.userId = "dev-user";
     req.userEmail = "dev@example.com";
     next();

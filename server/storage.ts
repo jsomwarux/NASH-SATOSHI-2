@@ -1,4 +1,4 @@
-import { eq, and, desc, sql, gte, lte, ilike, or, count } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lte, ilike, or, count, isNotNull } from "drizzle-orm";
 import { getDb } from "./db";
 import {
   userSubscriptions,
@@ -40,6 +40,7 @@ export interface IStorage {
   createAnalysis(data: InsertTokenAnalysis): Promise<TokenAnalysis>;
   getAnalysis(id: number): Promise<TokenAnalysis | null>;
   getAnalysisByToken(tokenId: string): Promise<TokenAnalysis | null>;
+  getAnalysisByRunId(runId: string): Promise<TokenAnalysis | null>;
   getUserAnalyses(userId: string, limit?: number, offset?: number): Promise<{ items: TokenAnalysis[]; total: number }>;
   updateAnalysis(id: number, data: Partial<InsertTokenAnalysis>): Promise<TokenAnalysis | null>;
   getRunningAnalysesCount(userId: string): Promise<number>;
@@ -57,9 +58,16 @@ export interface IStorage {
       narrative?: string;
       chain?: string;
       search?: string;
+      tokenType?: string;
+      marketCapTier?: string;
     };
   }): Promise<{ items: any[]; total: number }>;
-  getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[] }>;
+  getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[]; tokenTypes: string[]; marketCapTiers: string[] }>;
+  getLeaderboardStats(): Promise<{
+    topToken: { symbol: string; name: string; score: number; daysOnLeaderboard: number } | null;
+    topNarrative: { narrative: string; avgScore: number; tokenCount: number } | null;
+    strongestConviction: { symbol: string; name: string; score: number; consensus: string } | null;
+  }>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -296,6 +304,16 @@ export class PostgresStorage implements IStorage {
     return result[0] || null;
   }
 
+  async getAnalysisByRunId(runId: string): Promise<TokenAnalysis | null> {
+    const db = getDb();
+    const result = await db
+      .select()
+      .from(tokenAnalyses)
+      .where(eq(tokenAnalyses.gumloopRunId, runId))
+      .limit(1);
+    return result[0] || null;
+  }
+
   async getUserAnalyses(userId: string, limit = 20, offset = 0): Promise<{ items: TokenAnalysis[]; total: number }> {
     const db = getDb();
 
@@ -391,6 +409,8 @@ export class PostgresStorage implements IStorage {
       narrative?: string;
       chain?: string;
       search?: string;
+      tokenType?: string;
+      marketCapTier?: string;
     };
   }): Promise<{ items: any[]; total: number }> {
     const db = getDb();
@@ -416,6 +436,12 @@ export class PostgresStorage implements IStorage {
         )!
       );
     }
+    if (filters?.tokenType) {
+      conditions.push(eq(tokenAnalyses.tokenType, filters.tokenType));
+    }
+    if (filters?.marketCapTier) {
+      conditions.push(eq(tokenAnalyses.marketCapTier, filters.marketCapTier));
+    }
 
     // Get aggregated data per token with time-based metrics
     const now = new Date();
@@ -436,6 +462,9 @@ export class PostgresStorage implements IStorage {
         recommendation: tokenAnalyses.recommendation,
         id: tokenAnalyses.id,
         createdAt: tokenAnalyses.createdAt,
+        tokenType: tokenAnalyses.tokenType,
+        asymmetryScore: tokenAnalyses.asymmetryScore,
+        marketCapTier: tokenAnalyses.marketCapTier,
       })
       .from(tokenAnalyses)
       .where(and(...conditions))
@@ -462,6 +491,9 @@ export class PostgresStorage implements IStorage {
       latestAnalysisDate: string;
       scores7d: number[];
       scores30d: number[];
+      tokenType: string | null;
+      asymmetryScore: number | null;
+      marketCapTier: string | null;
     }>();
 
     for (const row of allResults) {
@@ -489,6 +521,9 @@ export class PostgresStorage implements IStorage {
           latestAnalysisDate: row.createdAt.toISOString(),
           scores7d: [],
           scores30d: [],
+          tokenType: row.tokenType,
+          asymmetryScore: row.asymmetryScore ? parseFloat(row.asymmetryScore as string) : null,
+          marketCapTier: row.marketCapTier,
         });
       }
 
@@ -581,20 +616,143 @@ export class PostgresStorage implements IStorage {
     };
   }
 
-  async getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[] }> {
+  async getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[]; tokenTypes: string[]; marketCapTiers: string[] }> {
     const db = getDb();
 
-    const [tiersResult, narrativesResult, chainsResult] = await Promise.all([
+    const [tiersResult, narrativesResult, chainsResult, tokenTypesResult, marketCapTiersResult] = await Promise.all([
       db.selectDistinct({ tier: tokenAnalyses.tier }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
       db.selectDistinct({ narrative: tokenAnalyses.narrative }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
       db.selectDistinct({ chain: tokenAnalyses.chain }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
+      db.selectDistinct({ tokenType: tokenAnalyses.tokenType }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
+      db.selectDistinct({ marketCapTier: tokenAnalyses.marketCapTier }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
     ]);
 
     return {
       tiers: tiersResult.map((r) => r.tier).filter(Boolean) as string[],
       narratives: narrativesResult.map((r) => r.narrative).filter(Boolean) as string[],
       chains: chainsResult.map((r) => r.chain).filter(Boolean) as string[],
+      tokenTypes: tokenTypesResult.map((r) => r.tokenType).filter(Boolean) as string[],
+      marketCapTiers: marketCapTiersResult.map((r) => r.marketCapTier).filter(Boolean) as string[],
     };
+  }
+
+  async getLeaderboardStats(): Promise<{
+    topToken: { symbol: string; name: string; score: number; daysOnLeaderboard: number } | null;
+    topNarrative: { narrative: string; avgScore: number; tokenCount: number } | null;
+    strongestConviction: { symbol: string; name: string; score: number; consensus: string } | null;
+  }> {
+    const db = getDb();
+
+    // Get the top token (highest 7-day average score) and when they first appeared
+    const topTokenQuery = await db
+      .select({
+        tokenSymbol: tokenAnalyses.tokenSymbol,
+        tokenName: tokenAnalyses.tokenName,
+        avgScore: sql<number>`AVG(CAST(${tokenAnalyses.finalScore} AS DECIMAL))`.as('avg_score'),
+        firstAnalysis: sql<Date>`MIN(${tokenAnalyses.createdAt})`.as('first_analysis'),
+      })
+      .from(tokenAnalyses)
+      .where(
+        and(
+          eq(tokenAnalyses.status, 'completed'),
+          gte(tokenAnalyses.createdAt, sql`NOW() - INTERVAL '7 days'`)
+        )
+      )
+      .groupBy(tokenAnalyses.tokenSymbol, tokenAnalyses.tokenName)
+      .orderBy(sql`avg_score DESC`)
+      .limit(1);
+
+    // Get narrative with highest average score (no minimum token count requirement)
+    const topNarrativeQuery = await db
+      .select({
+        narrative: tokenAnalyses.narrative,
+        avgScore: sql<number>`AVG(CAST(${tokenAnalyses.finalScore} AS DECIMAL))`.as('avg_score'),
+        tokenCount: sql<number>`COUNT(DISTINCT ${tokenAnalyses.tokenId})`.as('token_count'),
+      })
+      .from(tokenAnalyses)
+      .where(
+        and(
+          eq(tokenAnalyses.status, 'completed'),
+          isNotNull(tokenAnalyses.narrative),
+          sql`${tokenAnalyses.narrative} != ''`
+        )
+      )
+      .groupBy(tokenAnalyses.narrative)
+      .orderBy(sql`avg_score DESC`)
+      .limit(1);
+
+    // Get token with strongest conviction - prefer STRONG consensus with BUY, fall back to any BUY
+    let strongestConvictionQuery = await db
+      .select({
+        tokenSymbol: tokenAnalyses.tokenSymbol,
+        tokenName: tokenAnalyses.tokenName,
+        finalScore: tokenAnalyses.finalScore,
+        consensusLevel: tokenAnalyses.consensusLevel,
+      })
+      .from(tokenAnalyses)
+      .where(
+        and(
+          eq(tokenAnalyses.status, 'completed'),
+          eq(tokenAnalyses.consensusLevel, 'STRONG'),
+          eq(tokenAnalyses.recommendation, 'BUY')
+        )
+      )
+      .orderBy(sql`CAST(${tokenAnalyses.finalScore} AS DECIMAL) DESC`)
+      .limit(1);
+
+    // Fallback: if no STRONG+BUY, get highest scoring BUY recommendation
+    if (strongestConvictionQuery.length === 0) {
+      strongestConvictionQuery = await db
+        .select({
+          tokenSymbol: tokenAnalyses.tokenSymbol,
+          tokenName: tokenAnalyses.tokenName,
+          finalScore: tokenAnalyses.finalScore,
+          consensusLevel: tokenAnalyses.consensusLevel,
+        })
+        .from(tokenAnalyses)
+        .where(
+          and(
+            eq(tokenAnalyses.status, 'completed'),
+            eq(tokenAnalyses.recommendation, 'BUY')
+          )
+        )
+        .orderBy(sql`CAST(${tokenAnalyses.finalScore} AS DECIMAL) DESC`)
+        .limit(1);
+    }
+
+    // Calculate days on leaderboard for top token
+    let topToken = null;
+    if (topTokenQuery[0]) {
+      const firstAnalysisDate = new Date(topTokenQuery[0].firstAnalysis);
+      const daysOnLeaderboard = Math.floor((Date.now() - firstAnalysisDate.getTime()) / (1000 * 60 * 60 * 24));
+      topToken = {
+        symbol: topTokenQuery[0].tokenSymbol,
+        name: topTokenQuery[0].tokenName,
+        score: parseFloat(String(topTokenQuery[0].avgScore)) || 0,
+        daysOnLeaderboard: Math.max(1, daysOnLeaderboard),
+      };
+    }
+
+    let topNarrative = null;
+    if (topNarrativeQuery[0] && topNarrativeQuery[0].narrative) {
+      topNarrative = {
+        narrative: topNarrativeQuery[0].narrative,
+        avgScore: parseFloat(String(topNarrativeQuery[0].avgScore)) || 0,
+        tokenCount: parseInt(String(topNarrativeQuery[0].tokenCount)) || 0,
+      };
+    }
+
+    let strongestConviction = null;
+    if (strongestConvictionQuery[0]) {
+      strongestConviction = {
+        symbol: strongestConvictionQuery[0].tokenSymbol,
+        name: strongestConvictionQuery[0].tokenName,
+        score: parseFloat(strongestConvictionQuery[0].finalScore as string) || 0,
+        consensus: strongestConvictionQuery[0].consensusLevel || 'STRONG',
+      };
+    }
+
+    return { topToken, topNarrative, strongestConviction };
   }
 }
 
@@ -746,6 +904,13 @@ export class MemStorage implements IStorage {
     return null;
   }
 
+  async getAnalysisByRunId(runId: string): Promise<TokenAnalysis | null> {
+    for (const analysis of Array.from(this.analyses.values())) {
+      if (analysis.gumloopRunId === runId) return analysis;
+    }
+    return null;
+  }
+
   async getUserAnalyses(userId: string, limit = 20, offset = 0): Promise<{ items: TokenAnalysis[]; total: number }> {
     const userAnalyses = Array.from(this.analyses.values())
       .filter((a) => a.userId === userId)
@@ -790,8 +955,16 @@ export class MemStorage implements IStorage {
     return { items: [], total: 0 };
   }
 
-  async getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[] }> {
-    return { tiers: [], narratives: [], chains: [] };
+  async getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[]; tokenTypes: string[]; marketCapTiers: string[] }> {
+    return { tiers: [], narratives: [], chains: [], tokenTypes: [], marketCapTiers: [] };
+  }
+
+  async getLeaderboardStats(): Promise<{
+    topToken: { symbol: string; name: string; score: number; daysOnLeaderboard: number } | null;
+    topNarrative: { narrative: string; avgScore: number; tokenCount: number } | null;
+    strongestConviction: { symbol: string; name: string; score: number; consensus: string } | null;
+  }> {
+    return { topToken: null, topNarrative: null, strongestConviction: null };
   }
 }
 

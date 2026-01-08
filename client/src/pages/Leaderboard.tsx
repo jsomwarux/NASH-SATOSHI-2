@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database } from "lucide-react";
+import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database, Crown, Flame, Target } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { LeaderboardTable } from "@/components/leaderboard/LeaderboardTable";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useLeaderboard, useFilterOptions } from "@/hooks/useLeaderboard";
+import { useLeaderboard, useFilterOptions, useLeaderboardStats } from "@/hooks/useLeaderboard";
 import type { LeaderboardFilters } from "@shared/schema";
 
 type SortField = "score7d" | "score30d" | "runs7d" | "latestAnalysis";
@@ -41,6 +41,7 @@ export default function Leaderboard() {
   });
 
   const { data: filterOptions } = useFilterOptions();
+  const { data: leaderboardStats } = useLeaderboardStats();
 
   const handleSort = (field: SortField) => {
     if (field === sortBy) {
@@ -109,34 +110,82 @@ export default function Leaderboard() {
         </motion.div>
 
         {/* Stats Summary */}
-        {stats && (
+        {(stats || leaderboardStats) && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
             className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8"
           >
+            {/* Total Tokens */}
             <div className="cyber-card p-4 rounded border border-primary/20">
-              <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider">UNIQUE_TOKENS</div>
-              <div className="text-2xl font-bold font-mono text-primary">{stats.totalTokens}</div>
-            </div>
-            <div className="cyber-card p-4 rounded border border-primary/20">
-              <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider">AVG_SCORE</div>
-              <div className="text-2xl font-bold font-mono text-glow-cyan">
-                {stats.avgScore.toFixed(1)}
+              <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider flex items-center gap-1">
+                <Database className="w-3 h-3" />
+                UNIQUE_TOKENS
               </div>
+              <div className="text-2xl font-bold font-mono text-primary">{stats?.totalTokens || 0}</div>
             </div>
+
+            {/* #1 Token Dominance */}
+            <div className="cyber-card p-4 rounded border border-purple-500/20">
+              <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider flex items-center gap-1">
+                <Crown className="w-3 h-3" />
+                TOP_RANKED
+              </div>
+              {leaderboardStats?.topToken ? (
+                <div>
+                  <div className="text-lg font-bold font-mono text-purple-400 truncate">
+                    ${leaderboardStats.topToken.symbol}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground font-mono">
+                    {leaderboardStats.topToken.daysOnLeaderboard}d on board
+                  </div>
+                </div>
+              ) : (
+                <div className="text-lg font-bold font-mono text-muted-foreground">—</div>
+              )}
+            </div>
+
+            {/* Top Narrative */}
+            <div className="cyber-card p-4 rounded border border-orange-500/20">
+              <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider flex items-center gap-1">
+                <Flame className="w-3 h-3" />
+                HOT_NARRATIVE
+              </div>
+              {leaderboardStats?.topNarrative ? (
+                <div>
+                  <div className="text-lg font-bold font-mono text-orange-400 truncate" title={leaderboardStats.topNarrative.narrative}>
+                    {leaderboardStats.topNarrative.narrative.length > 12
+                      ? leaderboardStats.topNarrative.narrative.slice(0, 12) + "…"
+                      : leaderboardStats.topNarrative.narrative}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground font-mono">
+                    avg {leaderboardStats.topNarrative.avgScore.toFixed(1)} • {leaderboardStats.topNarrative.tokenCount} tokens
+                  </div>
+                </div>
+              ) : (
+                <div className="text-lg font-bold font-mono text-muted-foreground">—</div>
+              )}
+            </div>
+
+            {/* Strongest Conviction */}
             <div className="cyber-card p-4 rounded border border-green-500/20">
-              <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider">RUNS_7D</div>
-              <div className="text-2xl font-bold font-mono text-green-400">
-                {stats.totalRuns7d}
+              <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider flex items-center gap-1">
+                <Target className="w-3 h-3" />
+                STRONGEST_BUY
               </div>
-            </div>
-            <div className="cyber-card p-4 rounded border border-amber-500/20">
-              <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider">TOP_AVG_SCORE</div>
-              <div className="text-2xl font-bold font-mono text-amber-400">
-                {stats.topScore.toFixed(1)}
-              </div>
+              {leaderboardStats?.strongestConviction ? (
+                <div>
+                  <div className="text-lg font-bold font-mono text-green-400 truncate">
+                    ${leaderboardStats.strongestConviction.symbol}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground font-mono">
+                    {leaderboardStats.strongestConviction.score.toFixed(1)} • {leaderboardStats.strongestConviction.consensus}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-lg font-bold font-mono text-muted-foreground">—</div>
+              )}
             </div>
           </motion.div>
         )}
@@ -267,6 +316,44 @@ export default function Leaderboard() {
                   </Select>
                 </div>
               )}
+
+              {/* Token Type Filter */}
+              <div className="w-40">
+                <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">TYPE</label>
+                <Select
+                  value={filters.tokenType || "all"}
+                  onValueChange={(value) => setFilters(f => ({ ...f, tokenType: value === "all" ? undefined : value }))}
+                >
+                  <SelectTrigger className="bg-background/50 border-primary/20 font-mono">
+                    <SelectValue placeholder="All types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All types</SelectItem>
+                    <SelectItem value="UTILITY">Utility</SelectItem>
+                    <SelectItem value="MEMECOIN">Memecoin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Market Cap Tier Filter */}
+              <div className="w-40">
+                <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">MARKET_CAP</label>
+                <Select
+                  value={filters.marketCapTier || "all"}
+                  onValueChange={(value) => setFilters(f => ({ ...f, marketCapTier: value === "all" ? undefined : value }))}
+                >
+                  <SelectTrigger className="bg-background/50 border-primary/20 font-mono">
+                    <SelectValue placeholder="All caps" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All caps</SelectItem>
+                    <SelectItem value="mega">Mega (&gt;$5B)</SelectItem>
+                    <SelectItem value="large">Large ($1B-$5B)</SelectItem>
+                    <SelectItem value="mid">Mid ($500M-$1B)</SelectItem>
+                    <SelectItem value="small">Small (&lt;$500M)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </motion.div>
           )}
         </motion.div>
