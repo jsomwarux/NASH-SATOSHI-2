@@ -51,7 +51,49 @@ export async function registerRoutes(
         headers[cgApiType === 'pro' ? 'x-cg-pro-api-key' : 'x-cg-demo-api-key'] = cgApiKey;
       }
 
-      // Add cache-busting timestamp to prevent stale results
+      // Check if query looks like a contract address
+      const isEvmAddress = /^0x[a-fA-F0-9]{40}$/.test(query);
+      const isSolanaAddress = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(query) && !query.startsWith('0x');
+
+      if (isEvmAddress || isSolanaAddress) {
+        // Try to find token by contract address
+        const platformsToTry = isEvmAddress
+          ? ['ethereum', 'base', 'arbitrum-one', 'polygon-pos', 'binance-smart-chain', 'optimistic-ethereum', 'avalanche']
+          : ['solana'];
+
+        for (const platform of platformsToTry) {
+          try {
+            const contractResponse = await fetch(
+              `${cgBaseUrl}/coins/${platform}/contract/${query.toLowerCase()}`,
+              { headers, cache: 'no-store' }
+            );
+
+            if (contractResponse.ok) {
+              const tokenData = await contractResponse.json();
+              const coin = {
+                id: tokenData.id,
+                name: tokenData.name,
+                symbol: tokenData.symbol?.toUpperCase(),
+                thumb: tokenData.image?.thumb,
+                large: tokenData.image?.large,
+                market_cap_rank: tokenData.market_cap_rank,
+              };
+
+              res.set({
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+              });
+              res.json({ coins: [coin], foundByContract: true, platform });
+              return;
+            }
+          } catch {
+            // Continue to next platform
+          }
+        }
+      }
+
+      // Regular search by name/symbol
       const cacheBuster = Date.now();
       const response = await fetch(
         `${cgBaseUrl}/search?query=${encodeURIComponent(query)}&_t=${cacheBuster}`,

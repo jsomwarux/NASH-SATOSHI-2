@@ -18,6 +18,8 @@ export function useUserAnalyses(authToken: string | null, options?: { limit?: nu
     enabled: !!authToken,
     staleTime: 30 * 1000, // Cache for 30 seconds
     refetchOnWindowFocus: true,
+    retry: 3, // Retry up to 3 times on transient failures
+    retryDelay: (attemptIndex) => Math.min(1000 * (attemptIndex + 1), 3000),
   });
 }
 

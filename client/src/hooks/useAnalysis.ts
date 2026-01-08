@@ -47,6 +47,8 @@ export function useAnalysis(analysisId: number | null) {
     enabled: !!analysisId && analysisId > 0,
     staleTime: 0, // Always refetch to get fresh data
     gcTime: 0, // Don't cache completed analyses to avoid stale data
+    retry: 3, // Retry up to 3 times on failure
+    retryDelay: (attemptIndex) => Math.min(1000 * (attemptIndex + 1), 3000), // 1s, 2s, 3s delays
   });
 
   // Check if we need to poll for status updates

@@ -147,7 +147,7 @@ export function TokenSearch({ onSelect, isLoading }: TokenSearchProps) {
           <Input
             ref={inputRef}
             type="text"
-            placeholder="Enter token name or symbol..."
+            placeholder="Enter token name, symbol, or contract address..."
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -271,7 +271,7 @@ export function TokenSearch({ onSelect, isLoading }: TokenSearchProps) {
               </div>
               <div className="text-muted-foreground font-mono text-sm mb-1">NO_RESULTS_FOUND</div>
               <div className="text-xs text-muted-foreground/60 font-mono">
-                Try "Bitcoin", "Ethereum", or any token name
+                Try a token name, symbol, or paste a contract address
               </div>
             </div>
           )}
