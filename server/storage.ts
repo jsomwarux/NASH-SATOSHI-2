@@ -42,6 +42,9 @@ export interface IStorage {
   getAnalysisByToken(tokenId: string): Promise<TokenAnalysis | null>;
   getUserAnalyses(userId: string, limit?: number, offset?: number): Promise<{ items: TokenAnalysis[]; total: number }>;
   updateAnalysis(id: number, data: Partial<InsertTokenAnalysis>): Promise<TokenAnalysis | null>;
+  getRunningAnalysesCount(userId: string): Promise<number>;
+  getTotalRunningAnalyses(): Promise<number>;
+  getStuckAnalyses(maxAgeMinutes?: number): Promise<TokenAnalysis[]>;
 
   // Leaderboard methods
   getLeaderboard(options: {
@@ -326,6 +329,56 @@ export class PostgresStorage implements IStorage {
     return result[0] || null;
   }
 
+  async getRunningAnalysesCount(userId: string): Promise<number> {
+    const db = getDb();
+    const result = await db
+      .select({ count: count() })
+      .from(tokenAnalyses)
+      .where(
+        and(
+          eq(tokenAnalyses.userId, userId),
+          or(
+            eq(tokenAnalyses.status, "pending"),
+            eq(tokenAnalyses.status, "processing")
+          )
+        )
+      );
+    return result[0]?.count || 0;
+  }
+
+  async getTotalRunningAnalyses(): Promise<number> {
+    const db = getDb();
+    const result = await db
+      .select({ count: count() })
+      .from(tokenAnalyses)
+      .where(
+        or(
+          eq(tokenAnalyses.status, "pending"),
+          eq(tokenAnalyses.status, "processing")
+        )
+      );
+    return result[0]?.count || 0;
+  }
+
+  async getStuckAnalyses(maxAgeMinutes: number = 60): Promise<TokenAnalysis[]> {
+    const db = getDb();
+    const cutoffTime = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
+
+    const result = await db
+      .select()
+      .from(tokenAnalyses)
+      .where(
+        and(
+          or(
+            eq(tokenAnalyses.status, "pending"),
+            eq(tokenAnalyses.status, "processing")
+          ),
+          lte(tokenAnalyses.createdAt, cutoffTime)
+        )
+      );
+    return result;
+  }
+
   // ==================== LEADERBOARD METHODS ====================
 
   async getLeaderboard(options: {
@@ -380,6 +433,7 @@ export class PostgresStorage implements IStorage {
         finalScore: tokenAnalyses.finalScore,
         tier: tokenAnalyses.tier,
         narrative: tokenAnalyses.narrative,
+        recommendation: tokenAnalyses.recommendation,
         id: tokenAnalyses.id,
         createdAt: tokenAnalyses.createdAt,
       })
@@ -403,6 +457,7 @@ export class PostgresStorage implements IStorage {
       confidence: 'high' | 'medium' | 'low';
       latestTier: string;
       latestNarrative: string | null;
+      latestRecommendation: string | null;
       latestAnalysisId: number;
       latestAnalysisDate: string;
       scores7d: number[];
@@ -429,6 +484,7 @@ export class PostgresStorage implements IStorage {
           confidence: 'low',
           latestTier: row.tier || 'B',
           latestNarrative: row.narrative,
+          latestRecommendation: row.recommendation,
           latestAnalysisId: row.id,
           latestAnalysisDate: row.createdAt.toISOString(),
           scores7d: [],
@@ -707,6 +763,27 @@ export class MemStorage implements IStorage {
     const updated = { ...existing, ...data, updatedAt: new Date() } as TokenAnalysis;
     this.analyses.set(id, updated);
     return updated;
+  }
+
+  async getRunningAnalysesCount(userId: string): Promise<number> {
+    return Array.from(this.analyses.values())
+      .filter((a) => a.userId === userId && (a.status === "pending" || a.status === "processing"))
+      .length;
+  }
+
+  async getTotalRunningAnalyses(): Promise<number> {
+    return Array.from(this.analyses.values())
+      .filter((a) => a.status === "pending" || a.status === "processing")
+      .length;
+  }
+
+  async getStuckAnalyses(maxAgeMinutes: number = 60): Promise<TokenAnalysis[]> {
+    const cutoffTime = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
+    return Array.from(this.analyses.values())
+      .filter((a) =>
+        (a.status === "pending" || a.status === "processing") &&
+        a.createdAt <= cutoffTime
+      );
   }
 
   async getLeaderboard(_options: any): Promise<{ items: any[]; total: number }> {

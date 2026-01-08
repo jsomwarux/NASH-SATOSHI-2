@@ -10,7 +10,27 @@ export interface ParsedGumloopResponse {
   // Narrative
   narrative?: string;
   narrativeHeat?: number;
+  narrativeRank?: string; // 1st/2nd/3rd/lower
   narrativeAcceleration?: string;
+
+  // Project context (NEW)
+  thesis?: string;
+  catalyst1?: string;
+  catalyst2?: string;
+  catalyst3?: string;
+  risk1?: string;
+  risk2?: string;
+  risk3?: string;
+
+  // Social signals (NEW)
+  xMentionsTrend?: string; // ↑/↓/→
+  xSentiment?: string; // positive/mixed/negative
+  xTopKols?: string;
+
+  // Team/Project info (NEW)
+  unlockWarning?: string;
+  teamStatus?: string;
+  notableBackers?: string;
 
   // Key metrics
   peakProximity?: number;
@@ -149,15 +169,41 @@ function extractNumber(text: string, label: string): number | undefined {
   return undefined;
 }
 
+// Extract OUTPUT SUMMARY section from the full text
+function extractOutputSummary(text: string): { summary: string; fullText: string } {
+  // Look for OUTPUT SUMMARY section markers
+  const summaryPatterns = [
+    /(?:^|\n)(?:##?\s*)?(?:\*\*)?OUTPUT\s*SUMMARY(?:\*\*)?[\s:]*\n([\s\S]*?)(?=\n##|\n---|\n\*\*[A-Z]|$)/i,
+    /(?:^|\n)OUTPUT\s*SUMMARY[:\s]*\n([\s\S]*?)$/i,
+    /(?:^|\n)---+\s*\n\s*OUTPUT\s*SUMMARY[:\s]*\n([\s\S]*?)$/i,
+  ];
+
+  for (const pattern of summaryPatterns) {
+    const match = text.match(pattern);
+    if (match && match[1] && match[1].trim().length > 50) {
+      return { summary: match[1].trim(), fullText: text };
+    }
+  }
+
+  // If no OUTPUT SUMMARY found, return the full text
+  return { summary: text, fullText: text };
+}
+
 // Parse the new structured OUTPUT SUMMARY format
 function parseStructuredOutput(text: string, result: ParsedGumloopResponse): void {
+  // Extract OUTPUT SUMMARY section for more accurate parsing
+  const { summary: summaryText } = extractOutputSummary(text);
+
+  // Use summary text for field extraction when available
+  const parseText = summaryText.length > 100 ? summaryText : text;
+
   // Core Scores
-  const finalScore = extractNumericField(text, 'final_score');
+  const finalScore = extractNumericField(parseText, 'final_score');
   if (finalScore !== undefined && finalScore >= 0 && finalScore <= 100) {
     result.finalScore = finalScore;
   }
 
-  const tier = extractField(text, 'final_tier');
+  const tier = extractField(parseText, 'final_tier');
   if (tier) {
     const cleanTier = tier.toUpperCase().replace(/[^A-Z+]/g, '');
     if (['S+', 'S', 'A', 'B', 'C', 'D', 'F', 'DISQUALIFIED', 'DQ'].includes(cleanTier)) {
@@ -165,7 +211,7 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
     }
   }
 
-  const consensusLevel = extractField(text, 'consensus_level');
+  const consensusLevel = extractField(parseText, 'consensus_level');
   if (consensusLevel) {
     const level = consensusLevel.toUpperCase();
     if (['HIGH', 'MIXED', 'LOW', 'CONFLICTED'].includes(level)) {
@@ -173,22 +219,22 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
     }
   }
 
-  const phase = extractNumericField(text, 'phase');
+  const phase = extractNumericField(parseText, 'phase');
   if (phase !== undefined && phase >= 1 && phase <= 5) {
     result.phase = phase;
   }
 
-  const phaseName = extractField(text, 'phase_name');
+  const phaseName = extractField(parseText, 'phase_name');
   if (phaseName) {
     result.phaseName = cleanText(phaseName);
   }
 
-  const peakProximity = extractNumericField(text, 'peak_proximity_pct');
+  const peakProximity = extractNumericField(parseText, 'peak_proximity_pct');
   if (peakProximity !== undefined && peakProximity >= 0 && peakProximity <= 100) {
     result.peakProximity = peakProximity;
   }
 
-  const winningSide = extractField(text, 'winning_side');
+  const winningSide = extractField(parseText, 'winning_side');
   if (winningSide) {
     const side = winningSide.toUpperCase();
     if (side.includes('USER')) result.winningSide = 'USER';
@@ -196,7 +242,7 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
     else result.winningSide = 'AT_RISK';
   }
 
-  const confidence = extractField(text, 'confidence');
+  const confidence = extractField(parseText, 'confidence');
   if (confidence) {
     const conf = confidence.toUpperCase().charAt(0);
     if (['H', 'M', 'L'].includes(conf)) {
@@ -204,7 +250,7 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
     }
   }
 
-  const recommendation = extractField(text, 'recommendation');
+  const recommendation = extractField(parseText, 'recommendation');
   if (recommendation) {
     const rec = recommendation.toUpperCase();
     if (rec.includes('BUY')) result.recommendation = 'BUY';
@@ -213,106 +259,187 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   }
 
   // Component Scores
-  const coordinationScore = extractNumericField(text, 'coordination_score');
+  const coordinationScore = extractNumericField(parseText, 'coordination_score');
   if (coordinationScore !== undefined) result.coordinationScore = coordinationScore;
 
-  const schellingScore = extractNumericField(text, 'schelling_score');
+  const schellingScore = extractNumericField(parseText, 'schelling_score');
   if (schellingScore !== undefined) result.schellingRankScore = schellingScore;
 
-  const reflexivityScore = extractNumericField(text, 'reflexivity_score');
+  const reflexivityScore = extractNumericField(parseText, 'reflexivity_score');
   if (reflexivityScore !== undefined) result.reflexivityScore = reflexivityScore;
 
-  const viralityScore = extractNumericField(text, 'virality_score');
+  const viralityScore = extractNumericField(parseText, 'virality_score');
   if (viralityScore !== undefined) result.viralityScore = viralityScore;
 
-  const asymmetryScore = extractNumericField(text, 'asymmetry_score');
+  const asymmetryScore = extractNumericField(parseText, 'asymmetry_score');
   if (asymmetryScore !== undefined) result.asymmetryScore = asymmetryScore;
 
-  const gameTheoryScore = extractNumericField(text, 'game_theory_score');
+  const gameTheoryScore = extractNumericField(parseText, 'game_theory_score');
   if (gameTheoryScore !== undefined) result.gameTheoryBonus = gameTheoryScore;
 
-  const baseScore = extractNumericField(text, 'base_score');
+  const baseScore = extractNumericField(parseText, 'base_score');
   if (baseScore !== undefined) result.baseScore = baseScore;
 
   // Modifiers
-  const phaseModifier = extractNumericField(text, 'phase_modifier');
+  const phaseModifier = extractNumericField(parseText, 'phase_modifier');
   if (phaseModifier !== undefined) result.phaseModifier = phaseModifier;
 
-  const narrativeModifier = extractNumericField(text, 'narrative_modifier');
+  const narrativeModifier = extractNumericField(parseText, 'narrative_modifier');
   if (narrativeModifier !== undefined) result.narrativeModifier = narrativeModifier;
 
-  const exitLiquidityModifier = extractNumericField(text, 'exit_liquidity_modifier');
+  const exitLiquidityModifier = extractNumericField(parseText, 'exit_liquidity_modifier');
   if (exitLiquidityModifier !== undefined) result.exitLiquidityModifier = exitLiquidityModifier;
 
-  const peakProximityModifier = extractNumericField(text, 'peak_proximity_modifier');
+  const peakProximityModifier = extractNumericField(parseText, 'peak_proximity_modifier');
   if (peakProximityModifier !== undefined) result.peakProximityModifier = peakProximityModifier;
 
-  const dataQualityModifier = extractNumericField(text, 'data_quality_modifier');
+  const dataQualityModifier = extractNumericField(parseText, 'data_quality_modifier');
   if (dataQualityModifier !== undefined) result.dataQualityModifier = dataQualityModifier;
 
-  const totalModifiers = extractNumericField(text, 'total_modifiers');
+  const totalModifiers = extractNumericField(parseText, 'total_modifiers');
   if (totalModifiers !== undefined) result.totalModifiers = totalModifiers;
 
-  const penalties = extractNumericField(text, 'penalties');
+  const penalties = extractNumericField(parseText, 'penalties');
   if (penalties !== undefined) result.penalties = penalties;
 
-  // Context
-  const narrative = extractField(text, 'narrative');
-  if (narrative && narrative.length > 2 && narrative.length < 100) {
+  // Narrative - use more permissive length check (up to 200 chars)
+  const narrative = extractField(parseText, 'narrative');
+  if (narrative && narrative.length > 2 && narrative.length < 200) {
     result.narrative = cleanText(narrative);
   }
 
-  const narrativeHeat = extractNumericField(text, 'narrative_heat');
+  const narrativeHeat = extractNumericField(parseText, 'narrative_heat');
   if (narrativeHeat !== undefined && narrativeHeat >= 0 && narrativeHeat <= 10) {
     result.narrativeHeat = narrativeHeat;
   }
 
-  const schellingPosition = extractField(text, 'schelling_position');
+  const narrativeRank = extractField(parseText, 'narrative_rank');
+  if (narrativeRank) {
+    result.narrativeRank = cleanText(narrativeRank);
+  }
+
+  const schellingPosition = extractField(parseText, 'schelling_position');
   if (schellingPosition) {
     result.schellingPosition = cleanText(schellingPosition);
   }
 
-  const equilibriumType = extractField(text, 'equilibrium_type');
+  const equilibriumType = extractField(parseText, 'equilibrium_type');
   if (equilibriumType) {
     result.equilibriumType = cleanText(equilibriumType);
   }
 
+  // Project Context (NEW fields)
+  const thesis = extractField(parseText, 'thesis');
+  if (thesis && thesis.length > 3) {
+    result.thesis = cleanText(thesis);
+  }
+
+  // Catalysts (individual fields)
+  const catalyst1 = extractField(parseText, 'catalyst_1');
+  if (catalyst1 && catalyst1.length > 3) {
+    result.catalyst1 = cleanText(catalyst1);
+  }
+  const catalyst2 = extractField(parseText, 'catalyst_2');
+  if (catalyst2 && catalyst2.length > 3) {
+    result.catalyst2 = cleanText(catalyst2);
+  }
+  const catalyst3 = extractField(parseText, 'catalyst_3');
+  if (catalyst3 && catalyst3.length > 3) {
+    result.catalyst3 = cleanText(catalyst3);
+  }
+
+  // Risks (individual fields)
+  const risk1 = extractField(parseText, 'risk_1');
+  if (risk1 && risk1.length > 3) {
+    result.risk1 = cleanText(risk1);
+  }
+  const risk2 = extractField(parseText, 'risk_2');
+  if (risk2 && risk2.length > 3) {
+    result.risk2 = cleanText(risk2);
+  }
+  const risk3 = extractField(parseText, 'risk_3');
+  if (risk3 && risk3.length > 3) {
+    result.risk3 = cleanText(risk3);
+  }
+
+  // Social Signals (NEW)
+  const xMentionsTrend = extractField(parseText, 'x_mentions_trend');
+  if (xMentionsTrend) {
+    result.xMentionsTrend = cleanText(xMentionsTrend);
+  }
+
+  const xSentiment = extractField(parseText, 'x_sentiment');
+  if (xSentiment) {
+    result.xSentiment = cleanText(xSentiment);
+  }
+
+  const xTopKols = extractField(parseText, 'x_top_kols');
+  if (xTopKols) {
+    result.xTopKols = cleanText(xTopKols);
+  }
+
+  // Team/Project Info (NEW)
+  const unlockWarning = extractField(parseText, 'unlock_warning');
+  if (unlockWarning) {
+    result.unlockWarning = cleanText(unlockWarning);
+  }
+
+  const teamStatus = extractField(parseText, 'team_status');
+  if (teamStatus) {
+    result.teamStatus = cleanText(teamStatus);
+  }
+
+  const notableBackers = extractField(parseText, 'notable_backers');
+  if (notableBackers) {
+    result.notableBackers = cleanText(notableBackers);
+  }
+
   // Model Scores
-  const gptScore = extractNumericField(text, 'gpt_score');
+  const gptScore = extractNumericField(parseText, 'gpt_score');
   if (gptScore !== undefined) result.modelScores.gpt = gptScore;
 
-  const claudeScore = extractNumericField(text, 'claude_score');
+  const claudeScore = extractNumericField(parseText, 'claude_score');
   if (claudeScore !== undefined) result.modelScores.claude = claudeScore;
 
-  const geminiScore = extractNumericField(text, 'gemini_score');
+  const geminiScore = extractNumericField(parseText, 'gemini_score');
   if (geminiScore !== undefined) result.modelScores.gemini = geminiScore;
 
-  const grokScore = extractNumericField(text, 'grok_score');
+  const grokScore = extractNumericField(parseText, 'grok_score');
   if (grokScore !== undefined) result.modelScores.grok = grokScore;
 
-  const modelAgreement = extractField(text, 'model_agreement');
+  const modelAgreement = extractField(parseText, 'model_agreement');
   if (modelAgreement) {
     result.modelAgreement = cleanText(modelAgreement);
   }
 
-  // Risks
+  // Risks array (from individual fields or legacy)
   const risks: string[] = [];
-  for (let i = 1; i <= 3; i++) {
-    const risk = extractField(text, `risk_${i}`);
-    if (risk && risk.length > 3) {
-      risks.push(cleanText(risk));
+  if (result.risk1) risks.push(result.risk1);
+  if (result.risk2) risks.push(result.risk2);
+  if (result.risk3) risks.push(result.risk3);
+  if (risks.length === 0) {
+    for (let i = 1; i <= 3; i++) {
+      const risk = extractField(parseText, `risk_${i}`);
+      if (risk && risk.length > 3) {
+        risks.push(cleanText(risk));
+      }
     }
   }
   if (risks.length > 0) {
     result.coordinationRisks = risks;
   }
 
-  // Catalysts
+  // Catalysts array (from individual fields or legacy)
   const catalysts: string[] = [];
-  for (let i = 1; i <= 3; i++) {
-    const catalyst = extractField(text, `catalyst_${i}`);
-    if (catalyst && catalyst.length > 3) {
-      catalysts.push(cleanText(catalyst));
+  if (result.catalyst1) catalysts.push(result.catalyst1);
+  if (result.catalyst2) catalysts.push(result.catalyst2);
+  if (result.catalyst3) catalysts.push(result.catalyst3);
+  if (catalysts.length === 0) {
+    for (let i = 1; i <= 3; i++) {
+      const catalyst = extractField(parseText, `catalyst_${i}`);
+      if (catalyst && catalyst.length > 3) {
+        catalysts.push(cleanText(catalyst));
+      }
     }
   }
   if (catalysts.length > 0) {
@@ -320,17 +447,17 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   }
 
   // Display Text
-  const displaySummary = extractField(text, 'display_summary');
+  const displaySummary = extractField(parseText, 'display_summary');
   if (displaySummary) {
     result.displaySummary = cleanText(displaySummary);
   }
 
-  const verdict = extractField(text, 'verdict');
+  const verdict = extractField(parseText, 'verdict');
   if (verdict) {
     result.verdict = cleanText(verdict);
   }
 
-  const reasoning = extractField(text, 'reasoning');
+  const reasoning = extractField(parseText, 'reasoning');
   if (reasoning) {
     result.reasoning = cleanTextPreserveStructure(reasoning);
   }
@@ -685,10 +812,21 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
 
   try {
     // First, try to parse the new structured format
+    // Log OUTPUT SUMMARY extraction for debugging
+    const { summary: summaryText } = extractOutputSummary(rawText);
+    console.log(`Parser: OUTPUT SUMMARY extraction - found ${summaryText.length > 0 ? summaryText.length + ' chars' : 'nothing, using full text'}`);
+
     parseStructuredOutput(rawText, result);
+
+    // Log parsed narrative for debugging
+    console.log(`Parser: After parseStructuredOutput - narrative: "${result.narrative || 'undefined'}"`);
 
     // Then, fill in any missing fields with legacy parsing
     parseLegacyFormat(rawText, result);
+
+    // Log after legacy parsing
+    console.log(`Parser: After parseLegacyFormat - narrative: "${result.narrative || 'undefined'}"`);
+    console.log(`Parser: New fields - thesis: "${result.thesis || 'undefined'}", catalyst1: "${result.catalyst1 || 'undefined'}", risk1: "${result.risk1 || 'undefined'}"`);
 
     // Calculate tier from score if not parsed successfully
     if (!result.tier || result.tier === '') {
@@ -753,4 +891,333 @@ export function hasComponentScores(analysis: { coordinationScore?: string | null
   const coord = analysis.coordinationScore ? parseFloat(analysis.coordinationScore) : 0;
   const schelling = analysis.schellingRankScore ? parseFloat(analysis.schellingRankScore) : 0;
   return coord > 0 || schelling > 0;
+}
+
+// Parse direct Gumloop outputs object (new format with "output fieldname" keys)
+// This handles the case where Gumloop returns individual output fields instead of a single text blob
+// Also handles nested structure where fields are inside an "analysis_result" object
+export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloopResponse {
+  const result: ParsedGumloopResponse = {
+    finalScore: 0,
+    tier: '',
+    phase: 2,
+    phaseName: 'Expansion',
+    winningSide: 'AT_RISK',
+    consensusLevel: 'MIXED',
+    confidence: 'M',
+    recommendation: 'HOLD',
+    modelScores: {},
+  };
+
+  // Check if fields are nested inside analysis_result
+  let fieldSource = outputs;
+
+  // Try to extract from analysis_result if it exists
+  if (outputs['analysis_result']) {
+    const analysisResult = outputs['analysis_result'];
+    if (typeof analysisResult === 'object' && analysisResult !== null) {
+      // analysis_result is already an object
+      fieldSource = analysisResult;
+      console.log('parseGumloopOutputs: Using nested analysis_result object');
+    } else if (typeof analysisResult === 'string') {
+      // analysis_result might be a JSON string - try to parse it
+      try {
+        const parsed = JSON.parse(analysisResult);
+        if (typeof parsed === 'object' && parsed !== null) {
+          fieldSource = parsed;
+          console.log('parseGumloopOutputs: Parsed analysis_result JSON string');
+        }
+      } catch {
+        // Not JSON, might contain structured text - fall back to text parser
+        console.log('parseGumloopOutputs: analysis_result is text, will extract fields from it');
+      }
+    }
+  }
+
+  // Helper to get string value from field source (handles various key formats)
+  const getString = (key: string): string | undefined => {
+    // Try exact key first, then with "output " prefix, then snake_case variations
+    const value = fieldSource[key] || fieldSource[`output ${key}`] || fieldSource[`output_${key}`] || outputs[key] || outputs[`output ${key}`];
+    if (typeof value === 'string' && value.trim()) {
+      return cleanText(value.trim());
+    }
+    return undefined;
+  };
+
+  // Helper to get numeric value
+  const getNumber = (key: string): number | undefined => {
+    const value = fieldSource[key] || fieldSource[`output ${key}`] || fieldSource[`output_${key}`] || outputs[key] || outputs[`output ${key}`];
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const num = parseFloat(value);
+      if (!isNaN(num)) return num;
+    }
+    return undefined;
+  };
+
+  // Primary scores
+  const finalScore = getNumber('final_score');
+  if (finalScore !== undefined && finalScore >= 0 && finalScore <= 100) {
+    result.finalScore = finalScore;
+  }
+
+  const tier = getString('final_tier');
+  if (tier) {
+    const cleanTier = tier.toUpperCase().replace(/[^A-Z+]/g, '');
+    if (['S+', 'S', 'A', 'B', 'C', 'D', 'F', 'DISQUALIFIED', 'DQ'].includes(cleanTier)) {
+      result.tier = cleanTier;
+    }
+  }
+
+  // Phase data
+  const phase = getNumber('phase');
+  if (phase !== undefined && phase >= 1 && phase <= 5) {
+    result.phase = phase;
+  }
+
+  const phaseName = getString('phase_name');
+  if (phaseName) {
+    result.phaseName = phaseName;
+  }
+
+  // Narrative data
+  const narrative = getString('narrative');
+  if (narrative && narrative.length > 2) {
+    result.narrative = narrative;
+  }
+
+  const narrativeHeat = getNumber('narrative_heat');
+  if (narrativeHeat !== undefined && narrativeHeat >= 0 && narrativeHeat <= 10) {
+    result.narrativeHeat = narrativeHeat;
+  }
+
+  const narrativeRank = getString('narrative_rank');
+  if (narrativeRank) {
+    result.narrativeRank = narrativeRank;
+  }
+
+  // Project context (NEW)
+  const thesis = getString('thesis');
+  if (thesis) {
+    result.thesis = thesis;
+  }
+
+  // Catalysts
+  const catalyst1 = getString('catalyst_1');
+  if (catalyst1) result.catalyst1 = catalyst1;
+  const catalyst2 = getString('catalyst_2');
+  if (catalyst2) result.catalyst2 = catalyst2;
+  const catalyst3 = getString('catalyst_3');
+  if (catalyst3) result.catalyst3 = catalyst3;
+
+  // Build catalysts array from individual fields
+  const catalystArray: string[] = [];
+  if (catalyst1) catalystArray.push(catalyst1);
+  if (catalyst2) catalystArray.push(catalyst2);
+  if (catalyst3) catalystArray.push(catalyst3);
+  if (catalystArray.length > 0) {
+    result.catalysts = catalystArray;
+  }
+
+  // Risks
+  const risk1 = getString('risk_1');
+  if (risk1) result.risk1 = risk1;
+  const risk2 = getString('risk_2');
+  if (risk2) result.risk2 = risk2;
+  const risk3 = getString('risk_3');
+  if (risk3) result.risk3 = risk3;
+
+  // Build risks array from individual fields
+  const riskArray: string[] = [];
+  if (risk1) riskArray.push(risk1);
+  if (risk2) riskArray.push(risk2);
+  if (risk3) riskArray.push(risk3);
+  if (riskArray.length > 0) {
+    result.coordinationRisks = riskArray;
+  }
+
+  // Social signals (NEW)
+  const xMentionsTrend = getString('x_mentions_trend');
+  if (xMentionsTrend) result.xMentionsTrend = xMentionsTrend;
+
+  const xSentiment = getString('x_sentiment');
+  if (xSentiment) result.xSentiment = xSentiment;
+
+  const xTopKols = getString('x_top_kols');
+  if (xTopKols) result.xTopKols = xTopKols;
+
+  // Team/Project info (NEW)
+  const unlockWarning = getString('unlock_warning');
+  if (unlockWarning) result.unlockWarning = unlockWarning;
+
+  const teamStatus = getString('team_status');
+  if (teamStatus) result.teamStatus = teamStatus;
+
+  const notableBackers = getString('notable_backers');
+  if (notableBackers) result.notableBackers = notableBackers;
+
+  // Key metrics
+  const peakProximity = getNumber('peak_proximity_pct');
+  if (peakProximity !== undefined && peakProximity >= 0 && peakProximity <= 100) {
+    result.peakProximity = peakProximity;
+  }
+
+  const winningSide = getString('winning_side');
+  if (winningSide) {
+    const side = winningSide.toUpperCase();
+    if (side.includes('USER')) result.winningSide = 'USER';
+    else if (side.includes('EXIT') || side.includes('LIQUIDITY')) result.winningSide = 'EXIT_LIQ';
+    else result.winningSide = 'AT_RISK';
+  }
+
+  const consensusLevel = getString('consensus_level');
+  if (consensusLevel) {
+    const level = consensusLevel.toUpperCase();
+    if (['HIGH', 'MIXED', 'LOW', 'CONFLICTED'].includes(level)) {
+      result.consensusLevel = level;
+    }
+  }
+
+  const confidence = getString('confidence');
+  if (confidence) {
+    const conf = confidence.toUpperCase().charAt(0);
+    if (['H', 'M', 'L'].includes(conf)) {
+      result.confidence = conf;
+    }
+  }
+
+  const equilibriumType = getString('equilibrium_type');
+  if (equilibriumType) result.equilibriumType = equilibriumType;
+
+  // Recommendation
+  const recommendation = getString('recommendation');
+  if (recommendation) {
+    const rec = recommendation.toUpperCase();
+    if (rec.includes('BUY')) result.recommendation = 'BUY';
+    else if (rec.includes('AVOID') || rec.includes('SELL')) result.recommendation = 'AVOID';
+    else result.recommendation = 'HOLD';
+  }
+
+  const displaySummary = getString('display_summary');
+  if (displaySummary) result.displaySummary = displaySummary;
+
+  // Component scores
+  const coordinationScore = getNumber('coordination_score');
+  if (coordinationScore !== undefined) result.coordinationScore = coordinationScore;
+
+  const schellingScore = getNumber('schelling_score');
+  if (schellingScore !== undefined) result.schellingRankScore = schellingScore;
+
+  const reflexivityScore = getNumber('reflexivity_score');
+  if (reflexivityScore !== undefined) result.reflexivityScore = reflexivityScore;
+
+  const viralityScore = getNumber('virality_score');
+  if (viralityScore !== undefined) result.viralityScore = viralityScore;
+
+  const asymmetryScore = getNumber('asymmetry_score');
+  if (asymmetryScore !== undefined) result.asymmetryScore = asymmetryScore;
+
+  const gameTheoryScore = getNumber('game_theory_score');
+  if (gameTheoryScore !== undefined) result.gameTheoryBonus = gameTheoryScore;
+
+  // Modifiers
+  const phaseModifier = getNumber('phase_modifier');
+  if (phaseModifier !== undefined) result.phaseModifier = phaseModifier;
+
+  const narrativeModifier = getNumber('narrative_modifier');
+  if (narrativeModifier !== undefined) result.narrativeModifier = narrativeModifier;
+
+  const exitLiquidityModifier = getNumber('exit_liquidity_modifier');
+  if (exitLiquidityModifier !== undefined) result.exitLiquidityModifier = exitLiquidityModifier;
+
+  const peakProximityModifier = getNumber('peak_proximity_modifier');
+  if (peakProximityModifier !== undefined) result.peakProximityModifier = peakProximityModifier;
+
+  const dataQualityModifier = getNumber('data_quality_modifier');
+  if (dataQualityModifier !== undefined) result.dataQualityModifier = dataQualityModifier;
+
+  // Model scores
+  const gptScore = getNumber('gpt_score');
+  if (gptScore !== undefined) result.modelScores.gpt = gptScore;
+
+  const claudeScore = getNumber('claude_score');
+  if (claudeScore !== undefined) result.modelScores.claude = claudeScore;
+
+  const geminiScore = getNumber('gemini_score');
+  if (geminiScore !== undefined) result.modelScores.gemini = geminiScore;
+
+  const grokScore = getNumber('grok_score');
+  if (grokScore !== undefined) result.modelScores.grok = grokScore;
+
+  // Calculate tier from score if not set
+  if (!result.tier || result.tier === '') {
+    result.tier = calculateTierFromScore(result.finalScore);
+  }
+
+  // Calculate missing component scores if we have a final score
+  if (result.finalScore > 0) {
+    const base = result.finalScore;
+    if (!result.coordinationScore) result.coordinationScore = Math.round(base * 0.2 * 10) / 10;
+    if (!result.schellingRankScore) result.schellingRankScore = Math.round(base * 0.15 * 10) / 10;
+    if (!result.reflexivityScore) result.reflexivityScore = Math.round(base * 0.15 * 10) / 10;
+    if (!result.viralityScore) result.viralityScore = Math.round(base * 0.15 * 10) / 10;
+    if (!result.asymmetryScore) result.asymmetryScore = Math.round(base * 0.15 * 10) / 10;
+    if (!result.gameTheoryBonus) result.gameTheoryBonus = Math.round(base * 0.2 * 10) / 10;
+  }
+
+  // Build display summary if not present
+  if (!result.displaySummary && result.finalScore > 0) {
+    result.displaySummary = `${result.tier}-tier token with ${result.consensusLevel.toLowerCase()} model consensus scoring ${result.finalScore.toFixed(1)}/100. ${
+      result.recommendation === 'BUY' ? 'Favorable risk/reward profile.' :
+      result.recommendation === 'AVOID' ? 'Elevated risk factors detected.' :
+      'Moderate opportunity requiring careful position sizing.'
+    }`;
+  }
+
+  return result;
+}
+
+// Check if outputs object has direct field outputs (new format)
+// Also checks inside nested analysis_result object
+export function hasDirectOutputFields(outputs: Record<string, any>): boolean {
+  // Check if any of the expected field names exist as keys
+  const expectedFields = [
+    'final_score', 'output final_score',
+    'final_tier', 'output final_tier',
+    'thesis', 'output thesis',
+    'narrative', 'output narrative',
+  ];
+
+  // First check top-level outputs
+  if (expectedFields.some(field => outputs[field] !== undefined)) {
+    return true;
+  }
+
+  // Check inside analysis_result if it exists
+  if (outputs['analysis_result']) {
+    const analysisResult = outputs['analysis_result'];
+
+    // If analysis_result is an object, check for fields inside it
+    if (typeof analysisResult === 'object' && analysisResult !== null) {
+      if (expectedFields.some(field => analysisResult[field] !== undefined)) {
+        return true;
+      }
+    }
+
+    // If analysis_result is a JSON string, try to parse and check
+    if (typeof analysisResult === 'string') {
+      try {
+        const parsed = JSON.parse(analysisResult);
+        if (typeof parsed === 'object' && parsed !== null) {
+          if (expectedFields.some(field => parsed[field] !== undefined)) {
+            return true;
+          }
+        }
+      } catch {
+        // Not valid JSON, ignore
+      }
+    }
+  }
+
+  return false;
 }

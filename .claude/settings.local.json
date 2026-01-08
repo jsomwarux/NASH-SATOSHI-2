@@ -31,7 +31,12 @@
       "Bash(do curl -s http://localhost:5000/api/status)",
       "Bash(break)",
       "Bash(done)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(ls:*)",
+      "Bash(node:*)",
+      "Bash(yes:*)",
+      "Bash(psql:*)",
+      "Bash(timeout 20 npm run dev:*)"
     ]
   }
 }

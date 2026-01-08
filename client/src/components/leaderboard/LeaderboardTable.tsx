@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { ArrowUpDown, ExternalLink, Clock, BarChart3, Terminal, Shield, ShieldCheck, ShieldAlert } from "lucide-react";
+import { ArrowUpDown, ExternalLink, Clock, BarChart3, Terminal, Shield, ShieldCheck, ShieldAlert, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -100,6 +100,17 @@ function getConfidenceInfo(confidence: 'high' | 'medium' | 'low') {
   }
 }
 
+function getRecommendationInfo(rec: string | null) {
+  const recommendation = rec?.toUpperCase() || 'HOLD';
+  if (recommendation.includes('BUY')) {
+    return { icon: TrendingUp, color: 'text-green-400', bg: 'bg-green-500/10', label: 'BUY' };
+  }
+  if (recommendation.includes('AVOID') || recommendation.includes('SELL')) {
+    return { icon: TrendingDown, color: 'text-red-400', bg: 'bg-red-500/10', label: 'AVOID' };
+  }
+  return { icon: Minus, color: 'text-yellow-400', bg: 'bg-yellow-500/10', label: 'HOLD' };
+}
+
 export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTableProps) {
   const SortButton = ({ field, children }: { field: typeof sortBy; children: React.ReactNode }) => (
     <Button
@@ -135,6 +146,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
               <SortButton field="score30d">30D_SCORE</SortButton>
             </TableHead>
             <TableHead className="text-center font-mono text-[10px] tracking-wider">TIER</TableHead>
+            <TableHead className="text-center hidden sm:table-cell font-mono text-[10px] tracking-wider">SIGNAL</TableHead>
             <TableHead className="text-center hidden md:table-cell font-mono text-[10px] tracking-wider">
               <SortButton field="runs7d">RUNS</SortButton>
             </TableHead>
@@ -219,6 +231,25 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
                   <Badge variant="outline" className={`${getTierBadgeStyle(item.latestTier)} font-mono font-bold`}>
                     {item.latestTier}
                   </Badge>
+                </TableCell>
+                <TableCell className="text-center hidden sm:table-cell">
+                  {(() => {
+                    const recInfo = getRecommendationInfo(item.latestRecommendation);
+                    const RecIcon = recInfo.icon;
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded ${recInfo.bg} cursor-help`}>
+                            <RecIcon className={`w-3 h-3 ${recInfo.color}`} />
+                            <span className={`text-[10px] font-mono font-bold ${recInfo.color}`}>{recInfo.label}</span>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="cyber-card border-primary/20">
+                          <p className="text-sm font-mono">Latest analysis recommendation</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })()}
                 </TableCell>
                 <TableCell className="text-center hidden md:table-cell">
                   <Tooltip>

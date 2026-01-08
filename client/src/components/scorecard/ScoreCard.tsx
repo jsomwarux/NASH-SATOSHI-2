@@ -19,6 +19,15 @@ import {
   Zap,
   Users,
   TrendingUpIcon,
+  Lightbulb,
+  MessageCircle,
+  Twitter,
+  Unlock,
+  Building,
+  Award,
+  ArrowUp,
+  ArrowDown,
+  Minus,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -146,10 +155,34 @@ function formatDate(date: Date | string): string {
   });
 }
 
+// Extract OUTPUT SUMMARY section from the full response text
+function extractOutputSummary(text: string): string {
+  // Look for OUTPUT SUMMARY section markers
+  const summaryPatterns = [
+    /(?:^|\n)(?:##?\s*)?(?:\*\*)?OUTPUT\s*SUMMARY(?:\*\*)?[\s:]*\n([\s\S]*?)(?=\n##|\n---|\n\*\*[A-Z]|$)/i,
+    /(?:^|\n)OUTPUT\s*SUMMARY[:\s]*\n([\s\S]*?)$/i,
+    /(?:^|\n)---+\s*\n\s*OUTPUT\s*SUMMARY[:\s]*\n([\s\S]*?)$/i,
+  ];
+
+  for (const pattern of summaryPatterns) {
+    const match = text.match(pattern);
+    if (match && match[1] && match[1].trim().length > 50) {
+      return match[1].trim();
+    }
+  }
+
+  // If no OUTPUT SUMMARY found, return empty string (will fall back to full text)
+  return "";
+}
+
 // Component to format and display the full Gumloop analysis output
 function FormattedAnalysis({ content }: { content: string }) {
+  // Extract just the OUTPUT SUMMARY section if present
+  const outputSummary = extractOutputSummary(content);
+  const displayContent = outputSummary || content;
+
   // Parse markdown-like content into styled sections
-  const sections = content.split(/(?=^##?\s)/m).filter(Boolean);
+  const sections = displayContent.split(/(?=^##?\s)/m).filter(Boolean);
 
   return (
     <div className="space-y-6">
@@ -314,9 +347,9 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
 
   const [localElapsed, setLocalElapsed] = useState(initialElapsed);
 
-  // OPTIMAL SOLUTION: Start with realistic 20-minute estimate
+  // OPTIMAL SOLUTION: Start with realistic 23-minute estimate
   // Key insight: Never increase the displayed remaining time - only decrease or hold steady
-  const DEFAULT_TOTAL_TIME = 20 * 60; // 20 minutes - realistic based on actual Gumloop runs
+  const DEFAULT_TOTAL_TIME = 23 * 60; // 23 minutes - based on actual Gumloop phase timing
 
   // Track the minimum remaining time we've ever calculated - we'll never show MORE than this
   const [minRemainingEverShown, setMinRemainingEverShown] = useState<number>(() => {
@@ -333,10 +366,10 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
 
   // Define the actual pipeline phases (reflecting real Gumloop flow)
   // Phase thresholds as percentages of total time:
-  // - Data Collection: 0-15% (~3 min)
-  // - Parallel LLM Analysis: 15-55% (~8 min) - all 4 models run simultaneously
-  // - Cross-Validation: 55-80% (~5 min) - models check each other's work
-  // - Final Aggregation: 80-100% (~4 min) - score computation and finalization
+  // - Collecting Data: 0-15% (~7 min) - Gathering market data & social signals
+  // - LLM Analysis: 15-55% (~7 min) - 4 AI models analyzing in parallel
+  // - Cross-Validation: 55-80% (~7 min) - Models checking each other's findings
+  // - Score Aggregation: 80-100% (~2 min) - Computing final consensus score
   const PHASE_DATA_COLLECTION = 15;
   const PHASE_LLM_ANALYSIS = 55;
   const PHASE_CROSS_VALIDATION = 80;
@@ -352,10 +385,10 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
   const [currentPhase, setCurrentPhase] = useState(() => getCurrentPhase(initialProgress));
 
   const phases = [
-    { label: "Collecting Data", description: "Gathering market data & social signals", icon: TrendingUpIcon },
-    { label: "LLM Analysis", description: "4 AI models analyzing in parallel", icon: Brain },
-    { label: "Cross-Validation", description: "Models checking each other's findings", icon: Users },
-    { label: "Score Aggregation", description: "Computing final consensus score", icon: CheckCircle },
+    { label: "Collecting Data", description: "Gathering market data & social signals", time: "~7 min", icon: TrendingUpIcon },
+    { label: "LLM Analysis", description: "4 AI models analyzing in parallel", time: "~7 min", icon: Brain },
+    { label: "Cross-Validation", description: "Models checking each other's findings", time: "~7 min", icon: Users },
+    { label: "Score Aggregation", description: "Computing final consensus score", time: "~2 min", icon: CheckCircle },
   ];
 
   useEffect(() => {
@@ -522,10 +555,15 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
                     )}
                   </div>
                   <div className="flex-1">
-                    <div className={`text-sm font-medium ${
-                      isComplete ? 'text-green-400' : isActive ? 'text-primary' : 'text-muted-foreground'
-                    }`}>
-                      {phase.label}
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-medium ${
+                        isComplete ? 'text-green-400' : isActive ? 'text-primary' : 'text-muted-foreground'
+                      }`}>
+                        {phase.label}
+                      </span>
+                      <span className="text-xs text-muted-foreground/60 font-mono">
+                        {phase.time}
+                      </span>
                     </div>
                     <div className="text-xs text-muted-foreground">{phase.description}</div>
                   </div>
@@ -559,10 +597,10 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { name: "ChatGPT", color: "emerald", bgClass: "bg-emerald-500/10", borderClass: "border-emerald-500/30", textClass: "text-emerald-400" },
-              { name: "Claude", color: "orange", bgClass: "bg-orange-500/10", borderClass: "border-orange-500/30", textClass: "text-orange-400" },
-              { name: "Gemini", color: "blue", bgClass: "bg-blue-500/10", borderClass: "border-blue-500/30", textClass: "text-blue-400" },
-              { name: "Grok", color: "purple", bgClass: "bg-purple-500/10", borderClass: "border-purple-500/30", textClass: "text-purple-400" },
+              { name: "ChatGPT-5.2", color: "emerald", bgClass: "bg-emerald-500/10", borderClass: "border-emerald-500/30", textClass: "text-emerald-400" },
+              { name: "Claude Opus 4.5", color: "orange", bgClass: "bg-orange-500/10", borderClass: "border-orange-500/30", textClass: "text-orange-400" },
+              { name: "Gemini 3 Pro", color: "blue", bgClass: "bg-blue-500/10", borderClass: "border-blue-500/30", textClass: "text-blue-400" },
+              { name: "Grok 4", color: "purple", bgClass: "bg-purple-500/10", borderClass: "border-purple-500/30", textClass: "text-purple-400" },
             ].map((model) => {
               // Models are in standby during data collection (phase 0)
               // All models analyze in parallel during phase 1
@@ -635,7 +673,7 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
       <p className="text-center text-sm text-muted-foreground mt-6">
         Our 4-LLM ensemble cross-validates findings to eliminate bias and provide trusted consensus scores.
         <br />
-        <span className="text-xs">Analysis typically takes 15-25 minutes. You can navigate away - we'll save your results.</span>
+        <span className="text-xs">Analysis typically takes ~23 minutes. You can navigate away - we'll save your results.</span>
       </p>
     </motion.div>
   );
@@ -931,6 +969,213 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         </Card>
       </motion.div>
 
+      {/* Project Context (Thesis) - NEW */}
+      {analysis.thesis && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.12 }}
+        >
+          <Card className="glass-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Lightbulb className="w-5 h-5 text-amber-400" />
+                Project Context
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground leading-relaxed">{analysis.thesis}</p>
+
+              {/* Team/Project Info Row */}
+              {(analysis.teamStatus || analysis.notableBackers) && (
+                <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {analysis.teamStatus && (
+                    <div className="flex items-start gap-2">
+                      <Building className="w-4 h-4 text-muted-foreground mt-0.5" />
+                      <div>
+                        <div className="text-xs text-muted-foreground uppercase tracking-wide">Team Status</div>
+                        <div className="text-sm">{analysis.teamStatus}</div>
+                      </div>
+                    </div>
+                  )}
+                  {analysis.notableBackers && (
+                    <div className="flex items-start gap-2">
+                      <Award className="w-4 h-4 text-muted-foreground mt-0.5" />
+                      <div>
+                        <div className="text-xs text-muted-foreground uppercase tracking-wide">Notable Backers</div>
+                        <div className="text-sm">{analysis.notableBackers}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
+      {/* Unlock Warning - NEW (if present) */}
+      {analysis.unlockWarning && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.13 }}
+        >
+          <Card className="glass-card border-orange-500/30 bg-orange-500/5">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center shrink-0">
+                  <Unlock className="w-4 h-4 text-orange-400" />
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-orange-400 mb-1">Upcoming Token Unlock</div>
+                  <div className="text-sm text-muted-foreground">{analysis.unlockWarning}</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
+      {/* Catalysts & Risks - NEW */}
+      {(analysis.catalyst1 || analysis.catalyst2 || analysis.catalyst3 ||
+        analysis.risk1 || analysis.risk2 || analysis.risk3) && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.14 }}
+          className="grid grid-cols-1 md:grid-cols-2 gap-4"
+        >
+          {/* Catalysts */}
+          {(analysis.catalyst1 || analysis.catalyst2 || analysis.catalyst3) && (
+            <Card className="glass-card border-green-500/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Zap className="w-4 h-4 text-green-400" />
+                  <span className="text-green-400">Catalysts</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <ul className="space-y-2">
+                  {analysis.catalyst1 && (
+                    <li className="flex items-start gap-2 text-sm">
+                      <span className="text-green-400 font-bold">1.</span>
+                      <span className="text-muted-foreground">{analysis.catalyst1}</span>
+                    </li>
+                  )}
+                  {analysis.catalyst2 && (
+                    <li className="flex items-start gap-2 text-sm">
+                      <span className="text-green-400 font-bold">2.</span>
+                      <span className="text-muted-foreground">{analysis.catalyst2}</span>
+                    </li>
+                  )}
+                  {analysis.catalyst3 && (
+                    <li className="flex items-start gap-2 text-sm">
+                      <span className="text-green-400 font-bold">3.</span>
+                      <span className="text-muted-foreground">{analysis.catalyst3}</span>
+                    </li>
+                  )}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Risks */}
+          {(analysis.risk1 || analysis.risk2 || analysis.risk3) && (
+            <Card className="glass-card border-red-500/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <AlertTriangle className="w-4 h-4 text-red-400" />
+                  <span className="text-red-400">Key Risks</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <ul className="space-y-2">
+                  {analysis.risk1 && (
+                    <li className="flex items-start gap-2 text-sm">
+                      <span className="text-red-400 font-bold">1.</span>
+                      <span className="text-muted-foreground">{analysis.risk1}</span>
+                    </li>
+                  )}
+                  {analysis.risk2 && (
+                    <li className="flex items-start gap-2 text-sm">
+                      <span className="text-red-400 font-bold">2.</span>
+                      <span className="text-muted-foreground">{analysis.risk2}</span>
+                    </li>
+                  )}
+                  {analysis.risk3 && (
+                    <li className="flex items-start gap-2 text-sm">
+                      <span className="text-red-400 font-bold">3.</span>
+                      <span className="text-muted-foreground">{analysis.risk3}</span>
+                    </li>
+                  )}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+        </motion.div>
+      )}
+
+      {/* Social Signals - NEW */}
+      {(analysis.xMentionsTrend || analysis.xSentiment || analysis.xTopKols) && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.145 }}
+        >
+          <Card className="glass-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Twitter className="w-5 h-5 text-sky-400" />
+                Social Signals
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Mentions Trend */}
+                {analysis.xMentionsTrend && (
+                  <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Mentions Trend</div>
+                    <div className="flex items-center gap-2">
+                      {analysis.xMentionsTrend.includes('↑') || analysis.xMentionsTrend.toLowerCase().includes('up') ? (
+                        <ArrowUp className="w-4 h-4 text-green-400" />
+                      ) : analysis.xMentionsTrend.includes('↓') || analysis.xMentionsTrend.toLowerCase().includes('down') ? (
+                        <ArrowDown className="w-4 h-4 text-red-400" />
+                      ) : (
+                        <Minus className="w-4 h-4 text-yellow-400" />
+                      )}
+                      <span className="text-sm font-medium">{analysis.xMentionsTrend}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Sentiment */}
+                {analysis.xSentiment && (
+                  <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Sentiment</div>
+                    <div className={`text-sm font-medium ${
+                      analysis.xSentiment.toLowerCase().includes('positive') ? 'text-green-400' :
+                      analysis.xSentiment.toLowerCase().includes('negative') ? 'text-red-400' :
+                      'text-yellow-400'
+                    }`}>
+                      {analysis.xSentiment}
+                    </div>
+                  </div>
+                )}
+
+                {/* Top KOLs */}
+                {analysis.xTopKols && (
+                  <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Notable Mentions</div>
+                    <div className="text-sm text-muted-foreground">{analysis.xTopKols}</div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
       {/* Model Consensus - Show by default */}
       {modelScores && Object.keys(modelScores).length > 0 && (
         <motion.div
@@ -949,7 +1194,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {modelScores.gpt !== undefined && (
                   <div className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.gpt)}`}>
-                    <div className="text-xs text-muted-foreground mb-1">ChatGPT</div>
+                    <div className="text-xs text-muted-foreground mb-1">ChatGPT-5.2</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.gpt)}`}>
                       {modelScores.gpt.toFixed(1)}
                     </div>
@@ -957,7 +1202,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                 )}
                 {modelScores.claude !== undefined && (
                   <div className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.claude)}`}>
-                    <div className="text-xs text-muted-foreground mb-1">Claude</div>
+                    <div className="text-xs text-muted-foreground mb-1">Claude Opus 4.5</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.claude)}`}>
                       {modelScores.claude.toFixed(1)}
                     </div>
@@ -965,7 +1210,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                 )}
                 {modelScores.gemini !== undefined && (
                   <div className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.gemini)}`}>
-                    <div className="text-xs text-muted-foreground mb-1">Gemini</div>
+                    <div className="text-xs text-muted-foreground mb-1">Gemini 3 Pro</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.gemini)}`}>
                       {modelScores.gemini.toFixed(1)}
                     </div>
@@ -973,7 +1218,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                 )}
                 {modelScores.grok !== undefined && (
                   <div className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.grok)}`}>
-                    <div className="text-xs text-muted-foreground mb-1">Grok</div>
+                    <div className="text-xs text-muted-foreground mb-1">Grok 4</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.grok)}`}>
                       {modelScores.grok.toFixed(1)}
                     </div>
@@ -1116,7 +1361,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
           </motion.div>
         )}
 
-        {/* Full Reasoning */}
+        {/* Output Summary / Full Reasoning */}
         {(analysis.rawGumloopResponse || analysis.reasoning) && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -1130,7 +1375,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                     <CardTitle className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Brain className="w-5 h-5 text-primary" />
-                        Full Analysis
+                        Output Summary
                       </div>
                       {showReasoning ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                     </CardTitle>

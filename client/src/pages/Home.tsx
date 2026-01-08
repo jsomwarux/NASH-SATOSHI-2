@@ -27,7 +27,7 @@ import type { TokenSearchResult } from "@shared/schema";
 // AI Model data with cyber aesthetic
 const aiModels = [
   {
-    name: "ChatGPT",
+    name: "ChatGPT-5.2",
     color: "text-green-400",
     bgColor: "bg-green-500/10",
     borderColor: "border-green-500/30",
@@ -35,7 +35,7 @@ const aiModels = [
     icon: Brain,
   },
   {
-    name: "Claude",
+    name: "Claude Opus 4.5",
     color: "text-orange-400",
     bgColor: "bg-orange-500/10",
     borderColor: "border-orange-500/30",
@@ -43,7 +43,7 @@ const aiModels = [
     icon: Target,
   },
   {
-    name: "Gemini",
+    name: "Gemini 3 Pro",
     color: "text-blue-400",
     bgColor: "bg-blue-500/10",
     borderColor: "border-blue-500/30",
@@ -51,7 +51,7 @@ const aiModels = [
     icon: Hexagon,
   },
   {
-    name: "Grok",
+    name: "Grok 4",
     color: "text-purple-400",
     bgColor: "bg-purple-500/10",
     borderColor: "border-purple-500/30",
@@ -137,6 +137,14 @@ export default function Home() {
   const isLimitError = error?.message?.includes("limit reached") ||
                        error?.message?.includes("LIMIT_REACHED") ||
                        error?.message?.includes("upgrade your plan");
+
+  // Check if error is a concurrent analysis limit error
+  const isConcurrentError = error?.message?.includes("analyses in progress") ||
+                            error?.message?.includes("CONCURRENT_LIMIT");
+
+  // Check if system is at capacity
+  const isSystemBusy = error?.message?.includes("System is at capacity") ||
+                       error?.message?.includes("SYSTEM_BUSY");
 
   const handleTokenSelect = async (token: TokenSearchResult) => {
     setSelectedToken(token);
@@ -285,12 +293,25 @@ export default function Home() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 className={`font-mono text-sm mt-4 p-3 border rounded ${
-                  isLimitError
+                  isLimitError || isConcurrentError || isSystemBusy
                     ? "text-amber-400 border-amber-500/30 bg-amber-500/10"
                     : "text-red-400 border-red-500/30 bg-red-500/10"
                 }`}
               >
-                {isLimitError ? (
+                {isSystemBusy ? (
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                    <span>System is at capacity. Please try again in a few minutes.</span>
+                  </div>
+                ) : isConcurrentError ? (
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                    <span>You have analyses in progress. Please wait for one to complete.</span>
+                    <Link href="/history">
+                      <Button size="sm" variant="outline" className="font-mono text-xs border-amber-500/30 text-amber-400 hover:bg-amber-500/10">
+                        VIEW HISTORY
+                      </Button>
+                    </Link>
+                  </div>
+                ) : isLimitError ? (
                   <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
                     <span>Analysis limit reached for today.</span>
                     <Link href="/pricing">

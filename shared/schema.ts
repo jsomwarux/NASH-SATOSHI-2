@@ -241,7 +241,31 @@ export const tokenAnalyses = pgTable("token_analyses", {
   // Narrative data
   narrative: text("narrative"),
   narrativeHeat: numeric("narrative_heat", { precision: 4, scale: 1 }), // 1-10
+  narrativeRank: text("narrative_rank"), // 1st/2nd/3rd/lower
   narrativeAcceleration: text("narrative_acceleration"),
+
+  // Project context (thesis)
+  thesis: text("thesis"), // 2-3 sentence project description
+
+  // Catalysts (individual fields from Gumloop)
+  catalyst1: text("catalyst_1"),
+  catalyst2: text("catalyst_2"),
+  catalyst3: text("catalyst_3"),
+
+  // Risks (individual fields from Gumloop)
+  risk1: text("risk_1"),
+  risk2: text("risk_2"),
+  risk3: text("risk_3"),
+
+  // Social signals
+  xMentionsTrend: text("x_mentions_trend"), // ↑/↓/→
+  xSentiment: text("x_sentiment"), // positive/mixed/negative
+  xTopKols: text("x_top_kols"), // influencer mentions
+
+  // Team/Project info
+  unlockWarning: text("unlock_warning"),
+  teamStatus: text("team_status"),
+  notableBackers: text("notable_backers"),
 
   // Key metrics
   peakProximity: numeric("peak_proximity", { precision: 5, scale: 2 }), // percentage

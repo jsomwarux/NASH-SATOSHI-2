@@ -1,5 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
+import { registerRoutes, recoverStuckAnalyses } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initStorage } from "./storage";
@@ -109,8 +109,18 @@ app.use((req, res, next) => {
       host: "0.0.0.0",
       reusePort: true,
     },
-    () => {
+    async () => {
       log(`serving on port ${port}`);
+
+      // Recover any stuck analyses from previous server runs
+      // Run after a short delay to let everything initialize
+      setTimeout(async () => {
+        try {
+          await recoverStuckAnalyses();
+        } catch (err) {
+          console.error("Error during analysis recovery:", err);
+        }
+      }, 5000);
     },
   );
 })();

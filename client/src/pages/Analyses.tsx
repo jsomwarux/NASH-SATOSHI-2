@@ -188,7 +188,7 @@ function AnalysisCard({ analysis, index }: { analysis: TokenAnalysis; index: num
               <div className="flex items-center gap-4 mb-4">
                 <div className="flex items-baseline gap-1">
                   <span className={`text-4xl font-bold font-mono ${getScoreColor(finalScore)}`}>
-                    {finalScore.toFixed(0)}
+                    {finalScore.toFixed(1)}
                   </span>
                   <span className="text-muted-foreground text-sm font-mono">/100</span>
                 </div>

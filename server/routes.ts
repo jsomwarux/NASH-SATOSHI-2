@@ -533,7 +533,10 @@ export async function registerRoutes(
 
       const { tokenId, tokenSymbol, tokenName, tokenImage, chain, contractAddress } = req.body;
 
+      console.log(`Analysis request received - tokenId: "${tokenId}", tokenSymbol: "${tokenSymbol}", tokenName: "${tokenName}"`);
+
       if (!tokenId || !tokenSymbol || !tokenName) {
+        console.error("Missing required fields in analysis request:", { tokenId, tokenSymbol, tokenName });
         res.status(400).json({ message: "Token ID, symbol, and name are required" });
         return;
       }
@@ -593,6 +596,33 @@ export async function registerRoutes(
         res.status(403).json({
           message: "Analysis limit reached. Please upgrade your plan or purchase credits.",
           code: "LIMIT_REACHED",
+        });
+        return;
+      }
+
+      // Check concurrent analysis limit (max 2 running at once per user)
+      const MAX_CONCURRENT_PER_USER = 2;
+      const runningCount = await storage.getRunningAnalysesCount(userId);
+      if (runningCount >= MAX_CONCURRENT_PER_USER) {
+        res.status(429).json({
+          message: `You have ${runningCount} analyses in progress. Please wait for one to complete before starting another.`,
+          code: "CONCURRENT_LIMIT",
+          runningCount,
+          maxConcurrent: MAX_CONCURRENT_PER_USER,
+        });
+        return;
+      }
+
+      // Check global system limit to prevent overload (max 100 concurrent across all users)
+      const MAX_GLOBAL_CONCURRENT = 100;
+      const totalRunning = await storage.getTotalRunningAnalyses();
+      if (totalRunning >= MAX_GLOBAL_CONCURRENT) {
+        console.warn(`Global concurrent limit reached: ${totalRunning}/${MAX_GLOBAL_CONCURRENT}`);
+        res.status(503).json({
+          message: "System is at capacity. Please try again in a few minutes.",
+          code: "SYSTEM_BUSY",
+          totalRunning,
+          maxGlobal: MAX_GLOBAL_CONCURRENT,
         });
         return;
       }
@@ -806,6 +836,25 @@ async function canUseSubscription(
 }
 
 // Start Gumloop analysis asynchronously
+// ==================== GUMLOOP REQUEST QUEUE ====================
+// Simple queue to stagger Gumloop API requests and prevent rate limiting
+
+let lastGumloopRequestTime = 0;
+const GUMLOOP_REQUEST_INTERVAL_MS = 2000; // 2 seconds between requests
+
+async function waitForGumloopSlot(): Promise<void> {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastGumloopRequestTime;
+
+  if (timeSinceLastRequest < GUMLOOP_REQUEST_INTERVAL_MS) {
+    const waitTime = GUMLOOP_REQUEST_INTERVAL_MS - timeSinceLastRequest;
+    console.log(`Waiting ${waitTime}ms before next Gumloop request (rate limiting)`);
+    await new Promise((resolve) => setTimeout(resolve, waitTime));
+  }
+
+  lastGumloopRequestTime = Date.now();
+}
+
 async function startGumloopAnalysis(
   analysisId: number,
   tokenId: string,
@@ -815,12 +864,17 @@ async function startGumloopAnalysis(
   const GUMLOOP_API_KEY = process.env.GUMLOOP_API_KEY;
   const GUMLOOP_PIPELINE_ID = process.env.GUMLOOP_PIPELINE_ID;
   const GUMLOOP_USER_ID = process.env.GUMLOOP_USER_ID;
+  const GUMLOOP_WEBHOOK_URL = process.env.GUMLOOP_WEBHOOK_URL;
 
   try {
     // Update status to processing
     await storage.updateAnalysis(analysisId, { status: "processing" });
 
-    if (!GUMLOOP_API_KEY || !GUMLOOP_PIPELINE_ID || !GUMLOOP_USER_ID) {
+    // Check if Gumloop is configured (either webhook URL or API credentials)
+    const hasWebhook = !!GUMLOOP_WEBHOOK_URL;
+    const hasApiCredentials = GUMLOOP_API_KEY && GUMLOOP_PIPELINE_ID && GUMLOOP_USER_ID;
+
+    if (!hasWebhook && !hasApiCredentials) {
       // Gumloop not configured - create demo analysis for testing
       console.log("Gumloop not configured, creating demo analysis for:", tokenSymbol);
       await createDemoAnalysis(analysisId, tokenId, tokenSymbol, tokenName);
@@ -828,37 +882,103 @@ async function startGumloopAnalysis(
     }
 
     console.log(`Starting Gumloop analysis for ${tokenSymbol} (${tokenId})`);
+    console.log(`Token details - Symbol: "${tokenSymbol}", Name: "${tokenName}", ID: "${tokenId}"`);
 
-    // Start Gumloop pipeline
-    const startResponse = await fetch("https://api.gumloop.com/api/v1/start_pipeline", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${GUMLOOP_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        user_id: GUMLOOP_USER_ID,
-        saved_item_id: GUMLOOP_PIPELINE_ID,
-        pipeline_inputs: [
-          { input_name: "token_id", value: tokenId },
-          { input_name: "token_symbol", value: tokenSymbol },
-          { input_name: "token_name", value: tokenName },
-        ],
-      }),
-    });
+    // Wait for rate limit slot before making request
+    await waitForGumloopSlot();
 
-    if (!startResponse.ok) {
-      const errorText = await startResponse.text();
-      console.error("Gumloop start error:", errorText);
-      throw new Error(`Gumloop API error: ${startResponse.status}`);
+    // Ensure we have a valid token input - use symbol, fall back to name or ID
+    // CoinGecko expects the raw symbol without $ prefix
+    const tokenInput = tokenSymbol || tokenName || tokenId;
+    if (!tokenInput) {
+      throw new Error("No valid token identifier provided");
     }
 
-    const startData = await startResponse.json();
-    const runId = startData.run_id;
+    let runId: string;
+
+    // Method 1: Use webhook URL if available (simpler payload format)
+    if (hasWebhook) {
+      console.log("Using Gumloop webhook URL method with direct field mapping");
+
+      // Webhook uses direct field mapping - input names as top-level keys
+      // Only sending "Token Input" - CoinGecko handles chain detection internally
+      const webhookPayload = {
+        "Token Input": tokenInput,
+      };
+
+      console.log(`Gumloop webhook payload (direct mapping):`, JSON.stringify(webhookPayload, null, 2));
+      console.log(`Token Input value being sent: "${tokenInput}"`);
+
+      const webhookResponse = await fetch(GUMLOOP_WEBHOOK_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${GUMLOOP_API_KEY}`,
+        },
+        body: JSON.stringify(webhookPayload),
+      });
+
+      const webhookResponseText = await webhookResponse.text();
+      console.log(`Gumloop webhook response (${webhookResponse.status}):`, webhookResponseText);
+
+      if (!webhookResponse.ok) {
+        console.error("Gumloop webhook error:", webhookResponseText);
+        throw new Error(`Gumloop webhook error: ${webhookResponse.status}`);
+      }
+
+      const webhookData = JSON.parse(webhookResponseText);
+      runId = webhookData.run_id;
+    }
+    // Method 2: Use start_pipeline API with pipeline_inputs array (recommended per docs)
+    else {
+      console.log("Using Gumloop start_pipeline API method with pipeline_inputs array");
+
+      // Per Gumloop docs: user_id and saved_item_id are URL query parameters
+      const apiUrl = new URL("https://api.gumloop.com/api/v1/start_pipeline");
+      apiUrl.searchParams.set("user_id", GUMLOOP_USER_ID!);
+      apiUrl.searchParams.set("saved_item_id", GUMLOOP_PIPELINE_ID!);
+
+      // Using pipeline_inputs array format (Option 1 - Recommended per Gumloop docs)
+      // Only sending "Token Input" - CoinGecko handles chain detection internally
+      const requestPayload = {
+        pipeline_inputs: [
+          { input_name: "Token Input", value: tokenInput },
+        ],
+      };
+
+      console.log(`Gumloop API URL: ${apiUrl.toString()}`);
+      console.log(`Gumloop request payload:`, JSON.stringify(requestPayload, null, 2));
+      console.log(`Token Input value being sent: "${tokenInput}"`);
+
+      const startResponse = await fetch(apiUrl.toString(), {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${GUMLOOP_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestPayload),
+      });
+
+      const responseText = await startResponse.text();
+      console.log(`Gumloop start response (${startResponse.status}):`, responseText);
+
+      if (!startResponse.ok) {
+        console.error("Gumloop start error:", responseText);
+        throw new Error(`Gumloop API error: ${startResponse.status}`);
+      }
+
+      const startData = JSON.parse(responseText);
+      runId = startData.run_id;
+    }
+
+    console.log(`Gumloop run started with ID: ${runId}`);
 
     await storage.updateAnalysis(analysisId, { gumloopRunId: runId });
 
-    // Poll for completion
+    // Poll for completion (API key is required for polling)
+    if (!GUMLOOP_API_KEY) {
+      throw new Error("GUMLOOP_API_KEY is required for polling status");
+    }
     await pollGumloopStatus(analysisId, runId, GUMLOOP_API_KEY);
   } catch (error) {
     console.error("Gumloop analysis error:", error);
@@ -876,11 +996,16 @@ async function pollGumloopStatus(
   apiKey: string
 ): Promise<void> {
   const GUMLOOP_USER_ID = process.env.GUMLOOP_USER_ID;
-  const maxAttempts = 540; // 45 minutes with 5s intervals
+  const BASE_POLL_INTERVAL = 5000; // 5 seconds base
+  const JITTER_MAX = 3000; // Up to 3 seconds of random jitter
+  const maxAttempts = 540; // 45 minutes max
   let attempts = 0;
 
   while (attempts < maxAttempts) {
-    await new Promise((resolve) => setTimeout(resolve, 5000)); // Wait 5 seconds
+    // Add random jitter to spread out polling requests across concurrent analyses
+    // This prevents "polling storms" when many analyses run simultaneously
+    const jitter = Math.floor(Math.random() * JITTER_MAX);
+    await new Promise((resolve) => setTimeout(resolve, BASE_POLL_INTERVAL + jitter));
     attempts++;
 
     try {
@@ -912,7 +1037,7 @@ async function pollGumloopStatus(
 
         // Try to find the output text - it could be named differently
         let output = "";
-        const possibleKeys = ["output", "result", "text", "response", "final_output", "aggregated_output", "analysis"];
+        const possibleKeys = ["analysis_result", "output", "result", "text", "response", "final_output", "aggregated_output", "analysis"];
 
         // First, try known keys
         for (const key of possibleKeys) {
@@ -923,10 +1048,13 @@ async function pollGumloopStatus(
           }
         }
 
+        // Keys that should NOT be used as the main analysis output (they have special purposes)
+        const excludeFromMainOutput = ["narrative", "final_narrative", "output narrative", "token_narrative"];
+
         // If not found, take the first string value from outputs that looks like analysis content
         if (!output) {
           for (const [key, value] of Object.entries(outputs)) {
-            if (typeof value === "string" && value.length > 100 && key !== "narrative") {
+            if (typeof value === "string" && value.length > 100 && !excludeFromMainOutput.includes(key.toLowerCase())) {
               output = value;
               console.log(`Analysis ${analysisId}: Using output from field "${key}", length: ${output.length}`);
               break;
@@ -951,20 +1079,24 @@ async function pollGumloopStatus(
           console.error(`Analysis ${analysisId}: No valid output found. Raw outputs:`, JSON.stringify(outputs).substring(0, 500));
         }
 
-        // Check for separate narrative field from Gumloop outputs
-        let narrativeFromOutput: string | undefined;
-        if (outputs["narrative"] && typeof outputs["narrative"] === "string") {
-          narrativeFromOutput = outputs["narrative"].trim();
-          console.log(`Analysis ${analysisId}: Found separate narrative field: "${narrativeFromOutput}"`);
+        // Log all available keys and their values for debugging
+        console.log(`Analysis ${analysisId}: All output keys available:`, Object.keys(outputs));
+        for (const [key, value] of Object.entries(outputs)) {
+          const valuePreview = typeof value === "string" ? value.substring(0, 100) : JSON.stringify(value).substring(0, 100);
+          console.log(`Analysis ${analysisId}: Output key "${key}" (type: ${typeof value}): "${valuePreview}..."`);
         }
 
-        // Parse the Gumloop response
-        const { parseGumloopResponse } = await import("./gumloop-parser");
-        const parsed = parseGumloopResponse(output);
+        // Import the parser functions
+        const { parseGumloopResponse, parseGumloopOutputs, hasDirectOutputFields } = await import("./gumloop-parser");
 
-        // Use the separate narrative field if it exists and parsed one doesn't
-        if (narrativeFromOutput && (!parsed.narrative || parsed.narrative.length < 3)) {
-          parsed.narrative = narrativeFromOutput;
+        // Check if outputs have direct field outputs (new format with "output fieldname")
+        let parsed;
+        if (hasDirectOutputFields(outputs)) {
+          console.log(`Analysis ${analysisId}: Using direct output fields parser (new format)`);
+          parsed = parseGumloopOutputs(outputs);
+        } else {
+          console.log(`Analysis ${analysisId}: Using text-based parser (legacy format)`);
+          parsed = parseGumloopResponse(output);
         }
 
         console.log(`Analysis ${analysisId}: Parsed - score: ${parsed.finalScore}, tier: ${parsed.tier}, narrative: ${parsed.narrative}`);
@@ -978,10 +1110,28 @@ async function pollGumloopStatus(
           phaseName: parsed.phaseName,
           narrative: parsed.narrative,
           narrativeHeat: parsed.narrativeHeat?.toString(),
+          narrativeRank: parsed.narrativeRank,
           peakProximity: parsed.peakProximity?.toString(),
           winningSide: parsed.winningSide,
           consensusLevel: parsed.consensusLevel,
           confidence: parsed.confidence,
+          // Project context (NEW)
+          thesis: parsed.thesis,
+          catalyst1: parsed.catalyst1,
+          catalyst2: parsed.catalyst2,
+          catalyst3: parsed.catalyst3,
+          risk1: parsed.risk1,
+          risk2: parsed.risk2,
+          risk3: parsed.risk3,
+          // Social signals (NEW)
+          xMentionsTrend: parsed.xMentionsTrend,
+          xSentiment: parsed.xSentiment,
+          xTopKols: parsed.xTopKols,
+          // Team/Project info (NEW)
+          unlockWarning: parsed.unlockWarning,
+          teamStatus: parsed.teamStatus,
+          notableBackers: parsed.notableBackers,
+          // Component scores
           coordinationScore: parsed.coordinationScore?.toString(),
           schellingRankScore: parsed.schellingRankScore?.toString(),
           schellingPosition: parsed.schellingPosition,
@@ -1007,7 +1157,12 @@ async function pollGumloopStatus(
         });
         return;
       } else if (state === "FAILED" || state === "TERMINATED") {
-        throw new Error(`Gumloop run ${state.toLowerCase()}`);
+        console.error(`Analysis ${analysisId}: Gumloop run ${state}. Marking analysis as failed.`);
+        await storage.updateAnalysis(analysisId, {
+          status: "failed",
+          displaySummary: `Analysis ${state.toLowerCase()}. The token input may be invalid or Gumloop encountered an error.`,
+        });
+        return; // Exit polling - run is complete (failed)
       }
       // Continue polling for RUNNING, QUEUED states
       // Log progress every 2 minutes (24 attempts)
@@ -1016,6 +1171,14 @@ async function pollGumloopStatus(
       }
     } catch (pollError) {
       console.error("Gumloop poll error:", pollError);
+      // Don't continue indefinitely on repeated errors
+      if (pollError instanceof Error && pollError.message.includes("terminated")) {
+        await storage.updateAnalysis(analysisId, {
+          status: "failed",
+          displaySummary: "Analysis terminated by Gumloop. Please try again.",
+        });
+        return;
+      }
     }
   }
 
@@ -1092,4 +1255,54 @@ async function createDemoAnalysis(
       "Technical development progress",
     ],
   });
+}
+
+// ==================== ANALYSIS RECOVERY ====================
+// Recover stuck analyses on server startup
+
+export async function recoverStuckAnalyses(): Promise<void> {
+  const GUMLOOP_API_KEY = process.env.GUMLOOP_API_KEY;
+
+  if (!GUMLOOP_API_KEY) {
+    console.log("Gumloop not configured, skipping analysis recovery");
+    return;
+  }
+
+  try {
+    // Find analyses stuck in processing/pending for more than 60 minutes
+    const stuckAnalyses = await storage.getStuckAnalyses(60);
+
+    if (stuckAnalyses.length === 0) {
+      console.log("No stuck analyses to recover");
+      return;
+    }
+
+    console.log(`Found ${stuckAnalyses.length} stuck analyses to recover`);
+
+    for (const analysis of stuckAnalyses) {
+      const ageMinutes = Math.floor((Date.now() - analysis.createdAt.getTime()) / (1000 * 60));
+
+      if (analysis.gumloopRunId) {
+        // Has a Gumloop run ID - try to resume polling
+        console.log(`Resuming polling for analysis ${analysis.id} (${analysis.tokenSymbol}), age: ${ageMinutes}min, runId: ${analysis.gumloopRunId}`);
+
+        // Resume polling in background (don't await)
+        pollGumloopStatus(analysis.id, analysis.gumloopRunId, GUMLOOP_API_KEY).catch((err) => {
+          console.error(`Error resuming polling for analysis ${analysis.id}:`, err);
+        });
+      } else {
+        // No Gumloop run ID - mark as failed (never started properly)
+        console.log(`Marking analysis ${analysis.id} (${analysis.tokenSymbol}) as failed - no Gumloop run ID, age: ${ageMinutes}min`);
+
+        await storage.updateAnalysis(analysis.id, {
+          status: "failed",
+          displaySummary: "Analysis failed to start. Please try again.",
+        });
+      }
+    }
+
+    console.log("Analysis recovery complete");
+  } catch (error) {
+    console.error("Error recovering stuck analyses:", error);
+  }
 }
