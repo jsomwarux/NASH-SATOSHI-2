@@ -2,11 +2,7 @@ import type { Express, Request, Response } from "express";
 import type { Server } from "http";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import { storage } from "./storage";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 import { requireAuth, optionalAuth } from "./auth";
 import {
   isStripeConfigured,
@@ -961,8 +957,8 @@ export async function registerRoutes(
   });
 
   // ==================== SHARE IMAGE ENDPOINTS ====================
-  // Directory for share images
-  const shareImagesDir = path.resolve(__dirname, "share-images");
+  // Directory for share images (use process.cwd() for CommonJS compatibility)
+  const shareImagesDir = path.resolve(process.cwd(), "share-images");
   if (!fs.existsSync(shareImagesDir)) {
     fs.mkdirSync(shareImagesDir, { recursive: true });
   }
@@ -1494,7 +1490,7 @@ async function createDemoAnalysis(
     baseScore >= 85 ? "S+" :
     baseScore >= 70 ? "S" :
     baseScore >= 55 ? "A" :
-    baseScore >= 40 ? "B" : "DISQUALIFIED";
+    baseScore >= 40 ? "B" : "C";
 
   const phases = ["Stealth", "Expansion", "Mania", "Distribution", "Dead"];
   const phase = (hash % 5) + 1;

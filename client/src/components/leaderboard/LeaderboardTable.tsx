@@ -138,8 +138,8 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
         <TableHeader>
           <TableRow className="border-primary/10 hover:bg-transparent">
             <TableHead className="w-12 text-center font-mono text-[10px] tracking-wider">#</TableHead>
-            <TableHead className="font-mono text-[10px] tracking-wider">TOKEN</TableHead>
-            <TableHead className="text-center hidden sm:table-cell font-mono text-[10px] tracking-wider">TYPE</TableHead>
+            <TableHead className="font-mono text-[10px] tracking-wider min-w-[140px] max-w-[200px]">TOKEN</TableHead>
+            <TableHead className="text-center hidden sm:table-cell font-mono text-[10px] tracking-wider w-16 min-w-[64px]">TYPE</TableHead>
             <TableHead className="text-center font-mono text-[10px] tracking-wider">
               <SortButton field="score7d">7D_SCORE</SortButton>
             </TableHead>
@@ -179,37 +179,37 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
                 <TableCell className="text-center font-mono text-muted-foreground text-xs">
                   {String(index + 1).padStart(2, '0')}
                 </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-3">
+                <TableCell className="min-w-[140px] max-w-[200px]">
+                  <div className="flex items-center gap-2">
                     {item.tokenImage ? (
                       <img
                         src={item.tokenImage}
                         alt={item.tokenName}
-                        className="w-9 h-9 rounded bg-secondary ring-2 ring-primary/10"
+                        className="w-8 h-8 rounded bg-secondary ring-2 ring-primary/10 flex-shrink-0"
                       />
                     ) : (
-                      <div className="w-9 h-9 rounded bg-gradient-to-br from-primary/30 to-accent/30 flex items-center justify-center ring-2 ring-primary/10">
+                      <div className="w-8 h-8 rounded bg-gradient-to-br from-primary/30 to-accent/30 flex items-center justify-center ring-2 ring-primary/10 flex-shrink-0">
                         <span className="font-bold text-xs font-mono">
                           {item.tokenSymbol.slice(0, 2).toUpperCase()}
                         </span>
                       </div>
                     )}
-                    <div>
-                      <div className="font-medium flex items-center gap-2">
-                        <span className="truncate max-w-[120px]">{item.tokenName}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium flex items-center gap-1">
+                        <span className="truncate text-sm">{item.tokenName}</span>
                         {item.chain && (
-                          <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 font-mono opacity-60">
+                          <Badge variant="outline" className="text-[8px] px-1 py-0 h-3 font-mono opacity-60 flex-shrink-0">
                             {item.chain}
                           </Badge>
                         )}
                       </div>
-                      <div className="text-xs text-primary/70 uppercase font-mono">
+                      <div className="text-xs text-primary/70 uppercase font-mono truncate">
                         ${item.tokenSymbol}
                       </div>
                     </div>
                   </div>
                 </TableCell>
-                <TableCell className="text-center hidden sm:table-cell">
+                <TableCell className="text-center hidden sm:table-cell w-16 min-w-[64px]">
                   <Badge
                     variant="outline"
                     className={`text-[9px] px-1.5 py-0 h-4 font-mono ${

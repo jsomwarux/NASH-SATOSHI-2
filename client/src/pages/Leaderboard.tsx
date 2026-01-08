@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database, Crown, Flame, Target } from "lucide-react";
+import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database, Crown, Flame, Award } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { LeaderboardTable } from "@/components/leaderboard/LeaderboardTable";
 import { Button } from "@/components/ui/button";
@@ -168,19 +168,19 @@ export default function Leaderboard() {
               )}
             </div>
 
-            {/* Strongest Conviction */}
+            {/* 24H Winner */}
             <div className="cyber-card p-4 rounded border border-green-500/20">
               <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider flex items-center gap-1">
-                <Target className="w-3 h-3" />
-                STRONGEST_BUY
+                <Award className="w-3 h-3" />
+                24H_WINNER
               </div>
-              {leaderboardStats?.strongestConviction ? (
+              {leaderboardStats?.winner24h ? (
                 <div>
                   <div className="text-lg font-bold font-mono text-green-400 truncate">
-                    ${leaderboardStats.strongestConviction.symbol}
+                    ${leaderboardStats.winner24h.symbol}
                   </div>
                   <div className="text-[10px] text-muted-foreground font-mono">
-                    {leaderboardStats.strongestConviction.score.toFixed(1)} • {leaderboardStats.strongestConviction.consensus}
+                    score {leaderboardStats.winner24h.score.toFixed(1)}
                   </div>
                 </div>
               ) : (

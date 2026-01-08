@@ -66,7 +66,7 @@ export interface IStorage {
   getLeaderboardStats(): Promise<{
     topToken: { symbol: string; name: string; score: number; daysOnLeaderboard: number } | null;
     topNarrative: { narrative: string; avgScore: number; tokenCount: number } | null;
-    strongestConviction: { symbol: string; name: string; score: number; consensus: string } | null;
+    winner24h: { symbol: string; name: string; score: number } | null;
   }>;
 }
 
@@ -639,7 +639,7 @@ export class PostgresStorage implements IStorage {
   async getLeaderboardStats(): Promise<{
     topToken: { symbol: string; name: string; score: number; daysOnLeaderboard: number } | null;
     topNarrative: { narrative: string; avgScore: number; tokenCount: number } | null;
-    strongestConviction: { symbol: string; name: string; score: number; consensus: string } | null;
+    winner24h: { symbol: string; name: string; score: number } | null;
   }> {
     const db = getDb();
 
@@ -681,44 +681,22 @@ export class PostgresStorage implements IStorage {
       .orderBy(sql`avg_score DESC`)
       .limit(1);
 
-    // Get token with strongest conviction - prefer STRONG consensus with BUY, fall back to any BUY
-    let strongestConvictionQuery = await db
+    // Get highest rated token from past 24 hours
+    const winner24hQuery = await db
       .select({
         tokenSymbol: tokenAnalyses.tokenSymbol,
         tokenName: tokenAnalyses.tokenName,
         finalScore: tokenAnalyses.finalScore,
-        consensusLevel: tokenAnalyses.consensusLevel,
       })
       .from(tokenAnalyses)
       .where(
         and(
           eq(tokenAnalyses.status, 'completed'),
-          eq(tokenAnalyses.consensusLevel, 'STRONG'),
-          eq(tokenAnalyses.recommendation, 'BUY')
+          gte(tokenAnalyses.createdAt, sql`NOW() - INTERVAL '24 hours'`)
         )
       )
       .orderBy(sql`CAST(${tokenAnalyses.finalScore} AS DECIMAL) DESC`)
       .limit(1);
-
-    // Fallback: if no STRONG+BUY, get highest scoring BUY recommendation
-    if (strongestConvictionQuery.length === 0) {
-      strongestConvictionQuery = await db
-        .select({
-          tokenSymbol: tokenAnalyses.tokenSymbol,
-          tokenName: tokenAnalyses.tokenName,
-          finalScore: tokenAnalyses.finalScore,
-          consensusLevel: tokenAnalyses.consensusLevel,
-        })
-        .from(tokenAnalyses)
-        .where(
-          and(
-            eq(tokenAnalyses.status, 'completed'),
-            eq(tokenAnalyses.recommendation, 'BUY')
-          )
-        )
-        .orderBy(sql`CAST(${tokenAnalyses.finalScore} AS DECIMAL) DESC`)
-        .limit(1);
-    }
 
     // Calculate days on leaderboard for top token
     let topToken = null;
@@ -742,17 +720,16 @@ export class PostgresStorage implements IStorage {
       };
     }
 
-    let strongestConviction = null;
-    if (strongestConvictionQuery[0]) {
-      strongestConviction = {
-        symbol: strongestConvictionQuery[0].tokenSymbol,
-        name: strongestConvictionQuery[0].tokenName,
-        score: parseFloat(strongestConvictionQuery[0].finalScore as string) || 0,
-        consensus: strongestConvictionQuery[0].consensusLevel || 'STRONG',
+    let winner24h = null;
+    if (winner24hQuery[0]) {
+      winner24h = {
+        symbol: winner24hQuery[0].tokenSymbol,
+        name: winner24hQuery[0].tokenName,
+        score: parseFloat(winner24hQuery[0].finalScore as string) || 0,
       };
     }
 
-    return { topToken, topNarrative, strongestConviction };
+    return { topToken, topNarrative, winner24h };
   }
 }
 
@@ -962,9 +939,9 @@ export class MemStorage implements IStorage {
   async getLeaderboardStats(): Promise<{
     topToken: { symbol: string; name: string; score: number; daysOnLeaderboard: number } | null;
     topNarrative: { narrative: string; avgScore: number; tokenCount: number } | null;
-    strongestConviction: { symbol: string; name: string; score: number; consensus: string } | null;
+    winner24h: { symbol: string; name: string; score: number } | null;
   }> {
-    return { topToken: null, topNarrative: null, strongestConviction: null };
+    return { topToken: null, topNarrative: null, winner24h: null };
   }
 }
 

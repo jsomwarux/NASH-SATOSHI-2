@@ -265,7 +265,7 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   const tier = extractField(parseText, 'final_tier');
   if (tier) {
     const cleanTier = tier.toUpperCase().replace(/[^A-Z+]/g, '');
-    if (['S+', 'S', 'A', 'B', 'C', 'D', 'F', 'DISQUALIFIED', 'DQ'].includes(cleanTier)) {
+    if (['S+', 'S', 'A', 'B', 'C'].includes(cleanTier)) {
       result.tier = cleanTier;
     }
   }
@@ -685,7 +685,7 @@ function parseLegacyFormat(rawText: string, result: ParsedGumloopResponse): void
     const match = rawText.match(pattern);
     if (match && match[1]) {
       const tier = match[1].replace(/\*/g, '').trim().toUpperCase();
-      if (['S+', 'S', 'A', 'B', 'C', 'D', 'F', 'DISQUALIFIED', 'DQ'].includes(tier)) {
+      if (['S+', 'S', 'A', 'B', 'C'].includes(tier)) {
         result.tier = tier;
         break;
       }
@@ -890,7 +890,7 @@ function calculateTierFromScore(score: number): string {
   if (score >= 70) return 'S';
   if (score >= 55) return 'A';
   if (score >= 40) return 'B';
-  return 'DISQUALIFIED';
+  return 'C';
 }
 
 // Main parser function
@@ -1068,7 +1068,7 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   const tier = getString('final_tier');
   if (tier) {
     const cleanTier = tier.toUpperCase().replace(/[^A-Z+]/g, '');
-    if (['S+', 'S', 'A', 'B', 'C', 'D', 'F', 'DISQUALIFIED', 'DQ'].includes(cleanTier)) {
+    if (['S+', 'S', 'A', 'B', 'C'].includes(cleanTier)) {
       result.tier = cleanTier;
     }
   }

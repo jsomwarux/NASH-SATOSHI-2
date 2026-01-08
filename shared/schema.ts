@@ -232,7 +232,7 @@ export const tokenAnalyses = pgTable("token_analyses", {
 
   // Primary scores
   finalScore: numeric("final_score", { precision: 6, scale: 2 }).notNull(),
-  tier: text("tier").notNull(), // S+, S, A, B, DISQUALIFIED
+  tier: text("tier").notNull(), // S+, S, A, B, C
   tokenType: text("token_type"), // UTILITY or MEMECOIN
 
   // Phase data

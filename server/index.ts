@@ -11,6 +11,23 @@ import { closeDb } from "./db";
 const app = express();
 const httpServer = createServer(app);
 
+// ==================== HEALTH CHECK (MUST BE FIRST) ====================
+// Register health check BEFORE any async initialization so Replit
+// deployment health checks pass while the app is still starting up
+let serverReady = false;
+
+app.get("/health", (_req, res) => {
+  res.status(200).json({
+    status: serverReady ? "ok" : "starting",
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Also respond to root path for Replit health checks during startup
+app.get("/__replit_health", (_req, res) => {
+  res.status(200).send("OK");
+});
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -135,11 +152,6 @@ app.use((req, res, next) => {
     // Removed: throw err - this would crash the server
   });
 
-  // Health check endpoint for load balancers / monitoring
-  app.get("/health", (_req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
-  });
-
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
@@ -185,6 +197,7 @@ app.use((req, res, next) => {
       reusePort: true,
     },
     async () => {
+      serverReady = true;
       log(`serving on port ${port}`);
 
       // Recover any stuck analyses from previous server runs

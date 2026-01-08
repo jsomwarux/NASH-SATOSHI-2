@@ -529,9 +529,9 @@ export default function Home() {
                 {[
                   { range: "85-100", tier: "S+", color: "purple", label: "STRONG BUY", desc: "Exceptional opportunity" },
                   { range: "70-84", tier: "S", color: "green", label: "BUY", desc: "High conviction" },
-                  { range: "55-69", tier: "A", color: "emerald", label: "BUY/HOLD", desc: "Solid fundamentals" },
-                  { range: "40-54", tier: "B", color: "yellow", label: "HOLD", desc: "Caution advised" },
-                  { range: "0-39", tier: "DQ", color: "red", label: "AVOID", desc: "High risk" },
+                  { range: "55-69", tier: "A", color: "emerald", label: "BUY/HOLD", desc: "Moderate opportunity" },
+                  { range: "40-54", tier: "B", color: "yellow", label: "HOLD", desc: "Weak / risky" },
+                  { range: "0-39", tier: "C", color: "red", label: "AVOID", desc: "Avoid" },
                 ].map((item) => (
                   <div
                     key={item.tier}

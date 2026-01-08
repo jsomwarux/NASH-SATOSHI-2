@@ -124,7 +124,7 @@ export async function getFilterOptions(): Promise<{
 export interface LeaderboardStats {
   topToken: { symbol: string; name: string; score: number; daysOnLeaderboard: number } | null;
   topNarrative: { narrative: string; avgScore: number; tokenCount: number } | null;
-  strongestConviction: { symbol: string; name: string; score: number; consensus: string } | null;
+  winner24h: { symbol: string; name: string; score: number } | null;
 }
 
 export async function getLeaderboardStats(): Promise<LeaderboardStats> {
