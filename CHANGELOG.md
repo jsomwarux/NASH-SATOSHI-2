@@ -43,7 +43,17 @@ Major reliability improvements: fixed database connection issues, improved Gumlo
 - **Neon supports 10,000 connections** - Database is not the bottleneck
 - **Per-user limit of 2 still prevents abuse** - Individual users can't overwhelm system
 
-#### 6. Minor UI Updates
+#### 6. Graceful Failed Analysis Handling (Major Feature)
+- **Credits only deducted on SUCCESS** - Users no longer lose credits/usage when analyses fail
+- **Added `chargeType` column** - Stores intended charge type (daily/weekly/monthly/credit) for deferred charging
+- **Added error tracking columns** - `errorMessage`, `errorCode`, `retryCount` for detailed failure info
+- **Error codes**: TIMEOUT, PIPELINE_ERROR, API_ERROR, RATE_LIMIT, EMPTY_OUTPUT, TERMINATED
+- **New retry endpoint** - `POST /api/analyze/:id/retry` with 3-attempt limit
+- **Enhanced failure UI** - Shows error type with appropriate icon/color, error message, retry count
+- **Retry button** - Users can retry failed analyses (up to 3 times total)
+- **All failure paths updated** - Webhook, polling, startup, timeout, empty output now store error details
+
+#### 7. Minor UI Updates
 - Updated TokenSearch placeholder to mention contract addresses
 
 ### Files Modified
@@ -51,14 +61,16 @@ Major reliability improvements: fixed database connection issues, improved Gumlo
 |------|---------|
 | `server/db.ts` | Added `withRetry()` utility with exponential backoff |
 | `server/storage.ts` | Wrapped 8 database operations with retry logic |
-| `server/routes.ts` | Added fallback parsing for model scores/narrative |
+| `server/routes.ts` | Moved credit deduction to completion, added retry endpoint, error tracking |
 | `server/gumloop-parser.ts` | Improved OUTPUT SUMMARY extraction and line parsing |
-| `shared/schema.ts` | Added `ModelAnalysis`, `ModelAnalyses` types, `modelAnalyses` column |
-| `client/src/hooks/useAnalysis.ts` | Improved retry configuration |
+| `shared/schema.ts` | Added error columns (errorMessage, errorCode, retryCount, chargeType) |
+| `client/src/lib/api.ts` | Added `retryAnalysis()` API function |
+| `client/src/hooks/useAnalysis.ts` | Added `useRetryAnalysis` hook, improved retry config |
 | `client/src/hooks/useAnalyses.ts` | Added retry logic |
 | `client/src/hooks/useLeaderboard.ts` | Added retry logic |
-| `client/src/components/scorecard/ScoreCard.tsx` | Made model cards clickable |
+| `client/src/components/scorecard/ScoreCard.tsx` | Enhanced failure UI with retry button |
 | `client/src/components/scorecard/ModelAnalysisModal.tsx` | New component |
+| `client/src/pages/Analyze.tsx` | Wired up retry functionality |
 | `client/src/components/search/TokenSearch.tsx` | Updated placeholder text |
 | `PROJECT_CONTEXT.md` | Added Gumloop output format documentation |
 | `CHANGELOG.md` | This file |
@@ -67,6 +79,10 @@ Major reliability improvements: fixed database connection issues, improved Gumlo
 Run this SQL in Supabase (Production) if not already done:
 ```sql
 ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS model_analyses JSONB;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS error_message TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS error_code TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS charge_type TEXT;
 ```
 
 ### Current State
@@ -74,6 +90,9 @@ ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS model_analyses JSONB;
 - Frontend has robust retry behavior
 - Parser prioritizes OUTPUT SUMMARY, falls back to markdown extraction
 - Model cards are clickable with detailed modal
+- **Failed analyses don't charge users** - Credits deducted only on success
+- **Retry functionality** - Users can retry failed analyses up to 3 times
+- **Detailed error display** - Shows error type, message, and retry count
 - All TypeScript compiles successfully
 
 ---

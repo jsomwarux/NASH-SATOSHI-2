@@ -330,6 +330,12 @@ export const tokenAnalyses = pgTable("token_analyses", {
   gumloopRunId: text("gumloop_run_id"),
   rawGumloopResponse: text("raw_gumloop_response"),
 
+  // Error tracking for failed analyses
+  errorMessage: text("error_message"), // Detailed error reason
+  errorCode: text("error_code"), // TIMEOUT, API_ERROR, GUMLOOP_ERROR, RATE_LIMIT, EMPTY_OUTPUT, TERMINATED
+  retryCount: integer("retry_count").default(0), // Number of retry attempts
+  chargeType: text("charge_type"), // 'daily', 'weekly', 'monthly', 'credit' - what to charge on success
+
   // User association (Supabase user ID)
   userId: text("user_id"), // Supabase auth user ID
 

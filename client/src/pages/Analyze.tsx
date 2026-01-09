@@ -5,7 +5,7 @@ import { ArrowLeft, Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { ScoreCard } from "@/components/scorecard/ScoreCard";
 import { Button } from "@/components/ui/button";
-import { useAnalysis } from "@/hooks/useAnalysis";
+import { useAnalysis, useRetryAnalysis } from "@/hooks/useAnalysis";
 import { useAnalysisTracker } from "@/contexts/AnalysisTrackerContext";
 
 export default function Analyze() {
@@ -23,6 +23,19 @@ export default function Analyze() {
     nodesCompleted,
     currentNode,
   } = useAnalysis(analysisId);
+
+  // Retry mutation for failed analyses
+  const retryMutation = useRetryAnalysis();
+
+  const handleRetry = () => {
+    if (analysis && analysisId) {
+      retryMutation.mutate({
+        analysisId,
+        tokenSymbol: analysis.tokenSymbol,
+        tokenName: analysis.tokenName,
+      });
+    }
+  };
 
   // Untrack analysis when it's completed and user is viewing it
   useEffect(() => {
@@ -97,6 +110,8 @@ export default function Analyze() {
             elapsedSeconds={elapsedSeconds}
             nodesCompleted={nodesCompleted}
             currentNode={currentNode}
+            onRetry={handleRetry}
+            isRetrying={retryMutation.isPending}
           />
         )}
       </div>

@@ -7,6 +7,7 @@ import {
   getAnalysisStatus,
   searchTokens,
   getTokenDetails,
+  retryAnalysis,
 } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAnalysisTracker } from "@/contexts/AnalysisTrackerContext";
@@ -119,6 +120,35 @@ export function useAnalyzeToken() {
       // Invalidate related queries
       queryClient.invalidateQueries({ queryKey: ["analysisByToken", variables.tokenId] });
       queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
+    },
+  });
+}
+
+// Retry Failed Analysis Mutation
+export function useRetryAnalysis() {
+  const queryClient = useQueryClient();
+  const { getAccessToken } = useAuth();
+  const { trackAnalysis } = useAnalysisTracker();
+
+  return useMutation({
+    mutationFn: async ({ analysisId, tokenSymbol, tokenName }: { analysisId: number; tokenSymbol: string; tokenName: string }) => {
+      const authToken = await getAccessToken();
+      if (!authToken) {
+        throw new Error("Authentication required");
+      }
+      return retryAnalysis(analysisId, authToken);
+    },
+    onSuccess: (data, variables) => {
+      // Track the analysis for background monitoring
+      trackAnalysis({
+        id: data.analysisId,
+        tokenSymbol: variables.tokenSymbol,
+        tokenName: variables.tokenName,
+      });
+      // Invalidate the analysis query to trigger refetch
+      queryClient.invalidateQueries({ queryKey: ["analysis", data.analysisId] });
+      queryClient.invalidateQueries({ queryKey: ["analysisStatus", data.analysisId] });
+      queryClient.invalidateQueries({ queryKey: ["userAnalyses"] });
     },
   });
 }

@@ -32,6 +32,7 @@ import {
   Share2,
   Maximize2,
   Minimize2,
+  RefreshCw,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,6 +52,9 @@ interface ScoreCardProps {
   elapsedSeconds?: number;
   nodesCompleted?: number;
   currentNode?: string;
+  // Retry functionality for failed analyses
+  onRetry?: () => void;
+  isRetrying?: boolean;
 }
 
 // Score color helpers based on spec: red (<40), yellow (40-54), light green (55-69), green (70-84), gold (85+)
@@ -743,7 +747,7 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
   );
 }
 
-export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted, currentNode }: ScoreCardProps) {
+export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted, currentNode, onRetry, isRetrying }: ScoreCardProps) {
   const [showRisks, setShowRisks] = useState(false);
   const [showModels, setShowModels] = useState(true);
   const [showReasoning, setShowReasoning] = useState(false);
@@ -820,21 +824,155 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
     );
   }
 
-  // Failed state
+  // Failed state - Enhanced with error details and retry
   if (analysis.status === "failed") {
+    const errorCode = analysis.errorCode as string | null;
+    const errorMessage = analysis.errorMessage as string | null;
+    const retryCount = (analysis.retryCount as number) || 0;
+    const maxRetries = 3;
+    const canRetry = retryCount < maxRetries;
+
+    // Error type display mapping
+    const errorDisplayMap: Record<string, { title: string; icon: typeof XCircle; color: string; bgColor: string }> = {
+      TIMEOUT: {
+        title: "Analysis Timed Out",
+        icon: Clock,
+        color: "text-yellow-400",
+        bgColor: "bg-yellow-500/10",
+      },
+      PIPELINE_ERROR: {
+        title: "Pipeline Error",
+        icon: AlertTriangle,
+        color: "text-orange-400",
+        bgColor: "bg-orange-500/10",
+      },
+      API_ERROR: {
+        title: "Service Error",
+        icon: XCircle,
+        color: "text-red-400",
+        bgColor: "bg-red-500/10",
+      },
+      RATE_LIMIT: {
+        title: "Rate Limited",
+        icon: Clock,
+        color: "text-yellow-400",
+        bgColor: "bg-yellow-500/10",
+      },
+      EMPTY_OUTPUT: {
+        title: "Invalid Response",
+        icon: AlertTriangle,
+        color: "text-orange-400",
+        bgColor: "bg-orange-500/10",
+      },
+      TERMINATED: {
+        title: "Pipeline Terminated",
+        icon: XCircle,
+        color: "text-red-400",
+        bgColor: "bg-red-500/10",
+      },
+    };
+
+    const errorDisplay = errorDisplayMap[errorCode || "API_ERROR"] || errorDisplayMap.API_ERROR;
+    const ErrorIcon = errorDisplay.icon;
+
     return (
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col items-center justify-center py-20 text-center"
+        className="py-8"
       >
-        <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
-          <XCircle className="w-8 h-8 text-red-400" />
+        {/* Token Header */}
+        <div className="flex items-center gap-4 mb-8">
+          {analysis.tokenImage ? (
+            <img
+              src={analysis.tokenImage}
+              alt={analysis.tokenName}
+              className="w-20 h-20 rounded-2xl bg-secondary ring-4 ring-red-500/20"
+            />
+          ) : (
+            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-red-500/50 to-orange-500/50 flex items-center justify-center ring-4 ring-red-500/20">
+              <span className="font-bold text-2xl">
+                {analysis.tokenSymbol.slice(0, 2).toUpperCase()}
+              </span>
+            </div>
+          )}
+          <div>
+            <h2 className="text-2xl font-bold">{analysis.tokenName}</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-muted-foreground uppercase font-mono">${analysis.tokenSymbol}</span>
+              <Badge variant="outline" className="text-xs bg-red-500/10 border-red-500/30 text-red-400">
+                Failed
+              </Badge>
+            </div>
+          </div>
         </div>
-        <h2 className="text-xl font-bold mb-2">Analysis Failed</h2>
-        <p className="text-muted-foreground mb-6 max-w-md">
-          We couldn't complete the analysis for {analysis.tokenName}. Please try again.
-        </p>
+
+        {/* Error Card */}
+        <Card className={`glass-card ${errorDisplay.bgColor} border-red-500/20`}>
+          <CardContent className="p-6">
+            <div className="flex flex-col items-center text-center">
+              <div className={`w-16 h-16 rounded-full ${errorDisplay.bgColor} flex items-center justify-center mb-4`}>
+                <ErrorIcon className={`w-8 h-8 ${errorDisplay.color}`} />
+              </div>
+
+              <h3 className={`text-xl font-bold mb-2 ${errorDisplay.color}`}>
+                {errorDisplay.title}
+              </h3>
+
+              {errorMessage && (
+                <p className="text-muted-foreground mb-4 max-w-md">
+                  {errorMessage}
+                </p>
+              )}
+
+              {/* Retry info */}
+              <div className="text-sm text-muted-foreground mb-4">
+                {canRetry ? (
+                  <span>Retry attempt {retryCount} of {maxRetries} used</span>
+                ) : (
+                  <span className="text-orange-400">Maximum retries reached</span>
+                )}
+              </div>
+
+              {/* Retry Button */}
+              {canRetry && onRetry && (
+                <Button
+                  onClick={onRetry}
+                  disabled={isRetrying}
+                  className="gap-2"
+                  size="lg"
+                >
+                  {isRetrying ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Retrying...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4" />
+                      Retry Analysis
+                    </>
+                  )}
+                </Button>
+              )}
+
+              {!canRetry && (
+                <p className="text-sm text-muted-foreground">
+                  Please start a new analysis for this token.
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Technical Details */}
+        {errorCode && (
+          <div className="mt-4 text-center">
+            <span className="text-xs text-muted-foreground font-mono">
+              Error Code: {errorCode}
+            </span>
+          </div>
+        )}
       </motion.div>
     );
   }

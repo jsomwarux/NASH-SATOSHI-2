@@ -585,7 +585,9 @@ export async function registerRoutes(
         console.log(`Gumloop webhook: Analysis ${analysisId} ${state}`);
         await storage.updateAnalysis(analysisId, {
           status: "failed",
-          displaySummary: `Analysis ${state.toLowerCase()}. The token input may be invalid or Gumloop encountered an error.`,
+          errorCode: state === "FAILED" ? "PIPELINE_ERROR" : "TERMINATED",
+          errorMessage: `Analysis pipeline ${state.toLowerCase()}. The token input may be invalid or the service encountered an error.`,
+          displaySummary: `Analysis ${state.toLowerCase()}. Please try again.`,
         });
 
         // Publish completion event to Redis for real-time updates
@@ -820,7 +822,49 @@ export async function registerRoutes(
         console.error("Error fetching price data from CoinGecko:", priceError);
       }
 
-      // Create the analysis record with pending status and price data
+      // Determine what to charge on SUCCESS (don't charge yet - only on completion)
+      let chargeType: string | null = null;
+
+      if (tier === "free") {
+        const sub = await storage.getUserSubscription(userId);
+        const trialStart = sub?.trialStartDate ? new Date(sub.trialStartDate) : null;
+        const now = new Date();
+        const daysSinceTrialStart = trialStart
+          ? Math.floor((now.getTime() - trialStart.getTime()) / (1000 * 60 * 60 * 24))
+          : 0;
+        const isInTrial = daysSinceTrialStart < SUBSCRIPTION_TIERS.free.trialDays;
+
+        if (isInTrial) {
+          // Check if under daily limit
+          const dailyUsed = await storage.getDailyUsage(userId, today);
+          if (dailyUsed < SUBSCRIPTION_TIERS.free.trialAnalysesPerDay) {
+            chargeType = "daily";
+          } else if (creditBalance > 0) {
+            chargeType = "credit";
+          }
+        } else {
+          // Post-trial: check weekly limit
+          const weeklyUsed = await storage.getWeeklyUsage(userId);
+          if (weeklyUsed < SUBSCRIPTION_TIERS.free.postTrialAnalysesPerWeek) {
+            chargeType = "weekly";
+          } else if (creditBalance > 0) {
+            chargeType = "credit";
+          }
+        }
+      } else {
+        // Paid tier
+        const monthlyUsed = subscription?.monthlyAnalysesUsed || 0;
+        const monthlyLimit = tierConfig.analysesPerMonth || 0;
+
+        if (monthlyUsed < monthlyLimit) {
+          chargeType = "monthly";
+        } else if (creditBalance > 0) {
+          chargeType = "credit";
+        }
+      }
+
+      // Create the analysis record with pending status, price data, and chargeType
+      // Credits will be deducted only on successful completion
       const analysis = await storage.createAnalysis({
         tokenId,
         tokenSymbol,
@@ -836,57 +880,10 @@ export async function registerRoutes(
         marketCap,
         priceChange24h,
         priceChange7d,
+        chargeType, // Will be charged on successful completion only
       });
 
-      // Track usage - determine if we should use subscription allocation or credits
-      let usedCredit = false;
-
-      if (tier === "free") {
-        const sub = await storage.getUserSubscription(userId);
-        const trialStart = sub?.trialStartDate ? new Date(sub.trialStartDate) : null;
-        const now = new Date();
-        const daysSinceTrialStart = trialStart
-          ? Math.floor((now.getTime() - trialStart.getTime()) / (1000 * 60 * 60 * 24))
-          : 0;
-        const isInTrial = daysSinceTrialStart < SUBSCRIPTION_TIERS.free.trialDays;
-
-        if (isInTrial) {
-          // Check if under daily limit
-          const dailyUsed = await storage.getDailyUsage(userId, today);
-          if (dailyUsed < SUBSCRIPTION_TIERS.free.trialAnalysesPerDay) {
-            await storage.incrementDailyUsage(userId, today);
-          } else if (creditBalance > 0) {
-            // Over daily limit, use credit
-            await storage.useCredit(userId);
-            usedCredit = true;
-          }
-        } else {
-          // Post-trial: check weekly limit
-          const weeklyUsed = await storage.getWeeklyUsage(userId);
-          if (weeklyUsed < SUBSCRIPTION_TIERS.free.postTrialAnalysesPerWeek) {
-            await storage.incrementWeeklyUsage(userId);
-          } else if (creditBalance > 0) {
-            // Over weekly limit, use credit
-            await storage.useCredit(userId);
-            usedCredit = true;
-          }
-        }
-      } else {
-        // Paid tier
-        const monthlyUsed = subscription?.monthlyAnalysesUsed || 0;
-        const monthlyLimit = tierConfig.analysesPerMonth || 0;
-
-        if (monthlyUsed < monthlyLimit) {
-          // Under monthly limit, use subscription allocation
-          await storage.incrementMonthlyUsage(userId);
-        } else if (creditBalance > 0) {
-          // Over monthly limit, use credit
-          await storage.useCredit(userId);
-          usedCredit = true;
-        }
-      }
-
-      console.log(`Analysis started for user ${userId}: tier=${tier}, usedCredit=${usedCredit}`);
+      console.log(`Analysis started for user ${userId}: tier=${tier}, chargeType=${chargeType} (will charge on success)`);
 
       // Start the Gumloop analysis asynchronously
       startGumloopAnalysis(analysis.id, tokenId, tokenSymbol, tokenName).catch((err) => {
@@ -984,6 +981,99 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error getting analysis by token:", error);
       res.status(500).json({ message: "Failed to get analysis" });
+    }
+  });
+
+  // Retry a failed analysis
+  app.post("/api/analyze/:id/retry", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const analysisId = parseInt(req.params.id, 10);
+
+      if (isNaN(analysisId)) {
+        res.status(400).json({ message: "Invalid analysis ID" });
+        return;
+      }
+
+      // Get the analysis
+      const analysis = await storage.getAnalysis(analysisId);
+
+      if (!analysis) {
+        res.status(404).json({ message: "Analysis not found" });
+        return;
+      }
+
+      // Verify ownership
+      if (analysis.userId !== userId) {
+        res.status(403).json({ message: "Not authorized to retry this analysis" });
+        return;
+      }
+
+      // Only retry failed analyses
+      if (analysis.status !== "failed") {
+        res.status(400).json({
+          message: "Can only retry failed analyses",
+          currentStatus: analysis.status,
+        });
+        return;
+      }
+
+      // Check retry limit (max 3)
+      const MAX_RETRIES = 3;
+      const retryCount = analysis.retryCount || 0;
+
+      if (retryCount >= MAX_RETRIES) {
+        res.status(400).json({
+          message: `Maximum retry limit (${MAX_RETRIES}) reached. Please start a new analysis.`,
+          code: "MAX_RETRIES_REACHED",
+          retryCount,
+          maxRetries: MAX_RETRIES,
+        });
+        return;
+      }
+
+      // Check concurrent limit (same as /api/analyze)
+      const MAX_CONCURRENT_PER_USER = 2;
+      const runningCount = await storage.getRunningAnalysesCount(userId);
+      if (runningCount >= MAX_CONCURRENT_PER_USER) {
+        res.status(429).json({
+          message: `You have ${runningCount} analyses in progress. Please wait for one to complete.`,
+          code: "CONCURRENT_LIMIT",
+        });
+        return;
+      }
+
+      // Reset the analysis for retry
+      await storage.updateAnalysis(analysisId, {
+        status: "pending",
+        retryCount: retryCount + 1,
+        errorMessage: null,
+        errorCode: null,
+        gumloopRunId: null,
+        rawGumloopResponse: null,
+      });
+
+      console.log(`Retry started for analysis ${analysisId} by user ${userId} (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+
+      // Start the Gumloop analysis again
+      startGumloopAnalysis(
+        analysisId,
+        analysis.tokenId,
+        analysis.tokenSymbol,
+        analysis.tokenName
+      ).catch((err) => {
+        console.error("Error starting retry analysis:", err);
+      });
+
+      res.json({
+        analysisId,
+        status: "pending",
+        retryCount: retryCount + 1,
+        message: "Retry started successfully",
+      });
+    } catch (error) {
+      console.error("Error retrying analysis:", error);
+      res.status(500).json({ message: "Failed to retry analysis" });
     }
   });
 
@@ -1277,9 +1367,20 @@ async function startGumloopAnalysis(
     await pollGumloopStatus(analysisId, runId, GUMLOOP_API_KEY);
   } catch (error) {
     console.error("Gumloop analysis error:", error);
+    const errorMessage = error instanceof Error ? error.message : "Analysis failed to start";
+    // Determine error code based on error message
+    let errorCode = "API_ERROR";
+    if (errorMessage.toLowerCase().includes("rate limit") || errorMessage.includes("429")) {
+      errorCode = "RATE_LIMIT";
+    } else if (errorMessage.toLowerCase().includes("timeout")) {
+      errorCode = "TIMEOUT";
+    }
+
     await storage.updateAnalysis(analysisId, {
       status: "failed",
-      displaySummary: error instanceof Error ? error.message : "Analysis failed",
+      errorCode,
+      errorMessage,
+      displaySummary: "Analysis failed to start. Please try again.",
     });
   }
 }
@@ -1554,7 +1655,9 @@ async function pollGumloopStatus(
         console.error(`Analysis ${analysisId}: Gumloop run ${state}. Marking analysis as failed.`);
         await storage.updateAnalysis(analysisId, {
           status: "failed",
-          displaySummary: `Analysis ${state.toLowerCase()}. The token input may be invalid or Gumloop encountered an error.`,
+          errorCode: state === "FAILED" ? "PIPELINE_ERROR" : "TERMINATED",
+          errorMessage: `Analysis pipeline ${state.toLowerCase()}. The token input may be invalid or the service encountered an error.`,
+          displaySummary: `Analysis ${state.toLowerCase()}. Please try again.`,
         });
         return; // Exit polling - run is complete (failed)
       }
@@ -1569,7 +1672,9 @@ async function pollGumloopStatus(
       if (pollError instanceof Error && pollError.message.includes("terminated")) {
         await storage.updateAnalysis(analysisId, {
           status: "failed",
-          displaySummary: "Analysis terminated by Gumloop. Please try again.",
+          errorCode: "TERMINATED",
+          errorMessage: "Analysis pipeline was terminated unexpectedly.",
+          displaySummary: "Analysis was terminated. Please try again.",
         });
         return;
       }
@@ -1580,7 +1685,9 @@ async function pollGumloopStatus(
   console.error(`Analysis ${analysisId}: Polling timed out after 45 minutes`);
   await storage.updateAnalysis(analysisId, {
     status: "failed",
-    displaySummary: "Analysis timed out after 45 minutes. Please try again.",
+    errorCode: "TIMEOUT",
+    errorMessage: "Analysis timed out after 45 minutes. The service may be experiencing high demand.",
+    displaySummary: "Analysis timed out. Please try again.",
   });
 }
 
@@ -1702,6 +1809,8 @@ async function processGumloopCompletion(
     console.error(`Analysis ${analysisId}: No valid output found`);
     await storage.updateAnalysis(analysisId, {
       status: "failed",
+      errorCode: "EMPTY_OUTPUT",
+      errorMessage: "Analysis completed but returned empty or invalid output.",
       displaySummary: "Analysis completed but no valid output was returned.",
     });
     return;
@@ -1869,7 +1978,16 @@ async function processGumloopCompletion(
     modelScores: parsed.modelScores,
           modelAnalyses: parsed.modelAnalyses,
     rawGumloopResponse: rawResponseToSave,
+    // Clear any previous error state on success
+    errorMessage: null,
+    errorCode: null,
   });
+
+  // NOW charge the user - only on successful completion
+  if (existingAnalysis?.userId && existingAnalysis?.chargeType) {
+    await chargeForSuccessfulAnalysis(existingAnalysis.userId, existingAnalysis.chargeType as string);
+    console.log(`Analysis ${analysisId}: Charged user ${existingAnalysis.userId} via ${existingAnalysis.chargeType}`);
+  }
 
   // Publish completion event to Redis for real-time updates
   const { publishAnalysisComplete, invalidateCache, CACHE_KEYS } = await import("./redis");
@@ -1878,6 +1996,28 @@ async function processGumloopCompletion(
   await invalidateCache(CACHE_KEYS.LEADERBOARD);
 
   console.log(`Analysis ${analysisId}: Completed successfully`);
+}
+
+// Helper function to charge user on successful analysis completion
+async function chargeForSuccessfulAnalysis(userId: string, chargeType: string): Promise<void> {
+  const today = new Date().toISOString().split("T")[0];
+
+  switch (chargeType) {
+    case "daily":
+      await storage.incrementDailyUsage(userId, today);
+      break;
+    case "weekly":
+      await storage.incrementWeeklyUsage(userId);
+      break;
+    case "monthly":
+      await storage.incrementMonthlyUsage(userId);
+      break;
+    case "credit":
+      await storage.useCredit(userId);
+      break;
+    default:
+      console.warn(`Unknown chargeType: ${chargeType} for user ${userId}`);
+  }
 }
 
 // ==================== ANALYSIS RECOVERY ====================
@@ -1919,6 +2059,8 @@ export async function recoverStuckAnalyses(): Promise<void> {
 
         await storage.updateAnalysis(analysis.id, {
           status: "failed",
+          errorCode: "API_ERROR",
+          errorMessage: "Analysis failed to start - the pipeline was not created.",
           displaySummary: "Analysis failed to start. Please try again.",
         });
       }

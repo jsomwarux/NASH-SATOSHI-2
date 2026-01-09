@@ -79,6 +79,24 @@ export async function getAnalysisByToken(tokenId: string): Promise<TokenAnalysis
   return fetchApi<TokenAnalysis>(`/api/analyze/token/${tokenId}`);
 }
 
+// Retry a failed analysis
+export interface RetryAnalysisResponse {
+  analysisId: number;
+  status: string;
+  retryCount: number;
+  message: string;
+}
+
+export async function retryAnalysis(
+  analysisId: number,
+  authToken: string
+): Promise<RetryAnalysisResponse> {
+  return fetchApi<RetryAnalysisResponse>(`/api/analyze/${analysisId}/retry`, {
+    method: "POST",
+    authToken,
+  });
+}
+
 // Get Leaderboard
 export interface LeaderboardOptions {
   limit?: number;
