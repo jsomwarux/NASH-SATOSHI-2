@@ -856,8 +856,8 @@ export async function registerRoutes(
         return;
       }
 
-      // Check concurrent analysis limit (max 2 running at once per user)
-      const MAX_CONCURRENT_PER_USER = 2;
+      // Check concurrent analysis limit (max 10 running at once per user)
+      const MAX_CONCURRENT_PER_USER = 10;
       const runningCount = await storage.getRunningAnalysesCount(userId);
       if (runningCount >= MAX_CONCURRENT_PER_USER) {
         res.status(429).json({
@@ -1124,7 +1124,7 @@ export async function registerRoutes(
       }
 
       // Check concurrent limit (same as /api/analyze)
-      const MAX_CONCURRENT_PER_USER = 2;
+      const MAX_CONCURRENT_PER_USER = 10;
       const runningCount = await storage.getRunningAnalysesCount(userId);
       if (runningCount >= MAX_CONCURRENT_PER_USER) {
         res.status(429).json({

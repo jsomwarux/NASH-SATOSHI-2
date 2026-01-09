@@ -42,8 +42,12 @@ Fixed missing Market Cap modifier in Score Modifiers section. Updated Social Sig
 #### 4. Analysis Rate Limiter Fix
 - **Increased rate limit** from 10 to 30 requests per minute for `/api/analyze` endpoint
 - **Root cause**: Express rate limiter was too strict, blocking legitimate concurrent analysis requests
-- **Per-user concurrent limit** (max 2 running analyses) still enforced in route handler
 - **Updated error message** to be more generic ("Too many requests" instead of "rate limit exceeded")
+
+#### 5. Increased Concurrent Analysis Limit
+- **Increased per-user concurrent limit** from 2 to 10 running analyses
+- **Rationale**: Gumloop handles queuing automatically, DB supports high concurrency, no technical bottleneck
+- **Updated both endpoints**: `/api/analyze` and `/api/analyze/:id/retry`
 
 ### Files Modified
 | File | Changes |
@@ -64,7 +68,7 @@ ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS account_quality TEXT;
 - Market Cap modifier now displays for capped analyses (mid/large/mega cap tokens)
 - Social Signals shows 4 cards: Narrative Heat, Community Status, Account Quality, Notable KOLs
 - No more "N/A" values in Social Signals section
-- Users can run 2 concurrent analyses without hitting rate limits
+- Users can run up to 10 concurrent analyses
 - All TypeScript compiles successfully
 
 ---
