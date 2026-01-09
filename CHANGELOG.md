@@ -4,7 +4,76 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-09 (Latest)
+## Session: 2026-01-09 Part 2 (Latest)
+
+### Summary
+Score formatting standardization, market cap badge fixes, ScoreCard UI improvements, and critical cancel analysis fix (Gumloop API integration). Also improved error handling in AnalysisTrackerContext.
+
+### Changes Made
+
+#### 1. Score Formatting Utilities
+- **Created utility functions** in `client/src/lib/utils.ts`:
+  - `formatScore()` - 2 decimal places for final/model/average scores (e.g., "82.00")
+  - `formatComponentScore()` - 1 decimal place for component scores (e.g., "8.5")
+  - `formatModifier()` - 1 decimal with +/- sign for modifiers (e.g., "+2.5", "-1.0")
+- **Updated all score displays** across: ScoreCard.tsx, LeaderboardTable.tsx, ModelAnalysisModal.tsx, ShareCard.tsx, ShareModal.tsx, Analyses.tsx, Leaderboard.tsx
+
+#### 2. Market Cap Badge Fix
+- **Updated tier thresholds** in `server/routes.ts` (two locations):
+  - Micro: <$10M (was <$100M)
+  - Small: $10M-$50M (was $100M-$500M)
+  - Mid: $50M-$250M (was $500M-$1B)
+  - Large: $250M-$1B (was $1B-$10B)
+  - Mega: >$1B (was >$10B)
+- **Added all tier colors** to ScoreCard badge display
+
+#### 3. ScoreCard UI Improvements
+- **Modifiers layout** - Changed from grid to flexbox (`flex flex-wrap gap-2` with `flex-1 min-w-[80px] max-w-[120px]`)
+- **Share/Reanalyze buttons** - Now display text labels instead of icon-only
+- **Removed redundant "Latest of X" badge** - Count now integrated into average score section
+
+#### 4. Cancel Analysis Fix (Critical)
+- **Extended cancel window** from 30 seconds to 60 seconds
+- **Fixed Gumloop API endpoint** - Changed from non-existent `terminate_pl_run` to `/kill_pipeline`
+- **Fixed request format** - Parameters sent as JSON body instead of URL query params
+- **Backend updated** to allow cancellation even when gumloopRunId is set
+- **Added debug logging** throughout cancel flow for troubleshooting
+
+#### 5. AnalysisTrackerContext Error Handling
+- **Cancelled status handling** - Silently untrack cancelled analyses
+- **404/Not found handling** - Untrack analyses that no longer exist
+- **Rate limit handling** - Silently skip rate-limited requests instead of logging errors
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `client/src/lib/utils.ts` | Added formatScore(), formatComponentScore(), formatModifier() utilities |
+| `client/src/components/scorecard/ScoreCard.tsx` | Score formatting, modifiers flexbox layout, button text labels, market cap badge colors, cancel window extended to 60s |
+| `client/src/components/leaderboard/LeaderboardTable.tsx` | Updated to use formatScore() |
+| `client/src/components/scorecard/ModelAnalysisModal.tsx` | Updated to use formatScore() |
+| `client/src/components/share/ShareCard.tsx` | Updated to use formatScore() |
+| `client/src/components/share/ShareModal.tsx` | Updated to use formatScore() |
+| `client/src/pages/Analyses.tsx` | Updated to use formatScore() |
+| `client/src/pages/Leaderboard.tsx` | Updated to use formatScore() |
+| `server/routes.ts` | Market cap tier thresholds updated, cancel endpoint fixed with /kill_pipeline API |
+| `client/src/contexts/AnalysisTrackerContext.tsx` | Added error handling for cancelled, 404, and rate limit |
+| `client/src/hooks/useAnalysis.ts` | Added console logging for cancel debugging |
+| `client/src/pages/Analyze.tsx` | Added console logging for handleCancel debugging |
+
+### Commands Run
+- `npx tsc --noEmit` - Verified TypeScript compilation
+- Replit republish - Deployed changes to production
+
+### Current State
+- Scores display with consistent decimal formatting (2 decimals for final/model scores, 1 for components, +/- for modifiers)
+- Market cap badges show correct category based on new thresholds
+- Cancel analysis works correctly with Gumloop pipeline termination
+- Analysis tracker gracefully handles edge cases (cancelled, not found, rate limited)
+- All TypeScript compiles successfully
+
+---
+
+## Session: 2026-01-09 Part 1
 
 ### Summary
 Major reliability improvements: fixed database connection issues, improved Gumloop output parsing, and added clickable model analysis modals. Added scorecard enhancements: average score display, reanalyze button, and cancel analysis capability.
