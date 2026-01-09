@@ -39,6 +39,12 @@ Fixed missing Market Cap modifier in Score Modifiers section. Updated Social Sig
   - `top_kols` → `x_top_kols`
 - Updated both text-based parser and direct outputs parser
 
+#### 4. Analysis Rate Limiter Fix
+- **Increased rate limit** from 10 to 30 requests per minute for `/api/analyze` endpoint
+- **Root cause**: Express rate limiter was too strict, blocking legitimate concurrent analysis requests
+- **Per-user concurrent limit** (max 2 running analyses) still enforced in route handler
+- **Updated error message** to be more generic ("Too many requests" instead of "rate limit exceeded")
+
 ### Files Modified
 | File | Changes |
 |------|---------|
@@ -46,6 +52,7 @@ Fixed missing Market Cap modifier in Score Modifiers section. Updated Social Sig
 | `server/gumloop-parser.ts` | Added communityStatus, accountQuality fields with fallback aliases |
 | `shared/schema.ts` | Added community_status and account_quality columns |
 | `client/src/components/scorecard/ScoreCard.tsx` | New 4-card Social Signals layout, adjusted modifier box sizing |
+| `server/index.ts` | Increased analysis endpoint rate limit from 10 to 30 per minute |
 
 ### Database Migration Required
 ```sql
@@ -57,6 +64,7 @@ ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS account_quality TEXT;
 - Market Cap modifier now displays for capped analyses (mid/large/mega cap tokens)
 - Social Signals shows 4 cards: Narrative Heat, Community Status, Account Quality, Notable KOLs
 - No more "N/A" values in Social Signals section
+- Users can run 2 concurrent analyses without hitting rate limits
 - All TypeScript compiles successfully
 
 ---

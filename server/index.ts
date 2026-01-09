@@ -72,11 +72,12 @@ const globalLimiter = rateLimit({
 });
 app.use("/api/", globalLimiter);
 
-// Stricter rate limiting for analysis endpoint (10 per minute)
+// Rate limiting for analysis endpoint (30 per minute)
+// Per-user concurrent limits (max 2) are enforced in the route handler
 const analysisLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 10,
-  message: { message: "Analysis rate limit exceeded. Please wait before starting another analysis." },
+  max: 30,
+  message: { message: "Too many requests. Please wait a moment before trying again." },
   standardHeaders: true,
   legacyHeaders: false,
 });
