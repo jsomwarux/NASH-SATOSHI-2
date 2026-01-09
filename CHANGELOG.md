@@ -4,6 +4,42 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
+## Session: 2026-01-09
+
+### Summary
+Fixed intermittent "Analysis failed" and "Analysis not found" errors by adding database connection retry logic and improving frontend retry configuration.
+
+### Changes Made
+1. **Added database retry wrapper** - Created `withRetry()` function in `db.ts` with exponential backoff and jitter for handling transient connection errors (ECONNRESET, ETIMEDOUT, connection terminated, etc.)
+2. **Wrapped critical storage operations** - Applied retry wrapper to: `createAnalysis`, `getAnalysis`, `getAnalysisByToken`, `getAnalysisByRunId`, `updateAnalysis`, `getUserAnalyses`, `getUserSubscription`, `getLeaderboard`
+3. **Improved frontend retry logic** - Increased retry attempts and added exponential backoff delays to:
+   - `useAnalysis` hook: 5 retries with 500ms-5s exponential backoff
+   - `useAnalysisByToken` hook: 3 retries
+   - `analyzeTokenMutation`: 3 retries for starting analyses
+   - All leaderboard hooks: 3 retries
+4. **Root cause analysis** - Identified issues as transient database connection failures causing intermittent 404s and failed operations
+
+### Files Modified
+- `server/db.ts` - Added `withRetry()` utility function with exponential backoff
+- `server/storage.ts` - Wrapped 8 critical database operations with retry logic
+- `client/src/hooks/useAnalysis.ts` - Improved retry config for analysis fetching and creation
+- `client/src/hooks/useLeaderboard.ts` - Added retry logic to all leaderboard hooks
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compilation check passed
+
+### Current State
+- Database operations now automatically retry on transient connection errors
+- Frontend fetches have better retry behavior with exponential backoff
+- Both analysis creation and viewing should be more reliable
+
+### Notes
+- Retry logic uses exponential backoff with jitter to prevent thundering herd
+- Maximum 3 retries on backend, 3-5 on frontend depending on operation criticality
+- Retryable errors include: ECONNRESET, ETIMEDOUT, connection terminated, too many clients
+
+---
+
 ## Session: 2026-01-08
 
 ### Summary
