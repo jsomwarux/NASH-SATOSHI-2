@@ -59,7 +59,8 @@ export interface ParsedGumloopResponse {
   exitLiquidityModifier?: number;
   peakProximityModifier?: number;
   dataQualityModifier?: number;
-  marketCapModifier?: number; // -15 to +5, large caps penalized
+  fdvModifier?: number; // -15 to +5, large FDV penalized (replaces marketCapModifier)
+  marketCapModifier?: number; // deprecated, use fdvModifier
   totalModifiers?: number;
   penalties?: number;
 
@@ -300,6 +301,8 @@ const FIELD_ALIASES: Record<string, string> = {
   'data_quality_modifier': 'data_quality_modifier',
   'data quality modifier': 'data_quality_modifier',
 
+  'fdv_modifier': 'fdv_modifier',
+  'fdv modifier': 'fdv_modifier',
   'market_cap_modifier': 'market_cap_modifier',
   'market cap modifier': 'market_cap_modifier',
 
@@ -908,7 +911,14 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   const dataQualityModifier = extractNumericField(parseText, 'data_quality_modifier');
   if (dataQualityModifier !== undefined) result.dataQualityModifier = dataQualityModifier;
 
+  // FDV modifier with fallback to market_cap_modifier for backward compatibility
+  const fdvModifier = extractNumericField(parseText, 'fdv_modifier');
   const marketCapModifier = extractNumericField(parseText, 'market_cap_modifier');
+  if (fdvModifier !== undefined) {
+    result.fdvModifier = fdvModifier;
+  } else if (marketCapModifier !== undefined) {
+    result.fdvModifier = marketCapModifier; // Use market cap as fallback
+  }
   if (marketCapModifier !== undefined) result.marketCapModifier = marketCapModifier;
 
   const totalModifiers = extractNumericField(parseText, 'total_modifiers');
@@ -918,7 +928,7 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   if (penalties !== undefined) result.penalties = penalties;
 
   // Log all modifiers for debugging
-  console.log(`Parser: Modifiers - phase: ${result.phaseModifier}, narrative: ${result.narrativeModifier}, exitLiq: ${result.exitLiquidityModifier}, peakProx: ${result.peakProximityModifier}, dataQuality: ${result.dataQualityModifier}, marketCap: ${result.marketCapModifier}, total: ${result.totalModifiers}`);
+  console.log(`Parser: Modifiers - phase: ${result.phaseModifier}, narrative: ${result.narrativeModifier}, exitLiq: ${result.exitLiquidityModifier}, peakProx: ${result.peakProximityModifier}, dataQuality: ${result.dataQualityModifier}, fdv: ${result.fdvModifier}, total: ${result.totalModifiers}`);
 
   // Narrative - use dedicated extraction with multiple patterns
   const narrative = extractNarrativeField(parseText);
@@ -2119,7 +2129,14 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   const dataQualityModifier = getNumber('data_quality_modifier');
   if (dataQualityModifier !== undefined) result.dataQualityModifier = dataQualityModifier;
 
+  // FDV modifier with fallback to market_cap_modifier for backward compatibility
+  const fdvModifier = getNumber('fdv_modifier');
   const marketCapModifier = getNumber('market_cap_modifier');
+  if (fdvModifier !== undefined) {
+    result.fdvModifier = fdvModifier;
+  } else if (marketCapModifier !== undefined) {
+    result.fdvModifier = marketCapModifier; // Use market cap as fallback
+  }
   if (marketCapModifier !== undefined) result.marketCapModifier = marketCapModifier;
 
   // Model scores

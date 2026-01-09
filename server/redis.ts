@@ -150,37 +150,72 @@ export async function checkRateLimit(
 }
 
 // Distributed Gumloop request throttling
+// Uses a queue-based approach to serialize requests and prevent rate limiting
+
+// In-memory queue for when Redis isn't available
+// Uses a simple counter-based approach to avoid race conditions
+let gumloopSlotCounter = 0;
+let gumloopBaseTime = Date.now();
+const GUMLOOP_INTERVAL_MS = 2500; // 2.5 seconds between requests
+
 export async function waitForGumloopSlot(): Promise<void> {
   const client = getRedis();
-  const INTERVAL_MS = 2000; // 2 seconds between requests
+
+  // Get my slot number atomically (works for both Redis and non-Redis)
+  const mySlot = ++gumloopSlotCounter;
+
+  // Reset counter periodically to prevent overflow
+  if (mySlot > 1000) {
+    gumloopSlotCounter = 1;
+    gumloopBaseTime = Date.now();
+  }
 
   if (!client) {
-    // Fallback to simple delay if no Redis
-    await new Promise((resolve) => setTimeout(resolve, INTERVAL_MS));
+    // Calculate when my slot should execute
+    const myScheduledTime = gumloopBaseTime + (mySlot - 1) * GUMLOOP_INTERVAL_MS;
+    const now = Date.now();
+
+    if (myScheduledTime > now) {
+      const waitTime = myScheduledTime - now;
+      console.log(`Gumloop queue: slot ${mySlot}, waiting ${waitTime}ms`);
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    } else {
+      // We're behind schedule, update base time
+      gumloopBaseTime = now - (mySlot - 1) * GUMLOOP_INTERVAL_MS;
+    }
     return;
   }
 
   const key = CACHE_KEYS.GUMLOOP_LAST_REQUEST;
+  const slotKey = `${key}:slot`;
 
   try {
-    const lastRequest = await client.get<number>(key);
-    const now = Date.now();
+    // Use atomic increment to get a unique slot number across all instances
+    const redisSlot = await client.incr(slotKey);
+    await client.expire(slotKey, 300); // Reset after 5 minutes of inactivity
 
-    if (lastRequest) {
-      const elapsed = now - lastRequest;
-      if (elapsed < INTERVAL_MS) {
-        const waitTime = INTERVAL_MS - elapsed;
-        console.log(`Waiting ${waitTime}ms for Gumloop rate limit (Redis)`);
-        await new Promise((resolve) => setTimeout(resolve, waitTime));
-      }
+    // Get or set the base time
+    let baseTime = await client.get<number>(key);
+    if (!baseTime) {
+      baseTime = Date.now();
+      await client.set(key, baseTime, { ex: 300 });
     }
 
-    // Update last request time
-    await client.set(key, Date.now(), { ex: 60 }); // Expire after 60s
+    // Calculate when this slot should execute
+    const myScheduledTime = baseTime + (redisSlot - 1) * GUMLOOP_INTERVAL_MS;
+    const now = Date.now();
+
+    if (myScheduledTime > now) {
+      const waitTime = myScheduledTime - now;
+      console.log(`Gumloop queue: Redis slot ${redisSlot}, waiting ${waitTime}ms`);
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    }
   } catch (error) {
     console.error("Gumloop rate limit error:", error);
-    // Fallback to simple delay
-    await new Promise((resolve) => setTimeout(resolve, INTERVAL_MS));
+    // Fallback to slot-based delay
+    const waitTime = mySlot * GUMLOOP_INTERVAL_MS;
+    console.log(`Gumloop queue: fallback slot ${mySlot}, waiting ${waitTime}ms`);
+    await new Promise((resolve) => setTimeout(resolve, waitTime));
   }
 }
 

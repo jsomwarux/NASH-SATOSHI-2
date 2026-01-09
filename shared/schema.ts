@@ -296,10 +296,12 @@ export const tokenAnalyses = pgTable("token_analyses", {
   exitLiquidityModifier: numeric("exit_liquidity_modifier", { precision: 5, scale: 2 }),
   peakProximityModifier: numeric("peak_proximity_modifier", { precision: 5, scale: 2 }),
   dataQualityModifier: numeric("data_quality_modifier", { precision: 5, scale: 2 }),
-  marketCapModifier: numeric("market_cap_modifier", { precision: 5, scale: 2 }), // -15 to +5, large caps penalized
+  marketCapModifier: numeric("market_cap_modifier", { precision: 5, scale: 2 }), // deprecated, use fdvModifier
+  fdvModifier: numeric("fdv_modifier", { precision: 5, scale: 2 }), // -15 to +5, large FDV penalized
 
-  // Market cap scaling
-  marketCapTier: text("market_cap_tier"), // mega, large, mid, small
+  // FDV scaling (replaces market cap scaling)
+  fdvTier: text("fdv_tier"), // nano, micro, small, mid, large, mega
+  marketCapTier: text("market_cap_tier"), // deprecated, kept for backward compatibility
   scoreCapped: boolean("score_capped"), // true if score was capped due to market cap
   uncappedScore: numeric("uncapped_score", { precision: 5, scale: 2 }), // original score before cap
 

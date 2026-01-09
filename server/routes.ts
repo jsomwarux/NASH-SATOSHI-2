@@ -875,6 +875,7 @@ export async function registerRoutes(
       // Fetch current price data from CoinGecko
       let currentPrice: string | null = null;
       let marketCap: string | null = null;
+      let fdv: string | null = null;
       let priceChange24h: string | null = null;
       let priceChange7d: string | null = null;
 
@@ -905,6 +906,7 @@ export async function registerRoutes(
           if (marketData) {
             currentPrice = marketData.current_price?.usd?.toString() || null;
             marketCap = marketData.market_cap?.usd?.toString() || null;
+            fdv = marketData.fully_diluted_valuation?.usd?.toString() || null;
             priceChange24h = marketData.price_change_percentage_24h?.toString() || null;
             priceChange7d = marketData.price_change_percentage_7d?.toString() || null;
           }
@@ -969,6 +971,7 @@ export async function registerRoutes(
         tier: "PENDING",
         currentPrice,
         marketCap,
+        fdv,
         priceChange24h,
         priceChange7d,
         chargeType, // Will be charged on successful completion only
@@ -1775,29 +1778,31 @@ async function pollGumloopStatus(
 
         console.log(`Analysis ${analysisId}: Parsed - score: ${parsed.finalScore}, tier: ${parsed.tier}, narrative: ${parsed.narrative}`);
 
-        // Fetch existing analysis to get market cap for score capping
+        // Fetch existing analysis to get FDV for score capping (fall back to market cap)
         const existingAnalysis = await storage.getAnalysis(analysisId);
-        const marketCapStr = existingAnalysis?.marketCap;
-        const marketCap = marketCapStr ? parseFloat(marketCapStr) : null;
+        const fdvStr = existingAnalysis?.fdv || existingAnalysis?.marketCap;
+        const fdvValue = fdvStr ? parseFloat(fdvStr as string) : null;
 
-        // Determine market cap tier and apply hard caps
-        // Thresholds: Micro <$10M, Small $10M-$50M, Mid $50M-$250M, Large $250M-$1B, Mega >$1B
-        let marketCapTier = "micro";
+        // Determine FDV tier and apply hard caps
+        // Thresholds: Nano <$1M, Micro $1M-$10M, Small $10M-$50M, Mid $50M-$200M, Large $200M-$1B, Mega >$1B
+        let fdvTier = "micro";
         let scoreCap = 100;
-        if (marketCap !== null && !isNaN(marketCap)) {
-          if (marketCap > 1_000_000_000) {
-            marketCapTier = "mega";
+        if (fdvValue !== null && !isNaN(fdvValue)) {
+          if (fdvValue > 1_000_000_000) {
+            fdvTier = "mega";
             scoreCap = 80;
-          } else if (marketCap > 250_000_000) {
-            marketCapTier = "large";
+          } else if (fdvValue > 200_000_000) {
+            fdvTier = "large";
             scoreCap = 85;
-          } else if (marketCap > 50_000_000) {
-            marketCapTier = "mid";
+          } else if (fdvValue > 50_000_000) {
+            fdvTier = "mid";
             scoreCap = 90;
-          } else if (marketCap > 10_000_000) {
-            marketCapTier = "small";
+          } else if (fdvValue > 10_000_000) {
+            fdvTier = "small";
+          } else if (fdvValue > 1_000_000) {
+            fdvTier = "micro";
           } else {
-            marketCapTier = "micro";
+            fdvTier = "nano";
           }
         }
 
@@ -1806,15 +1811,15 @@ async function pollGumloopStatus(
         const cappedScore = Math.min(parsed.finalScore, scoreCap);
         const scoreCapped = cappedScore < uncappedScore;
 
-        // Calculate market cap modifier as the penalty applied by score capping
+        // Calculate FDV modifier as the penalty applied by score capping
         // If Gumloop provided a modifier, use that; otherwise calculate from cap
-        const calculatedMarketCapModifier = scoreCapped ? (cappedScore - uncappedScore) : 0;
-        const finalMarketCapModifier = parsed.marketCapModifier !== undefined
-          ? parsed.marketCapModifier
-          : calculatedMarketCapModifier;
+        const calculatedFdvModifier = scoreCapped ? (cappedScore - uncappedScore) : 0;
+        const finalFdvModifier = parsed.fdvModifier !== undefined
+          ? parsed.fdvModifier
+          : calculatedFdvModifier;
 
         if (scoreCapped) {
-          console.log(`Analysis ${analysisId}: Score capped from ${uncappedScore} to ${cappedScore} (${marketCapTier} cap, market cap: $${marketCap?.toLocaleString()}, modifier: ${finalMarketCapModifier})`);
+          console.log(`Analysis ${analysisId}: Score capped from ${uncappedScore} to ${cappedScore} (${fdvTier} cap, FDV: $${fdvValue?.toLocaleString()}, modifier: ${finalFdvModifier})`);
         }
 
         // Update the analysis with parsed results
@@ -1865,9 +1870,11 @@ async function pollGumloopStatus(
           exitLiquidityModifier: parsed.exitLiquidityModifier?.toString(),
           peakProximityModifier: parsed.peakProximityModifier?.toString(),
           dataQualityModifier: parsed.dataQualityModifier?.toString(),
-          marketCapModifier: finalMarketCapModifier.toString(),
-          // Market cap scaling fields
-          marketCapTier: marketCapTier,
+          fdvModifier: finalFdvModifier.toString(),
+          marketCapModifier: finalFdvModifier.toString(), // deprecated, keep for backward compat
+          // FDV scaling fields
+          fdvTier: fdvTier,
+          marketCapTier: fdvTier, // deprecated, keep for backward compat
           scoreCapped: scoreCapped,
           uncappedScore: uncappedScore.toString(),
           equilibriumType: parsed.equilibriumType,
@@ -2140,29 +2147,31 @@ async function processGumloopCompletion(
 
   console.log(`Analysis ${analysisId}: Parsed - score: ${parsed.finalScore}, tier: ${parsed.tier}, narrative: ${parsed.narrative}`);
 
-  // Fetch existing analysis to get market cap for score capping
+  // Fetch existing analysis to get FDV for score capping (fall back to market cap)
   const existingAnalysis = await storage.getAnalysis(analysisId);
-  const marketCapStr = existingAnalysis?.marketCap;
-  const marketCap = marketCapStr ? parseFloat(marketCapStr as string) : null;
+  const fdvStr = existingAnalysis?.fdv || existingAnalysis?.marketCap;
+  const fdvValue = fdvStr ? parseFloat(fdvStr as string) : null;
 
-  // Determine market cap tier and apply hard caps
-  // Thresholds: Micro <$10M, Small $10M-$50M, Mid $50M-$250M, Large $250M-$1B, Mega >$1B
-  let marketCapTier = "micro";
+  // Determine FDV tier and apply hard caps
+  // Thresholds: Nano <$1M, Micro $1M-$10M, Small $10M-$50M, Mid $50M-$200M, Large $200M-$1B, Mega >$1B
+  let fdvTier = "micro";
   let scoreCap = 100;
-  if (marketCap !== null && !isNaN(marketCap)) {
-    if (marketCap > 1_000_000_000) {
-      marketCapTier = "mega";
+  if (fdvValue !== null && !isNaN(fdvValue)) {
+    if (fdvValue > 1_000_000_000) {
+      fdvTier = "mega";
       scoreCap = 80;
-    } else if (marketCap > 250_000_000) {
-      marketCapTier = "large";
+    } else if (fdvValue > 200_000_000) {
+      fdvTier = "large";
       scoreCap = 85;
-    } else if (marketCap > 50_000_000) {
-      marketCapTier = "mid";
+    } else if (fdvValue > 50_000_000) {
+      fdvTier = "mid";
       scoreCap = 90;
-    } else if (marketCap > 10_000_000) {
-      marketCapTier = "small";
+    } else if (fdvValue > 10_000_000) {
+      fdvTier = "small";
+    } else if (fdvValue > 1_000_000) {
+      fdvTier = "micro";
     } else {
-      marketCapTier = "micro";
+      fdvTier = "nano";
     }
   }
 
@@ -2171,15 +2180,15 @@ async function processGumloopCompletion(
   const cappedScore = Math.min(parsed.finalScore, scoreCap);
   const scoreCapped = cappedScore < uncappedScore;
 
-  // Calculate market cap modifier as the penalty applied by score capping
+  // Calculate FDV modifier as the penalty applied by score capping
   // If Gumloop provided a modifier, use that; otherwise calculate from cap
-  const calculatedMarketCapModifier = scoreCapped ? (cappedScore - uncappedScore) : 0;
-  const finalMarketCapModifier = parsed.marketCapModifier !== undefined
-    ? parsed.marketCapModifier
-    : calculatedMarketCapModifier;
+  const calculatedFdvModifier = scoreCapped ? (cappedScore - uncappedScore) : 0;
+  const finalFdvModifier = parsed.fdvModifier !== undefined
+    ? parsed.fdvModifier
+    : calculatedFdvModifier;
 
   if (scoreCapped) {
-    console.log(`Analysis ${analysisId}: Score capped from ${uncappedScore} to ${cappedScore} (${marketCapTier} cap, modifier: ${finalMarketCapModifier})`);
+    console.log(`Analysis ${analysisId}: Score capped from ${uncappedScore} to ${cappedScore} (${fdvTier} cap, FDV: $${fdvValue?.toLocaleString()}, modifier: ${finalFdvModifier})`);
   }
 
   // Update the analysis with parsed results
@@ -2226,8 +2235,10 @@ async function processGumloopCompletion(
     exitLiquidityModifier: parsed.exitLiquidityModifier?.toString(),
     peakProximityModifier: parsed.peakProximityModifier?.toString(),
     dataQualityModifier: parsed.dataQualityModifier?.toString(),
-    marketCapModifier: finalMarketCapModifier.toString(),
-    marketCapTier: marketCapTier,
+    fdvModifier: finalFdvModifier.toString(),
+    marketCapModifier: finalFdvModifier.toString(), // deprecated, keep for backward compat
+    fdvTier: fdvTier,
+    marketCapTier: fdvTier, // deprecated, keep for backward compat
     scoreCapped: scoreCapped,
     uncappedScore: uncappedScore.toString(),
     equilibriumType: parsed.equilibriumType,

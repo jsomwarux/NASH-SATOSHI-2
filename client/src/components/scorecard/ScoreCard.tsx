@@ -154,9 +154,9 @@ function formatPrice(price: string | null): string {
   return `$${num.toFixed(8)}`;
 }
 
-function formatMarketCap(cap: string | null): string {
-  if (!cap) return "N/A";
-  const num = parseFloat(cap);
+function formatFDV(value: string | null): string {
+  if (!value) return "N/A";
+  const num = parseFloat(value);
   if (isNaN(num)) return "N/A";
   if (num >= 1e12) return `$${(num / 1e12).toFixed(2)}T`;
   if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
@@ -845,7 +845,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
     { label: "Exit Liquidity", value: parseFloat(analysis.exitLiquidityModifier as string) || 0 },
     { label: "Peak Proximity", value: parseFloat(analysis.peakProximityModifier as string) || 0 },
     { label: "Data Quality", value: parseFloat(analysis.dataQualityModifier as string) || 0 },
-    { label: "Market Cap", value: parseFloat(analysis.marketCapModifier as string) || 0 },
+    { label: "FDV", value: parseFloat((analysis.fdvModifier || analysis.marketCapModifier) as string) || 0 },
   ];
 
   // Only show modifiers that have non-zero values
@@ -854,8 +854,8 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
   // Calculate total modifiers
   const totalModifiersValue = modifiers.reduce((sum, m) => sum + m.value, 0);
 
-  // Market cap scaling context
-  const marketCapTier = analysis.marketCapTier as string | null;
+  // FDV scaling context (with fallback to marketCapTier for old analyses)
+  const fdvTier = (analysis.fdvTier || analysis.marketCapTier) as string | null;
   const scoreCapped = analysis.scoreCapped as boolean | null;
   const uncappedScore = analysis.uncappedScore ? parseFloat(analysis.uncappedScore as string) : null;
 
@@ -1240,18 +1240,22 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   <Badge variant="outline" className="text-xs">
                     {analysis.confidence === 'H' ? 'High' : analysis.confidence === 'L' ? 'Low' : 'Medium'} Confidence
                   </Badge>
-                  {marketCapTier && (
+                  {fdvTier && (
                     <Badge variant="outline" className={`text-xs ${
-                      marketCapTier === 'mega' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' :
-                      marketCapTier === 'large' ? 'bg-green-500/10 border-green-500/30 text-green-400' :
-                      marketCapTier === 'mid' ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' :
-                      marketCapTier === 'small' ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' :
-                      'bg-purple-500/10 border-purple-500/30 text-purple-400'
+                      fdvTier === 'mega' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' :
+                      fdvTier === 'large' ? 'bg-green-500/10 border-green-500/30 text-green-400' :
+                      fdvTier === 'mid' ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' :
+                      fdvTier === 'small' ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' :
+                      fdvTier === 'micro' ? 'bg-purple-500/10 border-purple-500/30 text-purple-400' :
+                      fdvTier === 'nano' ? 'bg-pink-500/10 border-pink-500/30 text-pink-400' :
+                      'bg-gray-500/10 border-gray-500/30 text-gray-400'
                     }`}>
-                      {marketCapTier === 'mega' ? 'Mega Cap' :
-                       marketCapTier === 'large' ? 'Large Cap' :
-                       marketCapTier === 'mid' ? 'Mid Cap' :
-                       marketCapTier === 'small' ? 'Small Cap' : 'Micro Cap'}
+                      {fdvTier === 'mega' ? 'Mega Cap' :
+                       fdvTier === 'large' ? 'Large Cap' :
+                       fdvTier === 'mid' ? 'Mid Cap' :
+                       fdvTier === 'small' ? 'Small Cap' :
+                       fdvTier === 'micro' ? 'Micro Cap' :
+                       fdvTier === 'nano' ? 'Nano Cap' : 'Unknown'}
                     </Badge>
                   )}
                 </div>
@@ -1277,9 +1281,9 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground">Market Cap</div>
+                  <div className="text-xs text-muted-foreground">FDV</div>
                   <div className="text-lg font-mono font-medium">
-                    {formatMarketCap(analysis.marketCap as string)}
+                    {formatFDV((analysis.fdv || analysis.marketCap) as string)}
                   </div>
                 </div>
                 <div>
@@ -1316,8 +1320,8 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
               </div>
             )}
 
-            {/* Market Cap Scaling Explanation - show when score is capped */}
-            {scoreCapped && uncappedScore !== null && marketCapTier && (
+            {/* FDV Scaling Explanation - show when score is capped */}
+            {scoreCapped && uncappedScore !== null && fdvTier && (
               <div className="mt-4 p-4 rounded-lg bg-blue-500/5 border border-blue-500/20">
                 <div className="flex items-start gap-3">
                   <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center shrink-0 mt-0.5">
@@ -1325,14 +1329,14 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   </div>
                   <div>
                     <div className="text-sm font-medium text-blue-400 mb-1">
-                      {marketCapTier === 'mega' ? 'Mega Cap Adjustment' : marketCapTier === 'large' ? 'Large Cap Adjustment' : 'Mid Cap Adjustment'}
+                      {fdvTier === 'mega' ? 'Mega FDV Adjustment' : fdvTier === 'large' ? 'Large FDV Adjustment' : 'Mid FDV Adjustment'}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      {marketCapTier === 'mega'
-                        ? `This token's $${formatMarketCap(analysis.marketCap as string)} market cap means scores are capped at 80. An 80 for a mega-cap is exceptional—equivalent to a 90+ for smaller tokens. Raw score: ${formatScore(uncappedScore)}.`
-                        : marketCapTier === 'large'
-                          ? `Large caps ($250M-$1B) are capped at 85. This reflects reduced asymmetric upside for established tokens. Raw score: ${formatScore(uncappedScore)}.`
-                          : `Mid caps ($50M-$250M) are capped at 90 to account for moderate size constraints. Raw score: ${formatScore(uncappedScore)}.`
+                      {fdvTier === 'mega'
+                        ? `This token's $${formatFDV((analysis.fdv || analysis.marketCap) as string)} FDV means scores are capped at 80. An 80 for a mega FDV token is exceptional—equivalent to a 90+ for smaller tokens. Raw score: ${formatScore(uncappedScore)}.`
+                        : fdvTier === 'large'
+                          ? `Large FDV tokens ($200M-$1B) are capped at 85. This reflects reduced asymmetric upside for established tokens. Raw score: ${formatScore(uncappedScore)}.`
+                          : `Mid FDV tokens ($50M-$200M) are capped at 90 to account for moderate size constraints. Raw score: ${formatScore(uncappedScore)}.`
                       }
                     </div>
                   </div>

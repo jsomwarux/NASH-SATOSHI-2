@@ -336,24 +336,24 @@ export default function Leaderboard() {
                 </Select>
               </div>
 
-              {/* Market Cap Tier Filter */}
+              {/* FDV Tier Filter */}
               <div className="w-48">
-                <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">MARKET_CAP</label>
+                <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">FDV</label>
                 <Select
                   value={filters.marketCapTier || "all"}
                   onValueChange={(value) => setFilters(f => ({ ...f, marketCapTier: value === "all" ? undefined : value }))}
                 >
                   <SelectTrigger className="bg-background/50 border-primary/20 font-mono">
-                    <SelectValue placeholder="All caps" />
+                    <SelectValue placeholder="All FDVs" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All caps</SelectItem>
-                    <SelectItem value="mega">Mega (&gt;$5B)</SelectItem>
-                    <SelectItem value="large">Large ($1B-$5B)</SelectItem>
-                    <SelectItem value="mid">Mid ($500M-$1B)</SelectItem>
-                    <SelectItem value="small">Small ($100M-$500M)</SelectItem>
-                    <SelectItem value="micro">Micro ($10M-$100M)</SelectItem>
-                    <SelectItem value="nano">Nano (&lt;$10M)</SelectItem>
+                    <SelectItem value="all">All FDVs</SelectItem>
+                    <SelectItem value="mega">Mega (&gt;$1B)</SelectItem>
+                    <SelectItem value="large">Large ($200M-$1B)</SelectItem>
+                    <SelectItem value="mid">Mid ($50M-$200M)</SelectItem>
+                    <SelectItem value="small">Small ($10M-$50M)</SelectItem>
+                    <SelectItem value="micro">Micro ($1M-$10M)</SelectItem>
+                    <SelectItem value="nano">Nano (&lt;$1M)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

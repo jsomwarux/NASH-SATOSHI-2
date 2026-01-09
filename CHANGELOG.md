@@ -4,7 +4,75 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-09 Part 3 (Latest)
+## Session: 2026-01-09 Part 4 (Latest)
+
+### Summary
+Replaced Market Cap with FDV (Fully Diluted Valuation) throughout the scorecard. Updated tier thresholds to use FDV-based calculations.
+
+### Changes Made
+
+#### 1. Parser Updates
+- Added `fdvModifier` field to ParsedGumloopResponse interface
+- Field alias: `fdv_modifier` with fallback to `market_cap_modifier` for backward compatibility
+- Both marketCapModifier and fdvModifier supported, fdvModifier takes precedence
+
+#### 2. Schema Updates
+- Added `fdvModifier` column (numeric, precision 5, scale 2)
+- Added `fdvTier` column (text: nano, micro, small, mid, large, mega)
+- Kept `marketCapModifier` and `marketCapTier` for backward compatibility with old analyses
+
+#### 3. Routes Updates
+- Fetch FDV from CoinGecko: `fully_diluted_valuation.usd`
+- Store FDV in `fdv` field (falls back to market cap if FDV unavailable)
+- New FDV tier thresholds:
+  - Nano: <$1M (no cap)
+  - Micro: $1M-$10M (no cap)
+  - Small: $10M-$50M (no cap)
+  - Mid: $50M-$200M (cap: 90)
+  - Large: $200M-$1B (cap: 85)
+  - Mega: >$1B (cap: 80)
+- Server-side `fdvModifier` calculation when score is capped
+
+#### 4. ScoreCard Updates
+- Renamed `formatMarketCap` to `formatFDV`
+- Hero section shows "FDV" label instead of "Market Cap"
+- Cap category badge uses `fdvTier` with fallback to `marketCapTier`
+- Added "Nano Cap" tier badge (emerald color)
+- Score Modifiers shows "FDV" label with fdvModifier value
+- FDV Scaling Explanation section updated with new tier names and thresholds
+
+#### 5. Leaderboard Updates
+- Filter label changed from "MARKET_CAP" to "FDV"
+- Placeholder changed from "All caps" to "All FDVs"
+- Filter options updated with new FDV thresholds
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/gumloop-parser.ts` | Added fdvModifier field and fdv_modifier alias |
+| `shared/schema.ts` | Added fdvModifier and fdvTier columns |
+| `server/routes.ts` | Fetch FDV from CoinGecko, calculate fdvTier with new thresholds |
+| `client/src/components/scorecard/ScoreCard.tsx` | Replaced Market Cap with FDV throughout |
+| `client/src/pages/Leaderboard.tsx` | Updated FDV filter labels and thresholds |
+
+### Database Migration Required
+```sql
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS fdv_modifier NUMERIC(5,2);
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS fdv_tier TEXT;
+```
+
+### Current State
+- Scorecard displays FDV instead of Market Cap
+- New tier thresholds based on FDV values
+- Backward compatible with analyses that only have marketCap/marketCapTier
+- All TypeScript compiles successfully
+
+### Known Issues
+- None
+
+---
+
+## Session: 2026-01-09 Part 3
 
 ### Summary
 Fixed missing Market Cap modifier in Score Modifiers section. Updated Social Signals section with more reliable fields (Community Status, Account Quality) replacing unreliable X Sentiment and X Mentions Trend.
@@ -49,14 +117,22 @@ Fixed missing Market Cap modifier in Score Modifiers section. Updated Social Sig
 - **Rationale**: Gumloop handles queuing automatically, DB supports high concurrency, no technical bottleneck
 - **Updated both endpoints**: `/api/analyze` and `/api/analyze/:id/retry`
 
+#### 6. Fixed Gumloop Rate Limiting Race Condition
+- **Root cause**: Multiple simultaneous requests would all check the timestamp together, then fire at Gumloop simultaneously
+- **In-memory queue**: When Redis not configured, requests serialize via promise chain
+- **Atomic Redis operations**: Uses `INCR` to assign unique slot numbers, preventing race condition
+- **Increased interval**: From 2 to 3 seconds between Gumloop API calls
+- **Added jitter**: Fallback includes random delay to spread out requests
+
 ### Files Modified
 | File | Changes |
 |------|---------|
-| `server/routes.ts` | Added server-side marketCapModifier calculation in both handlers |
+| `server/routes.ts` | Added server-side marketCapModifier calculation, increased concurrent limit to 10 |
 | `server/gumloop-parser.ts` | Added communityStatus, accountQuality fields with fallback aliases |
 | `shared/schema.ts` | Added community_status and account_quality columns |
 | `client/src/components/scorecard/ScoreCard.tsx` | New 4-card Social Signals layout, adjusted modifier box sizing |
 | `server/index.ts` | Increased analysis endpoint rate limit from 10 to 30 per minute |
+| `server/redis.ts` | Fixed Gumloop rate limiting with in-memory queue and atomic Redis ops |
 
 ### Database Migration Required
 ```sql
