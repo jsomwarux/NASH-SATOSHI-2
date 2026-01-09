@@ -5,6 +5,7 @@ import type {
   AnalyzeTokenRequest,
   AnalysisStatus,
   LeaderboardFilters,
+  TokenStats,
 } from "@shared/schema";
 import type { AggregatedLeaderboardItem } from "@/types/leaderboard";
 
@@ -97,11 +98,33 @@ export async function retryAnalysis(
   });
 }
 
+// Cancel an in-progress analysis
+export interface CancelAnalysisResponse {
+  analysisId: number;
+  status: string;
+  message: string;
+}
+
+export async function cancelAnalysis(
+  analysisId: number,
+  authToken: string
+): Promise<CancelAnalysisResponse> {
+  return fetchApi<CancelAnalysisResponse>(`/api/analyze/${analysisId}/cancel`, {
+    method: "POST",
+    authToken,
+  });
+}
+
+// Get Token Stats (aggregate data for tokens with multiple analyses)
+export async function getTokenStats(tokenId: string): Promise<TokenStats> {
+  return fetchApi<TokenStats>(`/api/token/${tokenId}/stats`);
+}
+
 // Get Leaderboard
 export interface LeaderboardOptions {
   limit?: number;
   offset?: number;
-  sortBy?: "score7d" | "score30d" | "runs7d" | "latestAnalysis";
+  sortBy?: "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "recommendation";
   order?: "asc" | "desc";
   filters?: LeaderboardFilters;
 }
@@ -259,14 +282,27 @@ export async function getSubscriptionStatus(
   });
 }
 
+// Set referral code for user (call after signup)
+export async function setUserReferralCode(
+  referralCode: string,
+  authToken: string
+): Promise<{ success: boolean; message?: string }> {
+  return fetchApi<{ success: boolean; message?: string }>("/api/user/referral", {
+    method: "POST",
+    body: JSON.stringify({ referralCode }),
+    authToken,
+  });
+}
+
 // Create checkout session for subscription
 export async function createCheckoutSession(
   tier: string,
-  authToken: string
+  authToken: string,
+  referralCode?: string
 ): Promise<{ url: string }> {
   return fetchApi<{ url: string }>("/api/subscription/checkout", {
     method: "POST",
-    body: JSON.stringify({ tier }),
+    body: JSON.stringify({ tier, referralCode }),
     authToken,
   });
 }
@@ -314,11 +350,12 @@ export async function syncSubscription(
 // Create checkout session for credit pack
 export async function createCreditCheckout(
   packId: string,
-  authToken: string
+  authToken: string,
+  referralCode?: string
 ): Promise<{ url: string }> {
   return fetchApi<{ url: string }>("/api/credits/checkout", {
     method: "POST",
-    body: JSON.stringify({ packId }),
+    body: JSON.stringify({ packId, referralCode }),
     authToken,
   });
 }

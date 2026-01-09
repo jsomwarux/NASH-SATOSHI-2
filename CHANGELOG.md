@@ -7,7 +7,7 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 ## Session: 2026-01-09 (Latest)
 
 ### Summary
-Major reliability improvements: fixed database connection issues, improved Gumloop output parsing, and added clickable model analysis modals.
+Major reliability improvements: fixed database connection issues, improved Gumloop output parsing, and added clickable model analysis modals. Added scorecard enhancements: average score display, reanalyze button, and cancel analysis capability.
 
 ### All Changes Made Today
 
@@ -56,6 +56,16 @@ Major reliability improvements: fixed database connection issues, improved Gumlo
 #### 7. Minor UI Updates
 - Updated TokenSearch placeholder to mention contract addresses
 
+#### 8. Scorecard Enhancements (Major Feature)
+- **Average Score Display** - For tokens with multiple analyses, shows average score alongside current score
+- **"Latest of N" Badge** - Indicates when viewing the most recent of multiple analyses
+- **Reanalyze Button** - One-click button to perform a fresh analysis of the current token
+- **Cancel Analysis** - Users can cancel analysis within ~30 seconds (before Gumloop starts consuming credits)
+- **Cancelled Status UI** - Clean display for cancelled analyses with option to analyze again
+- **New token stats endpoint** - `GET /api/token/:tokenId/stats` returns aggregate data
+- **New cancel endpoint** - `POST /api/analyze/:id/cancel` allows cancellation before gumloopRunId is set
+- **Added 'cancelled' status** - New analysis status for user-cancelled analyses
+
 ### Files Modified
 | File | Changes |
 |------|---------|
@@ -74,6 +84,12 @@ Major reliability improvements: fixed database connection issues, improved Gumlo
 | `client/src/components/search/TokenSearch.tsx` | Updated placeholder text |
 | `PROJECT_CONTEXT.md` | Added Gumloop output format documentation |
 | `CHANGELOG.md` | This file |
+| `server/storage.ts` | Added `getAnalysesByTokenId()` method for aggregate stats |
+| `shared/schema.ts` | Added 'cancelled' to analysisStatusSchema, added TokenStats interface |
+| `client/src/lib/api.ts` | Added `cancelAnalysis()`, `getTokenStats()` API functions |
+| `client/src/hooks/useAnalysis.ts` | Added `useCancelAnalysis`, `useTokenStats` hooks |
+| `client/src/pages/Analyze.tsx` | Added cancel, reanalyze, and token stats functionality |
+| `client/src/components/scorecard/ScoreCard.tsx` | Added cancel button, reanalyze button, average score display, cancelled state |
 
 ### Database Migration Required
 Run this SQL in Supabase (Production) if not already done:
@@ -93,6 +109,9 @@ ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS charge_type TEXT;
 - **Failed analyses don't charge users** - Credits deducted only on success
 - **Retry functionality** - Users can retry failed analyses up to 3 times
 - **Detailed error display** - Shows error type, message, and retry count
+- **Average score display** - Tokens with multiple analyses show average alongside current score
+- **Reanalyze button** - One-click reanalysis on completed scorecards
+- **Cancel analysis** - Users can cancel before Gumloop starts (~30 second window)
 - All TypeScript compiles successfully
 
 ---

@@ -17,7 +17,7 @@ import {
 import { useLeaderboard, useFilterOptions, useLeaderboardStats } from "@/hooks/useLeaderboard";
 import type { LeaderboardFilters } from "@shared/schema";
 
-type SortField = "score7d" | "score30d" | "runs7d" | "latestAnalysis";
+type SortField = "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "recommendation";
 type SortOrder = "asc" | "desc";
 
 export default function Leaderboard() {
@@ -336,7 +336,7 @@ export default function Leaderboard() {
               </div>
 
               {/* Market Cap Tier Filter */}
-              <div className="w-40">
+              <div className="w-48">
                 <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">MARKET_CAP</label>
                 <Select
                   value={filters.marketCapTier || "all"}
@@ -350,7 +350,9 @@ export default function Leaderboard() {
                     <SelectItem value="mega">Mega (&gt;$5B)</SelectItem>
                     <SelectItem value="large">Large ($1B-$5B)</SelectItem>
                     <SelectItem value="mid">Mid ($500M-$1B)</SelectItem>
-                    <SelectItem value="small">Small (&lt;$500M)</SelectItem>
+                    <SelectItem value="small">Small ($100M-$500M)</SelectItem>
+                    <SelectItem value="micro">Micro ($10M-$100M)</SelectItem>
+                    <SelectItem value="nano">Nano (&lt;$10M)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

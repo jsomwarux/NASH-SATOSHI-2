@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { setUserReferralCode } from '@/lib/api';
+import { getReferralCode, clearReferralCode } from '@/hooks/useReferral';
 
 interface AuthContextType {
   user: User | null;
@@ -36,10 +38,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      async (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+
+        // On signup/signin, attach referral code if present
+        if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.access_token) {
+          const referralCode = getReferralCode();
+          if (referralCode) {
+            try {
+              await setUserReferralCode(referralCode, session.access_token);
+              clearReferralCode(); // Clear after successful attribution
+              console.log('Referral code attributed successfully');
+            } catch (error) {
+              console.error('Failed to attribute referral code:', error);
+            }
+          }
+        }
       }
     );
 

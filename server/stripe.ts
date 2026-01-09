@@ -68,7 +68,8 @@ export async function createCheckoutSession(
   email: string,
   tier: SubscriptionTierId,
   successUrl: string,
-  cancelUrl: string
+  cancelUrl: string,
+  referralCode?: string
 ): Promise<string> {
   if (!stripe) throw new Error('Stripe not configured');
 
@@ -79,8 +80,18 @@ export async function createCheckoutSession(
 
   const customerId = await getOrCreateCustomer(userId, email);
 
+  // Build metadata with optional referral code
+  const metadata: Record<string, string> = {
+    userId,
+    tier,
+  };
+  if (referralCode) {
+    metadata.ref = referralCode;
+  }
+
   const session = await stripe.checkout.sessions.create({
     customer: customerId,
+    client_reference_id: userId, // For affiliate tracking
     mode: 'subscription',
     payment_method_types: ['card'],
     line_items: [
@@ -91,15 +102,9 @@ export async function createCheckoutSession(
     ],
     success_url: successUrl,
     cancel_url: cancelUrl,
-    metadata: {
-      userId,
-      tier,
-    },
+    metadata,
     subscription_data: {
-      metadata: {
-        userId,
-        tier,
-      },
+      metadata,
     },
   });
 
@@ -504,14 +509,27 @@ export async function createCreditCheckoutSession(
   credits: number,
   price: number,
   successUrl: string,
-  cancelUrl: string
+  cancelUrl: string,
+  referralCode?: string
 ): Promise<string> {
   if (!stripe) throw new Error('Stripe not configured');
 
   const customerId = await getOrCreateCustomer(userId, email);
 
+  // Build metadata with optional referral code
+  const metadata: Record<string, string> = {
+    userId,
+    type: 'credit_purchase',
+    packId,
+    credits: credits.toString(),
+  };
+  if (referralCode) {
+    metadata.ref = referralCode;
+  }
+
   const session = await stripe.checkout.sessions.create({
     customer: customerId,
+    client_reference_id: userId, // For affiliate tracking
     mode: 'payment',
     payment_method_types: ['card'],
     line_items: [
@@ -529,12 +547,7 @@ export async function createCreditCheckoutSession(
     ],
     success_url: successUrl,
     cancel_url: cancelUrl,
-    metadata: {
-      userId,
-      type: 'credit_purchase',
-      packId,
-      credits: credits.toString(),
-    },
+    metadata,
   });
 
   return session.url || '';

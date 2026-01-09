@@ -216,6 +216,217 @@ See `FIELD_ALIASES` in `gumloop-parser.ts` for the complete mapping (~50 aliases
 
 ---
 
+## Complete Parsing Instructions for Scorecard & Leaderboard
+
+This section provides exhaustive parsing instructions. Reference this when debugging parsing issues or adding new fields.
+
+### Output Structure
+
+The Gumloop response is a single text blob. The parseable data is in the OUTPUT SUMMARY section at the end, which uses this format:
+```
+field_name: value
+another_field: another value
+```
+
+The section starts after "=== REQUIRED: OUTPUT SUMMARY ===" or after the "{TICKER} ANALYSIS" header.
+
+### Parsing Strategy
+
+1. Locate the OUTPUT SUMMARY section in the response text
+2. Parse line by line, extracting field name and value pairs
+3. Clean values by stripping any accidental field label prefixes
+4. Convert types appropriately (numbers, arrays, etc.)
+
+### Field Cleaning Function
+
+The `stripFieldLabelPrefix()` utility in `gumloop-parser.ts` removes field label prefixes from values. Sometimes the LLM accidentally includes the label in the value (e.g., "thesis: RADR is building..." instead of just "RADR is building...").
+
+Labels to strip (case-insensitive, with colon and optional space):
+- narrative:, thesis:, display_summary:, recommendation:, confidence:
+- phase_name:, winning_side:, equilibrium_type:
+- team_status:, notable_backers:, unlock_warning:
+- x_sentiment:, x_top_kols:, x_mentions_trend:
+- catalyst_1:, catalyst_2:, catalyst_3:
+- risk_1:, risk_2:, risk_3:
+- gpt_verdict:, gpt_reasoning:, gpt_risks:
+- claude_verdict:, claude_reasoning:, claude_risks:
+- gemini_verdict:, gemini_reasoning:, gemini_risks:
+- grok_verdict:, grok_reasoning:, grok_risks:
+
+Apply this cleaning to all text fields during parsing.
+
+### Complete Field Mapping
+
+#### VERDICT Section
+
+| Field Name | Type | Used In | Notes |
+|------------|------|---------|-------|
+| final_score | number | Scorecard hero, Leaderboard | Parse as float, should have 2 decimal places |
+| final_tier | string | Scorecard hero, Leaderboard | Values: S+, S, A, B, C |
+| recommendation | string | Scorecard hero, Leaderboard | Values: BUY, HOLD, AVOID |
+| confidence | string | Scorecard hero | Values: H, M, L — display as "High Confidence", etc. |
+| consensus_level | string | Scorecard hero | Values: HIGH, MIXED, LOW, CONFLICTED |
+| token_type | string | Scorecard hero badge | Values: UTILITY, MEMECOIN — display as "UTIL" or "MEME" |
+
+#### GAME STATE Section
+
+| Field Name | Type | Used In | Notes |
+|------------|------|---------|-------|
+| phase | number | Key metrics row | Values: 1-5 |
+| phase_name | string | Key metrics row | Values: Stealth, Expansion, Mania, Distribution, Dead |
+| peak_proximity_pct | number | Key metrics row | Display as "XX%" with label |
+| winning_side | string | Key metrics row | Values: USER, AT_RISK, EXIT_LIQUIDITY |
+| equilibrium_type | string | Game Theory Context | Values: Fragile, Robust, Anti-fragile |
+
+#### NARRATIVE Section
+
+| Field Name | Type | Used In | Notes |
+|------------|------|---------|-------|
+| narrative | string | Key metrics row | Display clean name without prefix |
+| narrative_heat | number | Key metrics row, Social Signals | Values: 1-10 |
+| narrative_rank | string | Game Theory Context | Values: 1st, 2nd, 3rd, lower |
+
+#### THESIS Section
+
+| Field Name | Type | Used In | Notes |
+|------------|------|---------|-------|
+| thesis | string | Investment Thesis section | Strip "thesis:" prefix if present |
+
+#### CATALYSTS & RISKS Sections
+
+| Field Name | Type | Used In |
+|------------|------|---------|
+| catalyst_1, catalyst_2, catalyst_3 | string | Catalysts card |
+| risk_1, risk_2, risk_3 | string | Key Risks card |
+
+#### SOCIAL PULSE Section
+
+| Field Name | Type | Used In | Notes |
+|------------|------|---------|-------|
+| x_mentions_trend | string | Social Signals | e.g., "up 42% over 7d" |
+| x_sentiment | string | Social Signals | e.g., "80% bullish / 0% bearish" |
+| x_top_kols | string | Social Signals | Comma-separated list or "None identified" |
+
+#### TEAM & BACKERS Section
+
+| Field Name | Type | Used In | Notes |
+|------------|------|---------|-------|
+| team_status | string | Team section | Values: Doxxed, Anon, Partial |
+| notable_backers | string | Team section | List or "None known" |
+| unlock_warning | string | Token Unlock section | "NONE" or warning text |
+
+#### COMPONENT SCORES Section
+
+| Field Name | Type | Max | Used In |
+|------------|------|-----|---------|
+| coordination_score | number | 20 | Score Breakdown |
+| schelling_score | number | 10 | Score Breakdown |
+| reflexivity_score | number | 15 | Score Breakdown |
+| virality_score | number | 15 | Score Breakdown |
+| asymmetry_score | number | 25 | Score Breakdown |
+| game_theory_score | number | 15 | Score Breakdown |
+| base_score | number | 100 | Score Breakdown header |
+
+#### MODIFIERS Section
+
+| Field Name | Type | Used In | Notes |
+|------------|------|---------|-------|
+| phase_modifier | number | Score Modifiers | +/- value |
+| narrative_modifier | number | Score Modifiers | +/- value |
+| exit_liquidity_modifier | number | Score Modifiers | +/- value |
+| peak_proximity_modifier | number | Score Modifiers | +/- value |
+| market_cap_modifier | number | Score Modifiers | +/- value |
+| data_quality_modifier | number | Score Modifiers | +/- value |
+| total_modifiers | number | Score Modifiers | Sum of all |
+
+Display all modifiers with non-zero values. Green for positive, red for negative.
+
+#### MODEL SCORES Section
+
+| Field Name | Type | Used In |
+|------------|------|---------|
+| gpt_score | number | 4-Model Consensus |
+| claude_score | number | 4-Model Consensus |
+| gemini_score | number | 4-Model Consensus |
+| grok_score | number | 4-Model Consensus |
+
+#### MODEL ANALYSES Section (for click-to-view modal)
+
+| Field Name | Type | Used In | Notes |
+|------------|------|---------|-------|
+| gpt_verdict | string | Model modal | GPT's verdict statement |
+| gpt_reasoning | string | Model modal | GPT's full reasoning |
+| gpt_risks | string | Model modal | Comma-separated, split into array |
+| claude_verdict | string | Model modal | Claude's verdict |
+| claude_reasoning | string | Model modal | Claude's reasoning |
+| claude_risks | string | Model modal | Comma-separated risks |
+| gemini_verdict | string | Model modal | Gemini's verdict |
+| gemini_reasoning | string | Model modal | Gemini's reasoning |
+| gemini_risks | string | Model modal | Comma-separated risks |
+| grok_verdict | string | Model modal | Grok's verdict |
+| grok_reasoning | string | Model modal | Grok's reasoning |
+| grok_risks | string | Model modal | Comma-separated risks |
+
+#### SUMMARY Section
+
+| Field Name | Type | Used In | Notes |
+|------------|------|---------|-------|
+| display_summary | string | Hero section | **DO NOT generate fallback** - use actual value or show "Summary not available" |
+
+### Scorecard Section Layout (Render Order)
+
+1. **Hero Section** - Token info, tier badge, recommendation, score, confidence, consensus
+2. **Display Summary** - Full text from display_summary field (no generic fallback)
+3. **Key Metrics Row** - Phase, Narrative, Peak Proximity, Position (4 cards)
+4. **4-Model Consensus** - 4 clickable model cards with scores
+5. **Score Breakdown** - 6 component scores with progress bars
+6. **Score Modifiers** - Non-zero modifiers with total
+7. **Investment Thesis** - Full thesis text
+8. **Game Theory Context** - Schelling Position, Equilibrium, Risk/Reward
+9. **Team Section** - team_status
+10. **Token Unlock** - unlock_warning
+11. **Catalysts & Risks** - Side by side cards
+12. **Social Signals** - Narrative heat, X sentiment, KOLs
+
+### Model Analysis Modal
+
+When user clicks a model card:
+- **Header**: Model name (e.g., "ChatGPT-5.2 Analysis")
+- **Score**: Large display of model's score
+- **Verdict**: {model}_verdict value
+- **Reasoning**: {model}_reasoning value
+- **Key Risks**: {model}_risks split by comma into numbered list
+
+### Leaderboard Fields
+
+| Column | Field | Notes |
+|--------|-------|-------|
+| Rank | Calculated | Based on final_score |
+| Token | Token data | Name, logo, ticker |
+| Score | final_score | Color-coded by tier |
+| Tier | final_tier | Badge with color |
+| Phase | phase + phase_name | e.g., "2 - Expansion" |
+| Narrative | narrative | Clean name |
+| Heat | narrative_heat | /10 with color |
+| Recommendation | recommendation | BUY/HOLD/AVOID badge |
+
+### Error Handling & Fallbacks
+
+| Field | If Missing |
+|-------|------------|
+| final_score | Show 0 or "N/A" |
+| final_tier | Show "?" |
+| display_summary | Show "Summary not available" — **DO NOT generate generic text** |
+| thesis | Show "Thesis not available" |
+| narrative | Show "Unknown" |
+| model scores | Show 0 or hide the model card |
+| model analyses | Show "Analysis not available" in modal |
+| catalysts/risks | Show "No catalysts/risks identified" |
+| x_sentiment | Show "N/A" |
+| x_top_kols | Show "None identified" |
+
+---
+
 ## Database Schema Highlights
 
 ### Key Tables (shared/schema.ts)

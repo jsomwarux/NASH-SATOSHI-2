@@ -8,6 +8,8 @@ import {
   searchTokens,
   getTokenDetails,
   retryAnalysis,
+  cancelAnalysis,
+  getTokenStats,
 } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAnalysisTracker } from "@/contexts/AnalysisTrackerContext";
@@ -150,6 +152,43 @@ export function useRetryAnalysis() {
       queryClient.invalidateQueries({ queryKey: ["analysisStatus", data.analysisId] });
       queryClient.invalidateQueries({ queryKey: ["userAnalyses"] });
     },
+  });
+}
+
+// Cancel In-Progress Analysis Mutation
+export function useCancelAnalysis() {
+  const queryClient = useQueryClient();
+  const { getAccessToken } = useAuth();
+  const { untrackAnalysis } = useAnalysisTracker();
+
+  return useMutation({
+    mutationFn: async ({ analysisId }: { analysisId: number }) => {
+      const authToken = await getAccessToken();
+      if (!authToken) {
+        throw new Error("Authentication required");
+      }
+      return cancelAnalysis(analysisId, authToken);
+    },
+    onSuccess: (data, variables) => {
+      // Remove from tracker since it's cancelled
+      untrackAnalysis(variables.analysisId);
+      // Invalidate the analysis query to trigger refetch
+      queryClient.invalidateQueries({ queryKey: ["analysis", data.analysisId] });
+      queryClient.invalidateQueries({ queryKey: ["analysisStatus", data.analysisId] });
+      queryClient.invalidateQueries({ queryKey: ["userAnalyses"] });
+    },
+  });
+}
+
+// Token Stats Hook (aggregate data for tokens with multiple analyses)
+export function useTokenStats(tokenId: string | null) {
+  return useQuery({
+    queryKey: ["tokenStats", tokenId],
+    queryFn: () => getTokenStats(tokenId!),
+    enabled: !!tokenId,
+    retry: 2,
+    retryDelay: (attemptIndex) => Math.min(500 * Math.pow(2, attemptIndex), 2000),
+    staleTime: 60 * 1000, // Cache for 1 minute
   });
 }
 

@@ -1,15 +1,16 @@
-import { useParams, Link } from "wouter";
+import { useParams, Link, useLocation } from "wouter";
 import { useEffect } from "react";
 import { motion } from "framer-motion";
 import { ArrowLeft, Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { ScoreCard } from "@/components/scorecard/ScoreCard";
 import { Button } from "@/components/ui/button";
-import { useAnalysis, useRetryAnalysis } from "@/hooks/useAnalysis";
+import { useAnalysis, useRetryAnalysis, useCancelAnalysis, useTokenStats, useTokenAnalyzer } from "@/hooks/useAnalysis";
 import { useAnalysisTracker } from "@/contexts/AnalysisTrackerContext";
 
 export default function Analyze() {
   const params = useParams();
+  const [, setLocation] = useLocation();
   const analysisId = params.id ? parseInt(params.id, 10) : null;
   const { untrackAnalysis } = useAnalysisTracker();
 
@@ -24,8 +25,19 @@ export default function Analyze() {
     currentNode,
   } = useAnalysis(analysisId);
 
+  // Fetch token stats only when analysis is completed
+  const { data: tokenStats } = useTokenStats(
+    analysis?.status === "completed" ? analysis.tokenId : null
+  );
+
   // Retry mutation for failed analyses
   const retryMutation = useRetryAnalysis();
+
+  // Cancel mutation for in-progress analyses
+  const cancelMutation = useCancelAnalysis();
+
+  // Reanalyze functionality
+  const { startAnalysis, isAnalyzing } = useTokenAnalyzer();
 
   const handleRetry = () => {
     if (analysis && analysisId) {
@@ -34,6 +46,30 @@ export default function Analyze() {
         tokenSymbol: analysis.tokenSymbol,
         tokenName: analysis.tokenName,
       });
+    }
+  };
+
+  const handleCancel = () => {
+    if (analysisId) {
+      cancelMutation.mutate({ analysisId });
+    }
+  };
+
+  const handleReanalyze = async () => {
+    if (analysis) {
+      try {
+        const result = await startAnalysis({
+          id: analysis.tokenId,
+          symbol: analysis.tokenSymbol,
+          name: analysis.tokenName,
+          thumb: analysis.tokenImage || undefined,
+          large: analysis.tokenImage || undefined,
+        });
+        // Navigate to the new analysis
+        setLocation(`/analyze/${result.analysisId}`);
+      } catch (err) {
+        console.error("Failed to start reanalysis:", err);
+      }
     }
   };
 
@@ -112,6 +148,11 @@ export default function Analyze() {
             currentNode={currentNode}
             onRetry={handleRetry}
             isRetrying={retryMutation.isPending}
+            onCancel={handleCancel}
+            isCancelling={cancelMutation.isPending}
+            onReanalyze={handleReanalyze}
+            isReanalyzing={isAnalyzing}
+            tokenStats={tokenStats}
           />
         )}
       </div>

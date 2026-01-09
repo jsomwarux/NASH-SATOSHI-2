@@ -12,6 +12,7 @@ import {
   type SubscriptionStatus,
   type SubscriptionTier,
 } from "@/lib/api";
+import { getReferralCode } from "@/hooks/useReferral";
 
 // Get subscription tiers (public)
 export function useSubscriptionTiers() {
@@ -51,7 +52,8 @@ export function useCreateCheckout() {
     mutationFn: async (tier: string) => {
       const token = await getAccessToken();
       if (!token) throw new Error("Authentication required");
-      return createCheckoutSession(tier, token);
+      const referralCode = getReferralCode() || undefined;
+      return createCheckoutSession(tier, token, referralCode);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["subscriptionStatus"] });
@@ -143,7 +145,8 @@ export function useCreateCreditCheckout() {
     mutationFn: async (packId: string) => {
       const token = await getAccessToken();
       if (!token) throw new Error("Authentication required");
-      return createCreditCheckout(packId, token);
+      const referralCode = getReferralCode() || undefined;
+      return createCreditCheckout(packId, token, referralCode);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["subscriptionStatus"] });

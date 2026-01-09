@@ -138,6 +138,9 @@ export const userSubscriptions = pgTable("user_subscriptions", {
   weeklyAnalysesUsed: integer("weekly_analyses_used").default(0),
   weeklyResetDate: date("weekly_reset_date"),
 
+  // Referral tracking
+  referredBy: text("referred_by"), // Affiliate/referral code that brought this user
+
   // Timestamps
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -455,13 +458,24 @@ export type TokenDetails = z.infer<typeof tokenDetailsSchema>;
 // Analysis status response
 export const analysisStatusSchema = z.object({
   analysisId: z.number(),
-  status: z.enum(['pending', 'processing', 'completed', 'failed']),
+  status: z.enum(['pending', 'processing', 'completed', 'failed', 'cancelled']),
   message: z.string().optional(),
   startTime: z.string().optional(), // ISO date string of when analysis started
   elapsedSeconds: z.number().optional(), // Seconds since start
   nodesCompleted: z.number().optional(), // Number of workflow nodes completed
   currentNode: z.string().optional(), // Name of currently executing node
 });
+
+// Token stats response (aggregate data for tokens with multiple analyses)
+export interface TokenStats {
+  tokenId: string;
+  analysisCount: number;
+  averageScore: number;
+  score7d: number | null;
+  runs7d: number;
+  latestAnalysisId: number;
+  latestAnalysisDate: string;
+}
 
 export type AnalysisStatus = z.infer<typeof analysisStatusSchema>;
 

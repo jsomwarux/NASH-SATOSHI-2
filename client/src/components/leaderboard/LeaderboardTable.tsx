@@ -18,11 +18,13 @@ import {
 } from "@/components/ui/tooltip";
 import type { AggregatedLeaderboardItem } from "@/types/leaderboard";
 
+type SortField = "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "recommendation";
+
 interface LeaderboardTableProps {
   items: AggregatedLeaderboardItem[];
-  sortBy: "score7d" | "score30d" | "runs7d" | "latestAnalysis";
+  sortBy: SortField;
   order: "asc" | "desc";
-  onSort: (field: "score7d" | "score30d" | "runs7d" | "latestAnalysis") => void;
+  onSort: (field: SortField) => void;
 }
 
 // Score color helpers based on spec: red (<40), yellow (40-54), light green (55-69), green (70-84), gold (85+)
@@ -112,7 +114,7 @@ function getRecommendationInfo(rec: string | null) {
 }
 
 export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTableProps) {
-  const SortButton = ({ field, children }: { field: typeof sortBy; children: React.ReactNode }) => (
+  const SortButton = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
     <Button
       variant="ghost"
       size="sm"
@@ -139,24 +141,32 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
           <TableRow className="border-primary/10 hover:bg-transparent">
             <TableHead className="w-12 text-center font-mono text-[10px] tracking-wider">#</TableHead>
             <TableHead className="font-mono text-[10px] tracking-wider min-w-[140px] max-w-[200px]">TOKEN</TableHead>
-            <TableHead className="text-center hidden sm:table-cell font-mono text-[10px] tracking-wider w-16 min-w-[64px]">TYPE</TableHead>
+            <TableHead className="text-center hidden sm:table-cell font-mono text-[10px] tracking-wider w-16 min-w-[64px]">
+              <SortButton field="tokenType">TYPE</SortButton>
+            </TableHead>
             <TableHead className="text-center font-mono text-[10px] tracking-wider">
               <SortButton field="score7d">7D_SCORE</SortButton>
             </TableHead>
             <TableHead className="text-center hidden sm:table-cell font-mono text-[10px] tracking-wider">
               <SortButton field="score30d">30D_SCORE</SortButton>
             </TableHead>
-            <TableHead className="text-center font-mono text-[10px] tracking-wider">TIER</TableHead>
-            <TableHead className="text-center hidden sm:table-cell font-mono text-[10px] tracking-wider">SIGNAL</TableHead>
-            <TableHead className="text-center hidden lg:table-cell font-mono text-[10px] tracking-wider">ASYM</TableHead>
+            <TableHead className="text-center font-mono text-[10px] tracking-wider">
+              <SortButton field="tier">TIER</SortButton>
+            </TableHead>
+            <TableHead className="text-center hidden sm:table-cell font-mono text-[10px] tracking-wider">
+              <SortButton field="recommendation">SIGNAL</SortButton>
+            </TableHead>
+            <TableHead className="text-center hidden lg:table-cell font-mono text-[10px] tracking-wider">
+              <SortButton field="asymmetryScore">ASYM</SortButton>
+            </TableHead>
             <TableHead className="text-center hidden md:table-cell font-mono text-[10px] tracking-wider">
               <SortButton field="runs7d">RUNS</SortButton>
             </TableHead>
             <TableHead className="hidden xl:table-cell font-mono text-[10px] tracking-wider">NARRATIVE</TableHead>
-            <TableHead className="text-center hidden md:table-cell font-mono text-[10px] tracking-wider">
+            <TableHead className="text-center hidden md:table-cell font-mono text-[10px] tracking-wider min-w-[70px] pr-4">
               <SortButton field="latestAnalysis">LATEST</SortButton>
             </TableHead>
-            <TableHead className="w-12"></TableHead>
+            <TableHead className="w-14 pr-2"></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -312,13 +322,13 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
                     <span className="text-muted-foreground text-sm font-mono">—</span>
                   )}
                 </TableCell>
-                <TableCell className="text-center hidden md:table-cell">
-                  <span className="text-[10px] text-muted-foreground flex items-center justify-center gap-1 font-mono">
+                <TableCell className="text-center hidden md:table-cell pr-4">
+                  <span className="text-[10px] text-muted-foreground flex items-center justify-center gap-1 font-mono whitespace-nowrap">
                     <Clock className="w-3 h-3" />
                     {formatDate(item.latestAnalysisDate)}
                   </span>
                 </TableCell>
-                <TableCell onClick={(e) => e.stopPropagation()}>
+                <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                   <Link href={`/analyze/${item.latestAnalysisId}`}>
                     <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity">
                       <ExternalLink className="w-4 h-4 text-primary" />

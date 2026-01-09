@@ -43,7 +43,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Button } from "@/components/ui/button";
 import { ShareModal } from "./ShareModal";
 import { ModelAnalysisModal } from "./ModelAnalysisModal";
-import type { TokenAnalysis, ModelScores, ModelAnalyses } from "@shared/schema";
+import type { TokenAnalysis, ModelScores, ModelAnalyses, TokenStats } from "@shared/schema";
 
 interface ScoreCardProps {
   analysis: TokenAnalysis;
@@ -55,6 +55,14 @@ interface ScoreCardProps {
   // Retry functionality for failed analyses
   onRetry?: () => void;
   isRetrying?: boolean;
+  // Cancel functionality for in-progress analyses
+  onCancel?: () => void;
+  isCancelling?: boolean;
+  // Reanalyze functionality
+  onReanalyze?: () => void;
+  isReanalyzing?: boolean;
+  // Token stats for showing average score
+  tokenStats?: TokenStats;
 }
 
 // Score color helpers based on spec: red (<40), yellow (40-54), light green (55-69), green (70-84), gold (85+)
@@ -296,61 +304,72 @@ function FormattedContent({ content }: { content: string }) {
     return <FormattedTable content={cleaned} />;
   }
 
-  // Check if this contains a numbered list
+  // Split by double newlines or single newlines to get logical blocks
   const lines = cleaned.split('\n');
-  const hasList = lines.some(line => /^\d+\.\s/.test(line.trim()) || /^[-•]\s/.test(line.trim()));
 
-  if (hasList) {
-    return (
-      <div className="space-y-2">
-        {lines.map((line, i) => {
-          const trimmed = line.trim();
-          if (!trimmed) return null;
+  // Check if most lines look like key-value pairs (e.g., "Field: Value")
+  const kvPattern = /^[A-Za-z][A-Za-z0-9\s_-]*:\s*.+/;
+  const kvLines = lines.filter(line => kvPattern.test(line.trim()));
+  const isKvBlock = kvLines.length > lines.filter(l => l.trim()).length * 0.3; // At least 30% are KV pairs
 
-          // Numbered list item
-          const numberedMatch = trimmed.match(/^(\d+)\.\s*\*?\*?(.+?)\*?\*?\s*$/);
-          if (numberedMatch) {
-            return (
-              <div key={i} className="flex gap-2 text-sm">
-                <span className="text-primary font-medium">{numberedMatch[1]}.</span>
-                <span className="text-muted-foreground">{numberedMatch[2].replace(/\*\*/g, '')}</span>
-              </div>
-            );
-          }
-
-          // Bullet list item
-          const bulletMatch = trimmed.match(/^[-•]\s*(.+)$/);
-          if (bulletMatch) {
-            return (
-              <div key={i} className="flex gap-2 text-sm ml-2">
-                <span className="text-primary">•</span>
-                <span className="text-muted-foreground">{bulletMatch[1].replace(/\*\*/g, '')}</span>
-              </div>
-            );
-          }
-
-          // Bold text as sub-header
-          const boldMatch = trimmed.match(/^\*\*(.+?)\*\*:?\s*(.*)$/);
-          if (boldMatch) {
-            return (
-              <div key={i} className="text-sm">
-                <span className="font-medium text-foreground">{boldMatch[1]}: </span>
-                <span className="text-muted-foreground">{boldMatch[2]}</span>
-              </div>
-            );
-          }
-
-          return <p key={i} className="text-sm text-muted-foreground">{trimmed.replace(/\*\*/g, '')}</p>;
-        })}
-      </div>
-    );
-  }
-
-  // Regular paragraph content
   return (
-    <p className="text-sm text-muted-foreground leading-relaxed">
-      {cleaned.replace(/\*\*/g, '')}
-    </p>
+    <div className="space-y-2">
+      {lines.map((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={i} className="h-2" />; // Empty line spacer
+
+        // Numbered list item
+        const numberedMatch = trimmed.match(/^(\d+)\.\s*\*?\*?(.+?)\*?\*?\s*$/);
+        if (numberedMatch) {
+          return (
+            <div key={i} className="flex gap-2 text-sm">
+              <span className="text-primary font-medium shrink-0">{numberedMatch[1]}.</span>
+              <span className="text-muted-foreground">{numberedMatch[2].replace(/\*\*/g, '')}</span>
+            </div>
+          );
+        }
+
+        // Bullet list item
+        const bulletMatch = trimmed.match(/^[-•]\s*(.+)$/);
+        if (bulletMatch) {
+          return (
+            <div key={i} className="flex gap-2 text-sm ml-2">
+              <span className="text-primary shrink-0">•</span>
+              <span className="text-muted-foreground">{bulletMatch[1].replace(/\*\*/g, '')}</span>
+            </div>
+          );
+        }
+
+        // Bold text as sub-header (e.g., **Field**: Value)
+        const boldMatch = trimmed.match(/^\*\*(.+?)\*\*:?\s*(.*)$/);
+        if (boldMatch) {
+          return (
+            <div key={i} className="text-sm py-0.5">
+              <span className="font-semibold text-primary">{boldMatch[1]}: </span>
+              <span className="text-muted-foreground">{boldMatch[2]}</span>
+            </div>
+          );
+        }
+
+        // Key-value pair (e.g., "Field: Value" or "Field Name: Value")
+        const kvMatch = trimmed.match(/^([A-Za-z][A-Za-z0-9\s_-]*):\s*(.+)$/);
+        if (kvMatch && isKvBlock) {
+          return (
+            <div key={i} className="text-sm py-0.5 flex flex-wrap gap-x-2">
+              <span className="font-medium text-foreground/80 shrink-0">{kvMatch[1]}:</span>
+              <span className="text-muted-foreground">{kvMatch[2].replace(/\*\*/g, '')}</span>
+            </div>
+          );
+        }
+
+        // Regular text line
+        return (
+          <p key={i} className="text-sm text-muted-foreground leading-relaxed">
+            {trimmed.replace(/\*\*/g, '')}
+          </p>
+        );
+      })}
+    </div>
   );
 }
 
@@ -408,9 +427,11 @@ interface LoadingScreenProps {
   elapsedSeconds?: number;
   nodesCompleted?: number;
   currentNode?: string;
+  onCancel?: () => void;
+  isCancelling?: boolean;
 }
 
-function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElapsed, nodesCompleted }: LoadingScreenProps) {
+function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElapsed, nodesCompleted, onCancel, isCancelling }: LoadingScreenProps) {
   // Calculate elapsed time from analysis creation time (persists across refresh)
   const analysisStartTime = new Date(analysis.createdAt).getTime();
   const initialElapsed = Math.floor((Date.now() - analysisStartTime) / 1000);
@@ -737,6 +758,30 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
         </CardContent>
       </Card>
 
+      {/* Cancel Button - only show for first 30 seconds */}
+      {onCancel && elapsedTime < 30 && (
+        <div className="flex justify-center mt-6 mb-4">
+          <Button
+            variant="outline"
+            onClick={onCancel}
+            disabled={isCancelling}
+            className="gap-2 border-red-500/30 text-red-400 hover:bg-red-500/10"
+          >
+            {isCancelling ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Cancelling...
+              </>
+            ) : (
+              <>
+                <XCircle className="w-4 h-4" />
+                Cancel Analysis ({30 - elapsedTime}s)
+              </>
+            )}
+          </Button>
+        </div>
+      )}
+
       {/* Info text */}
       <p className="text-center text-sm text-muted-foreground mt-6">
         Our 4-LLM ensemble cross-validates findings to eliminate bias and provide trusted consensus scores.
@@ -747,9 +792,7 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
   );
 }
 
-export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted, currentNode, onRetry, isRetrying }: ScoreCardProps) {
-  const [showRisks, setShowRisks] = useState(false);
-  const [showModels, setShowModels] = useState(true);
+export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted, currentNode, onRetry, isRetrying, onCancel, isCancelling, onReanalyze, isReanalyzing, tokenStats }: ScoreCardProps) {
   const [showReasoning, setShowReasoning] = useState(false);
   const [loadingStartTime] = useState(Date.now());
   const [showShareModal, setShowShareModal] = useState(false);
@@ -766,8 +809,6 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
   const exitStyle = getExitLiquidityDisplay(analysis.winningSide);
   const modelScores = analysis.modelScores as ModelScores | null;
   const modelAnalyses = analysis.modelAnalyses as ModelAnalyses | null;
-  const coordinationRisks = analysis.coordinationRisks as string[] | null;
-  const catalysts = analysis.catalysts as string[] | null;
 
   // Token type - UTILITY or MEMECOIN (default to UTILITY)
   const tokenType = (analysis.tokenType as string) || 'UTILITY';
@@ -820,7 +861,87 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         elapsedSeconds={elapsedSeconds}
         nodesCompleted={nodesCompleted}
         currentNode={currentNode}
+        onCancel={onCancel}
+        isCancelling={isCancelling}
       />
+    );
+  }
+
+  // Cancelled state - show message and option to analyze again
+  if (analysis.status === "cancelled") {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="py-8"
+      >
+        {/* Token Header */}
+        <div className="flex items-center gap-4 mb-8">
+          {analysis.tokenImage ? (
+            <img
+              src={analysis.tokenImage}
+              alt={analysis.tokenName}
+              className="w-20 h-20 rounded-2xl bg-secondary ring-4 ring-muted/50"
+            />
+          ) : (
+            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-gray-500/50 to-gray-600/50 flex items-center justify-center ring-4 ring-muted/50">
+              <span className="font-bold text-2xl">
+                {analysis.tokenSymbol.slice(0, 2).toUpperCase()}
+              </span>
+            </div>
+          )}
+          <div>
+            <h2 className="text-2xl font-bold">{analysis.tokenName}</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-muted-foreground uppercase font-mono">${analysis.tokenSymbol}</span>
+              <Badge variant="outline" className="text-xs bg-muted/50 border-muted-foreground/30 text-muted-foreground">
+                Cancelled
+              </Badge>
+            </div>
+          </div>
+        </div>
+
+        {/* Cancelled Card */}
+        <Card className="glass-card bg-muted/10 border-muted/30">
+          <CardContent className="p-6">
+            <div className="flex flex-col items-center text-center">
+              <div className="w-16 h-16 rounded-full bg-muted/20 flex items-center justify-center mb-4">
+                <XCircle className="w-8 h-8 text-muted-foreground" />
+              </div>
+
+              <h3 className="text-xl font-bold mb-2 text-muted-foreground">
+                Analysis Cancelled
+              </h3>
+
+              <p className="text-muted-foreground mb-6 max-w-md">
+                This analysis was cancelled before completion. No credits were charged.
+              </p>
+
+              {/* Reanalyze Button */}
+              {onReanalyze && (
+                <Button
+                  onClick={onReanalyze}
+                  disabled={isReanalyzing}
+                  className="gap-2"
+                  size="lg"
+                >
+                  {isReanalyzing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Starting...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4" />
+                      Analyze Again
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
     );
   }
 
@@ -847,8 +968,8 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         bgColor: "bg-orange-500/10",
       },
       API_ERROR: {
-        title: "Service Error",
-        icon: XCircle,
+        title: "API Error",
+        icon: AlertTriangle,
         color: "text-red-400",
         bgColor: "bg-red-500/10",
       },
@@ -859,20 +980,26 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         bgColor: "bg-yellow-500/10",
       },
       EMPTY_OUTPUT: {
-        title: "Invalid Response",
+        title: "Empty Response",
         icon: AlertTriangle,
         color: "text-orange-400",
         bgColor: "bg-orange-500/10",
       },
       TERMINATED: {
-        title: "Pipeline Terminated",
+        title: "Analysis Terminated",
         icon: XCircle,
         color: "text-red-400",
         bgColor: "bg-red-500/10",
       },
     };
 
-    const errorDisplay = errorDisplayMap[errorCode || "API_ERROR"] || errorDisplayMap.API_ERROR;
+    const errorDisplay = errorDisplayMap[errorCode || ""] || {
+      title: "Analysis Failed",
+      icon: XCircle,
+      color: "text-red-400",
+      bgColor: "bg-red-500/10",
+    };
+
     const ErrorIcon = errorDisplay.icon;
 
     return (
@@ -925,17 +1052,14 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                 </p>
               )}
 
-              {/* Retry info */}
-              <div className="text-sm text-muted-foreground mb-4">
-                {canRetry ? (
-                  <span>Retry attempt {retryCount} of {maxRetries} used</span>
-                ) : (
-                  <span className="text-orange-400">Maximum retries reached</span>
-                )}
-              </div>
+              {retryCount > 0 && (
+                <p className="text-xs text-muted-foreground mb-4">
+                  Retry attempt {retryCount} of {maxRetries}
+                </p>
+              )}
 
               {/* Retry Button */}
-              {canRetry && onRetry && (
+              {onRetry && canRetry && (
                 <Button
                   onClick={onRetry}
                   disabled={isRetrying}
@@ -958,21 +1082,12 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
 
               {!canRetry && (
                 <p className="text-sm text-muted-foreground">
-                  Please start a new analysis for this token.
+                  Maximum retry attempts reached. Please start a new analysis.
                 </p>
               )}
             </div>
           </CardContent>
         </Card>
-
-        {/* Technical Details */}
-        {errorCode && (
-          <div className="mt-4 text-center">
-            <span className="text-xs text-muted-foreground font-mono">
-              Error Code: {errorCode}
-            </span>
-          </div>
-        )}
       </motion.div>
     );
   }
@@ -1025,15 +1140,56 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                     <Badge className={`${isMemecoin ? 'bg-orange-500/20 text-orange-400 border-orange-500/50' : 'bg-blue-500/20 text-blue-400 border-blue-500/50'} border font-medium text-[10px] sm:text-xs px-1.5 sm:px-2`}>
                       {isMemecoin ? '🎭 MEME' : '⚙️ UTIL'}
                     </Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowShareModal(true)}
-                      className="h-7 sm:h-8 gap-1.5 text-xs bg-primary/10 border-primary/30 hover:bg-primary/20 hover:border-primary/50 text-primary"
-                    >
-                      <Share2 className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Share</span>
-                    </Button>
+                  </div>
+                  {/* Action buttons row */}
+                  <div className="flex items-center gap-2 mt-2">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setShowShareModal(true)}
+                            className="h-8 w-8 bg-primary/10 border-primary/30 hover:bg-primary/20 hover:border-primary/50 text-primary"
+                          >
+                            <Share2 className="w-4 h-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Share Analysis</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    {onReanalyze && (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={onReanalyze}
+                              disabled={isReanalyzing}
+                              className="h-8 w-8 bg-accent/10 border-accent/30 hover:bg-accent/20 hover:border-accent/50 text-accent"
+                            >
+                              {isReanalyzing ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="w-4 h-4" />
+                              )}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{isReanalyzing ? 'Starting new analysis...' : 'Run Fresh Analysis'}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
+                    {/* Token Stats Badge */}
+                    {tokenStats && tokenStats.analysisCount > 1 && (
+                      <Badge variant="outline" className="text-xs bg-blue-500/10 border-blue-500/30 text-blue-400">
+                        Latest of {tokenStats.analysisCount}
+                      </Badge>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1079,6 +1235,16 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   {finalScore.toFixed(1)}
                 </div>
                 <div className="text-sm text-muted-foreground mt-1">out of 100</div>
+                {/* Average Score Display */}
+                {tokenStats && tokenStats.analysisCount > 1 && (
+                  <div className="text-xs text-muted-foreground mt-2 flex items-center gap-1.5">
+                    <span>Avg:</span>
+                    <span className={`font-mono font-medium ${getScoreColor(tokenStats.averageScore)}`}>
+                      {tokenStats.averageScore.toFixed(1)}
+                    </span>
+                    <span>from {tokenStats.analysisCount} analyses</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-2 mt-2 flex-wrap justify-center">
                   <Badge variant="outline" className="text-xs">
                     {analysis.consensusLevel || "MIXED"} Consensus
@@ -1454,64 +1620,89 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
               )}
 
               {/* Game Theory Context Row */}
-              {(analysis.schellingPosition || analysis.equilibriumType || analysis.dominantStrategies || analysis.asymmetryFloor || analysis.asymmetryCeiling) && (
-                <div className="pt-4 border-t border-white/10">
-                  <div className="text-xs text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
-                    <Brain className="w-3 h-3" />
-                    Game Theory Context
+              <div className="pt-4 border-t border-white/10">
+                <div className="text-xs text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
+                  <Brain className="w-3 h-3" />
+                  Game Theory Context
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {/* Schelling Position */}
+                  <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                    <div className="text-xs text-muted-foreground mb-1">Schelling Position</div>
+                    <div className="text-sm">{analysis.schellingPosition || '—'}</div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {analysis.schellingPosition && (
-                      <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
-                        <div className="text-xs text-muted-foreground mb-1">Schelling Position</div>
-                        <div className="text-sm">{analysis.schellingPosition}</div>
+
+                  {/* Market Equilibrium */}
+                  <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                    <div className="text-xs text-muted-foreground mb-1">Market Equilibrium</div>
+                    <div className={`text-sm ${
+                      analysis.equilibriumType?.toLowerCase().includes('robust') ? 'text-green-400' :
+                      analysis.equilibriumType?.toLowerCase().includes('fragile') ? 'text-yellow-400' :
+                      ''
+                    }`}>{analysis.equilibriumType || '—'}</div>
+                  </div>
+
+                  {/* Winning Side / Exit Liquidity */}
+                  <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                    <div className="text-xs text-muted-foreground mb-1">Exit Liquidity</div>
+                    <div className={`text-sm font-medium ${
+                      analysis.winningSide?.toUpperCase().includes('USER') ? 'text-green-400' :
+                      analysis.winningSide?.toUpperCase().includes('EXIT') || analysis.winningSide?.toUpperCase().includes('LIQ') ? 'text-red-400' :
+                      'text-yellow-400'
+                    }`}>
+                      {analysis.winningSide ? (
+                        analysis.winningSide.toUpperCase().includes('USER') ? 'Favorable' :
+                        analysis.winningSide.toUpperCase().includes('EXIT') || analysis.winningSide.toUpperCase().includes('LIQ') ? 'At Risk' :
+                        'Neutral'
+                      ) : '—'}
+                    </div>
+                  </div>
+
+                  {/* Reflexivity Score */}
+                  <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                    <div className="text-xs text-muted-foreground mb-1">Reflexivity</div>
+                    {analysis.reflexivityScore ? (
+                      <div className="flex items-center gap-2">
+                        <span className={`text-lg font-bold font-mono ${
+                          parseFloat(analysis.reflexivityScore as string) >= 12 ? 'text-green-400' :
+                          parseFloat(analysis.reflexivityScore as string) >= 8 ? 'text-yellow-400' :
+                          'text-muted-foreground'
+                        }`}>{parseFloat(analysis.reflexivityScore as string).toFixed(1)}</span>
+                        <span className="text-xs text-muted-foreground">/15</span>
                       </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">—</div>
                     )}
-                    {analysis.equilibriumType && (
-                      <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
-                        <div className="text-xs text-muted-foreground mb-1">Market Equilibrium</div>
-                        <div className={`text-sm ${
-                          analysis.equilibriumType.toLowerCase().includes('robust') ? 'text-green-400' :
-                          analysis.equilibriumType.toLowerCase().includes('fragile') ? 'text-yellow-400' :
-                          ''
-                        }`}>{analysis.equilibriumType}</div>
+                  </div>
+
+                  {/* Asymmetry Profile */}
+                  <div className="p-3 rounded-lg bg-secondary/30 border border-white/5 col-span-2">
+                    <div className="text-xs text-muted-foreground mb-1">Asymmetry Profile</div>
+                    <div className="flex items-center gap-4 text-sm">
+                      <div className="flex items-center gap-1">
+                        <ArrowDown className="w-3 h-3 text-red-400" />
+                        <span className="text-xs text-muted-foreground">Floor:</span>
+                        <span className="text-red-400 font-mono">{analysis.asymmetryFloor || '—'}</span>
                       </div>
-                    )}
-                    {analysis.dominantStrategies && !analysis.dominantStrategies.toLowerCase().includes('n/a') && (
-                      <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
-                        <div className="text-xs text-muted-foreground mb-1">Dominant Strategy</div>
-                        <div className={`text-sm ${
-                          analysis.dominantStrategies.toLowerCase().includes('hold') || analysis.dominantStrategies.toLowerCase().includes('accumulate') ? 'text-green-400' :
-                          analysis.dominantStrategies.toLowerCase().includes('sell') || analysis.dominantStrategies.toLowerCase().includes('exit') ? 'text-red-400' :
-                          ''
-                        }`}>{analysis.dominantStrategies}</div>
+                      <div className="flex items-center gap-1">
+                        <ArrowUp className="w-3 h-3 text-green-400" />
+                        <span className="text-xs text-muted-foreground">Ceiling:</span>
+                        <span className="text-green-400 font-mono">{analysis.asymmetryCeiling || '—'}</span>
                       </div>
-                    )}
-                    {(analysis.asymmetryFloor || analysis.asymmetryCeiling) && (
-                      <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
-                        <div className="text-xs text-muted-foreground mb-1">Risk/Reward Profile</div>
-                        <div className="flex items-center gap-3 text-sm">
-                          {analysis.asymmetryFloor && (
-                            <div className="flex items-center gap-1">
-                              <ArrowDown className="w-3 h-3 text-red-400" />
-                              <span className="text-red-400 font-mono">{analysis.asymmetryFloor}</span>
-                            </div>
-                          )}
-                          {analysis.asymmetryFloor && analysis.asymmetryCeiling && (
-                            <span className="text-muted-foreground">/</span>
-                          )}
-                          {analysis.asymmetryCeiling && (
-                            <div className="flex items-center gap-1">
-                              <ArrowUp className="w-3 h-3 text-green-400" />
-                              <span className="text-green-400 font-mono">{analysis.asymmetryCeiling}</span>
-                            </div>
-                          )}
+                      {analysis.asymmetryScore && (
+                        <div className="ml-auto flex items-center gap-1">
+                          <span className="text-xs text-muted-foreground">Score:</span>
+                          <span className={`font-mono font-medium ${
+                            parseFloat(analysis.asymmetryScore as string) >= 20 ? 'text-green-400' :
+                            parseFloat(analysis.asymmetryScore as string) >= 12 ? 'text-yellow-400' :
+                            'text-muted-foreground'
+                          }`}>{parseFloat(analysis.asymmetryScore as string).toFixed(1)}/25</span>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
-              )}
+              </div>
 
               {/* Team/Project Info Row */}
               {(analysis.teamStatus || analysis.notableBackers) && (
@@ -1647,110 +1838,77 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         </motion.div>
       )}
 
-      {/* Social Signals */}
-      {(analysis.xSentiment || analysis.xTopKols || narrativeHeat !== null) && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.25 }}
-        >
-          <Card className="glass-card">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Twitter className="w-5 h-5 text-sky-400" />
-                Social Signals
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Narrative/Meta Heat - replaces unreliable mentions trend */}
-                {narrativeHeat !== null && (
-                  <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
-                    <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">{isMemecoin ? 'Meta Heat' : 'Narrative Heat'}</div>
-                    <div className="flex items-center gap-2">
-                      <Flame className={`w-4 h-4 ${
-                        narrativeHeat >= 7 ? 'text-orange-400' :
-                        narrativeHeat >= 4 ? 'text-yellow-400' :
-                        'text-muted-foreground'
-                      }`} />
-                      <span className={`text-lg font-bold font-mono ${
-                        narrativeHeat >= 7 ? 'text-orange-400' :
-                        narrativeHeat >= 4 ? 'text-yellow-400' :
-                        'text-muted-foreground'
-                      }`}>{narrativeHeat.toFixed(1)}/10</span>
-                      <span className="text-xs text-muted-foreground">
-                        {narrativeHeat >= 7 ? 'Hot' : narrativeHeat >= 4 ? 'Warm' : 'Cool'}
-                      </span>
-                    </div>
+      {/* Social Signals - Always show all three fields */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.25 }}
+      >
+        <Card className="glass-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Twitter className="w-5 h-5 text-sky-400" />
+              Social Signals
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Narrative/Meta Heat */}
+              <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">{isMemecoin ? 'Meta Heat' : 'Narrative Heat'}</div>
+                {narrativeHeat !== null ? (
+                  <div className="flex items-center gap-2">
+                    <Flame className={`w-4 h-4 ${
+                      narrativeHeat >= 7 ? 'text-orange-400' :
+                      narrativeHeat >= 4 ? 'text-yellow-400' :
+                      'text-muted-foreground'
+                    }`} />
+                    <span className={`text-lg font-bold font-mono ${
+                      narrativeHeat >= 7 ? 'text-orange-400' :
+                      narrativeHeat >= 4 ? 'text-yellow-400' :
+                      'text-muted-foreground'
+                    }`}>{narrativeHeat.toFixed(1)}/10</span>
+                    <span className="text-xs text-muted-foreground">
+                      {narrativeHeat >= 7 ? 'Hot' : narrativeHeat >= 4 ? 'Warm' : 'Cool'}
+                    </span>
                   </div>
-                )}
-
-                {/* Sentiment - fixed to detect bullish/bearish */}
-                {analysis.xSentiment && !analysis.xSentiment.toLowerCase().includes('n/a') && (
-                  <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
-                    <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">X Sentiment</div>
-                    <div className={`text-sm font-medium ${
-                      analysis.xSentiment.toLowerCase().includes('bullish') || analysis.xSentiment.toLowerCase().includes('positive') ? 'text-green-400' :
-                      analysis.xSentiment.toLowerCase().includes('bearish') || analysis.xSentiment.toLowerCase().includes('negative') ? 'text-red-400' :
-                      ''
-                    }`}>
-                      {analysis.xSentiment}
-                    </div>
-                  </div>
-                )}
-
-                {/* Top KOLs */}
-                {analysis.xTopKols && !analysis.xTopKols.toLowerCase().includes('n/a') && (
-                  <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
-                    <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Notable KOLs</div>
-                    <div className="text-sm text-muted-foreground">{analysis.xTopKols}</div>
-                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">—</div>
                 )}
               </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
+
+              {/* X Sentiment - Always show */}
+              <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">X Sentiment</div>
+                {analysis.xSentiment && !analysis.xSentiment.toLowerCase().includes('n/a') ? (
+                  <div className={`text-sm font-medium ${
+                    analysis.xSentiment.toLowerCase().includes('bullish') || analysis.xSentiment.toLowerCase().includes('positive') ? 'text-green-400' :
+                    analysis.xSentiment.toLowerCase().includes('bearish') || analysis.xSentiment.toLowerCase().includes('negative') ? 'text-red-400' :
+                    ''
+                  }`}>
+                    {analysis.xSentiment}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">—</div>
+                )}
+              </div>
+
+              {/* Notable KOLs - Always show */}
+              <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Notable KOLs</div>
+                {analysis.xTopKols && !analysis.xTopKols.toLowerCase().includes('n/a') ? (
+                  <div className="text-sm text-muted-foreground">{analysis.xTopKols}</div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">—</div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
 
       {/* Collapsible Sections */}
       <div className="space-y-4">
-        {/* Coordination Risks */}
-        {coordinationRisks && coordinationRisks.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.4 }}
-          >
-            <Collapsible open={showRisks} onOpenChange={setShowRisks}>
-              <Card className="glass-card">
-                <CollapsibleTrigger className="w-full">
-                  <CardHeader className="cursor-pointer hover:bg-white/5 transition-colors">
-                    <CardTitle className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <AlertTriangle className="w-5 h-5 text-orange-400" />
-                        Key Risks ({coordinationRisks.length})
-                      </div>
-                      {showRisks ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                    </CardTitle>
-                  </CardHeader>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <CardContent className="pt-0">
-                    <ul className="space-y-3">
-                      {coordinationRisks.map((risk, i) => (
-                        <li key={i} className="flex items-start gap-3 text-sm">
-                          <span className="text-orange-400 font-bold">{i + 1}.</span>
-                          <span className="text-muted-foreground">{risk}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                </CollapsibleContent>
-              </Card>
-            </Collapsible>
-          </motion.div>
-        )}
-
         {/* Output Summary / Full Reasoning */}
         {(analysis.rawGumloopResponse || analysis.reasoning) && (
           <motion.div

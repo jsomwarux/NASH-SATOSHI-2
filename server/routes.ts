@@ -178,6 +178,68 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== TOKEN STATS (Aggregate analysis data) ====================
+  app.get("/api/token/:tokenId/stats", async (req: Request, res: Response) => {
+    try {
+      const { tokenId } = req.params;
+
+      if (!tokenId) {
+        res.status(400).json({ message: "Token ID is required" });
+        return;
+      }
+
+      // Get all completed analyses for this token
+      const analyses = await storage.getAnalysesByTokenId(tokenId);
+
+      if (analyses.length === 0) {
+        res.status(404).json({ message: "No analyses found for this token" });
+        return;
+      }
+
+      // Calculate aggregate stats
+      const now = new Date();
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      let totalScore = 0;
+      let scores7d: number[] = [];
+
+      for (const analysis of analyses) {
+        const score = parseFloat(analysis.finalScore as string);
+        if (!isNaN(score)) {
+          totalScore += score;
+
+          // Check if within 7 days
+          if (analysis.createdAt >= sevenDaysAgo) {
+            scores7d.push(score);
+          }
+        }
+      }
+
+      const averageScore = analyses.length > 0 ? Math.round((totalScore / analyses.length) * 10) / 10 : 0;
+      const score7d = scores7d.length > 0
+        ? Math.round((scores7d.reduce((a, b) => a + b, 0) / scores7d.length) * 10) / 10
+        : null;
+
+      // Find latest analysis
+      const latestAnalysis = analyses.reduce((latest, current) =>
+        current.createdAt > latest.createdAt ? current : latest
+      );
+
+      res.json({
+        tokenId,
+        analysisCount: analyses.length,
+        averageScore,
+        score7d,
+        runs7d: scores7d.length,
+        latestAnalysisId: latestAnalysis.id,
+        latestAnalysisDate: latestAnalysis.createdAt.toISOString(),
+      });
+    } catch (error) {
+      console.error("Error getting token stats:", error);
+      res.status(500).json({ message: "Failed to get token stats" });
+    }
+  });
+
   // ==================== SUBSCRIPTION TIERS (Public) ====================
   app.get("/api/subscription/tiers", (_req, res) => {
     const tiers = getSubscriptionTiers();
@@ -331,12 +393,39 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== SET REFERRAL CODE (Auth Required) ====================
+  app.post("/api/user/referral", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const { referralCode } = req.body;
+
+      if (!referralCode || typeof referralCode !== "string") {
+        res.status(400).json({ message: "Referral code required" });
+        return;
+      }
+
+      // Sanitize and validate referral code (alphanumeric, max 20 chars)
+      const sanitizedCode = referralCode.trim().toUpperCase().slice(0, 20);
+      if (!/^[A-Z0-9_-]+$/.test(sanitizedCode)) {
+        res.status(400).json({ message: "Invalid referral code format" });
+        return;
+      }
+
+      await storage.setReferralCode(userId, sanitizedCode);
+
+      res.json({ success: true, message: "Referral code attached" });
+    } catch (error) {
+      console.error("Error setting referral code:", error);
+      res.status(500).json({ message: "Failed to set referral code" });
+    }
+  });
+
   // ==================== CREATE CHECKOUT SESSION (Auth Required) ====================
   app.post("/api/subscription/checkout", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.userId!;
       const userEmail = req.userEmail!;
-      const { tier } = req.body;
+      const { tier, referralCode } = req.body;
 
       if (!tier || !["starter", "trader", "pro", "desk"].includes(tier)) {
         res.status(400).json({ message: "Invalid tier" });
@@ -357,7 +446,8 @@ export async function registerRoutes(
         userEmail,
         tier as SubscriptionTierId,
         successUrl,
-        cancelUrl
+        cancelUrl,
+        referralCode || undefined
       );
 
       res.json({ url: checkoutUrl });
@@ -449,7 +539,7 @@ export async function registerRoutes(
     try {
       const userId = req.userId!;
       const userEmail = req.userEmail!;
-      const { packId } = req.body;
+      const { packId, referralCode } = req.body;
 
       if (!packId || !CREDIT_PACKS[packId as CreditPackId]) {
         res.status(400).json({ message: "Invalid credit pack" });
@@ -473,7 +563,8 @@ export async function registerRoutes(
         pack.credits,
         pack.price,
         successUrl,
-        cancelUrl
+        cancelUrl,
+        referralCode || undefined
       );
 
       res.json({ url: checkoutUrl });
@@ -1077,6 +1168,70 @@ export async function registerRoutes(
     }
   });
 
+  // Cancel an in-progress analysis (within 30s window before Gumloop starts)
+  app.post("/api/analyze/:id/cancel", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const analysisId = parseInt(req.params.id, 10);
+
+      if (isNaN(analysisId)) {
+        res.status(400).json({ message: "Invalid analysis ID" });
+        return;
+      }
+
+      // Get the analysis
+      const analysis = await storage.getAnalysis(analysisId);
+
+      if (!analysis) {
+        res.status(404).json({ message: "Analysis not found" });
+        return;
+      }
+
+      // Verify ownership
+      if (analysis.userId !== userId) {
+        res.status(403).json({ message: "Not authorized to cancel this analysis" });
+        return;
+      }
+
+      // Check if cancellable: must be pending/processing AND gumloopRunId must be null
+      // Once gumloopRunId is set, the analysis has been sent to Gumloop and is consuming credits
+      const isCancellable = (
+        (analysis.status === "pending" || analysis.status === "processing") &&
+        analysis.gumloopRunId === null
+      );
+
+      if (!isCancellable) {
+        res.status(400).json({
+          message: analysis.gumloopRunId
+            ? "Analysis already in progress with AI research. Too late to cancel."
+            : "Analysis cannot be cancelled in its current state.",
+          currentStatus: analysis.status,
+          hasRunId: !!analysis.gumloopRunId,
+        });
+        return;
+      }
+
+      // Cancel the analysis
+      await storage.updateAnalysis(analysisId, {
+        status: "cancelled",
+        errorCode: "USER_CANCELLED",
+        errorMessage: "Analysis cancelled by user",
+        chargeType: null, // Clear any charge type so nothing gets charged
+      });
+
+      console.log(`Analysis ${analysisId} cancelled by user ${userId}`);
+
+      res.json({
+        analysisId,
+        status: "cancelled",
+        message: "Analysis cancelled successfully",
+      });
+    } catch (error) {
+      console.error("Error cancelling analysis:", error);
+      res.status(500).json({ message: "Failed to cancel analysis" });
+    }
+  });
+
   // ==================== SHARE IMAGE ENDPOINTS ====================
   // Directory for share images (use process.cwd() for CommonJS compatibility)
   const shareImagesDir = path.resolve(process.cwd(), "share-images");
@@ -1521,6 +1676,23 @@ async function pollGumloopStatus(
           }
         }
 
+        // FALLBACK: Extract social signals from text if missing
+        if (output && output.length > 100) {
+          const textParsed = parseGumloopResponse(output);
+          if (!parsed.xSentiment && textParsed.xSentiment) {
+            parsed.xSentiment = textParsed.xSentiment;
+            console.log(`Analysis ${analysisId}: Recovered xSentiment from text: ${parsed.xSentiment}`);
+          }
+          if (!parsed.xMentionsTrend && textParsed.xMentionsTrend) {
+            parsed.xMentionsTrend = textParsed.xMentionsTrend;
+            console.log(`Analysis ${analysisId}: Recovered xMentionsTrend from text: ${parsed.xMentionsTrend}`);
+          }
+          if (!parsed.xTopKols && textParsed.xTopKols) {
+            parsed.xTopKols = textParsed.xTopKols;
+            console.log(`Analysis ${analysisId}: Recovered xTopKols from text: ${parsed.xTopKols}`);
+          }
+        }
+
         // FALLBACK: Try to extract narrative from analysis_result text if still missing
         if (!parsed.narrative && outputs['analysis_result'] && typeof outputs['analysis_result'] === 'string') {
           const analysisText = outputs['analysis_result'];
@@ -1563,7 +1735,7 @@ async function pollGumloopStatus(
         const marketCap = marketCapStr ? parseFloat(marketCapStr) : null;
 
         // Determine market cap tier and apply hard caps
-        let marketCapTier = "small";
+        let marketCapTier = "nano";
         let scoreCap = 100;
         if (marketCap !== null && !isNaN(marketCap)) {
           if (marketCap > 5_000_000_000) {
@@ -1575,6 +1747,12 @@ async function pollGumloopStatus(
           } else if (marketCap > 500_000_000) {
             marketCapTier = "mid";
             scoreCap = 90;
+          } else if (marketCap > 100_000_000) {
+            marketCapTier = "small";
+          } else if (marketCap > 10_000_000) {
+            marketCapTier = "micro";
+          } else {
+            marketCapTier = "nano";
           }
         }
 
@@ -1855,6 +2033,23 @@ async function processGumloopCompletion(
     }
   }
 
+  // FALLBACK: Extract social signals from text if missing
+  if (output && output.length > 100) {
+    const textParsed = parseGumloopResponse(output);
+    if (!parsed.xSentiment && textParsed.xSentiment) {
+      parsed.xSentiment = textParsed.xSentiment;
+      console.log(`Analysis ${analysisId}: Recovered xSentiment from text: ${parsed.xSentiment}`);
+    }
+    if (!parsed.xMentionsTrend && textParsed.xMentionsTrend) {
+      parsed.xMentionsTrend = textParsed.xMentionsTrend;
+      console.log(`Analysis ${analysisId}: Recovered xMentionsTrend from text: ${parsed.xMentionsTrend}`);
+    }
+    if (!parsed.xTopKols && textParsed.xTopKols) {
+      parsed.xTopKols = textParsed.xTopKols;
+      console.log(`Analysis ${analysisId}: Recovered xTopKols from text: ${parsed.xTopKols}`);
+    }
+  }
+
   // FALLBACK: Try to extract narrative from analysis_result text if still missing
   if (!parsed.narrative && outputs['analysis_result'] && typeof outputs['analysis_result'] === 'string') {
     const analysisText = outputs['analysis_result'];
@@ -1897,7 +2092,7 @@ async function processGumloopCompletion(
   const marketCap = marketCapStr ? parseFloat(marketCapStr as string) : null;
 
   // Determine market cap tier and apply hard caps
-  let marketCapTier = "small";
+  let marketCapTier = "nano";
   let scoreCap = 100;
   if (marketCap !== null && !isNaN(marketCap)) {
     if (marketCap > 5_000_000_000) {
@@ -1909,6 +2104,12 @@ async function processGumloopCompletion(
     } else if (marketCap > 500_000_000) {
       marketCapTier = "mid";
       scoreCap = 90;
+    } else if (marketCap > 100_000_000) {
+      marketCapTier = "small";
+    } else if (marketCap > 10_000_000) {
+      marketCapTier = "micro";
+    } else {
+      marketCapTier = "nano";
     }
   }
 

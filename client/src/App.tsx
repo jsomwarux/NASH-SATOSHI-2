@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AnalysisTrackerProvider } from "@/contexts/AnalysisTrackerContext";
+import { useReferralCapture } from "@/hooks/useReferral";
 import Home from "@/pages/Home";
 import Analyze from "@/pages/Analyze";
 import Analyses from "@/pages/Analyses";
@@ -14,6 +15,8 @@ import Account from "@/pages/Account";
 import NotFound from "@/pages/not-found";
 
 function Router() {
+  // Capture referral codes from URL on any page load
+  useReferralCapture();
   return (
     <Switch>
       <Route path="/" component={Home} />

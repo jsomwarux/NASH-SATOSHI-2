@@ -107,6 +107,9 @@ export interface IStorage {
   addCredits(userId: string, credits: number, packId: string, amountPaid: number, paymentIntentId?: string): Promise<void>;
   useCredit(userId: string): Promise<boolean>;
 
+  // Referral methods
+  setReferralCode(userId: string, referralCode: string): Promise<void>;
+
   // Analysis methods
   createAnalysis(data: InsertTokenAnalysis): Promise<TokenAnalysis>;
   getAnalysis(id: number): Promise<TokenAnalysis | null>;
@@ -117,6 +120,7 @@ export interface IStorage {
   getRunningAnalysesCount(userId: string): Promise<number>;
   getTotalRunningAnalyses(): Promise<number>;
   getStuckAnalyses(maxAgeMinutes?: number): Promise<TokenAnalysis[]>;
+  getAnalysesByTokenId(tokenId: string): Promise<TokenAnalysis[]>;
 
   // Leaderboard methods
   getLeaderboard(options: {
@@ -348,6 +352,28 @@ export class PostgresStorage implements IStorage {
     return true;
   }
 
+  async setReferralCode(userId: string, referralCode: string): Promise<void> {
+    const db = getDb();
+
+    // First ensure the user subscription exists
+    let sub = await this.getUserSubscription(userId);
+    if (!sub) {
+      // Create subscription if it doesn't exist
+      await this.createOrUpdateSubscription({ userId });
+    }
+
+    // Update with referral code (only if not already set)
+    await db
+      .update(userSubscriptions)
+      .set({
+        referredBy: sql`COALESCE(${userSubscriptions.referredBy}, ${referralCode})`,
+        updatedAt: new Date(),
+      })
+      .where(eq(userSubscriptions.userId, userId));
+
+    console.log(`Referral code "${referralCode}" attached to user ${userId}`);
+  }
+
   // ==================== ANALYSIS METHODS ====================
 
   async createAnalysis(data: InsertTokenAnalysis): Promise<TokenAnalysis> {
@@ -480,6 +506,23 @@ export class PostgresStorage implements IStorage {
         )
       );
     return result;
+  }
+
+  async getAnalysesByTokenId(tokenId: string): Promise<TokenAnalysis[]> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(tokenAnalyses)
+        .where(
+          and(
+            eq(tokenAnalyses.tokenId, tokenId),
+            eq(tokenAnalyses.status, "completed")
+          )
+        )
+        .orderBy(desc(tokenAnalyses.createdAt));
+      return result;
+    });
   }
 
   // ==================== LEADERBOARD METHODS ====================
@@ -666,31 +709,60 @@ export class PostgresStorage implements IStorage {
 
     // Sort based on sortBy parameter
     items.sort((a, b) => {
-      let aVal: number, bVal: number;
+      let comparison = 0;
 
       switch (sortBy) {
         case 'score7d':
-          aVal = a.score7d;
-          bVal = b.score7d;
+          comparison = (a.score7d || 0) - (b.score7d || 0);
           break;
         case 'score30d':
-          aVal = a.score30d;
-          bVal = b.score30d;
+          comparison = (a.score30d || 0) - (b.score30d || 0);
           break;
         case 'runs7d':
-          aVal = a.runs7d;
-          bVal = b.runs7d;
+          comparison = (a.runs7d || 0) - (b.runs7d || 0);
           break;
         case 'latestAnalysis':
-          aVal = new Date(a.latestAnalysisDate).getTime();
-          bVal = new Date(b.latestAnalysisDate).getTime();
+          comparison = new Date(a.latestAnalysisDate).getTime() - new Date(b.latestAnalysisDate).getTime();
           break;
+        case 'tier': {
+          // Sort by tier rank: S+ > S > A > B > C
+          const tierRank: Record<string, number> = { 'S+': 5, 'S': 4, 'A': 3, 'B': 2, 'C': 1 };
+          const aRank = tierRank[a.latestTier] || 0;
+          const bRank = tierRank[b.latestTier] || 0;
+          comparison = aRank - bRank;
+          break;
+        }
+        case 'tokenType': {
+          // Sort by type: MEMECOIN before UTILITY (M < U alphabetically)
+          const aType = a.tokenType || 'ZZZZ';
+          const bType = b.tokenType || 'ZZZZ';
+          comparison = aType.localeCompare(bType);
+          break;
+        }
+        case 'asymmetryScore': {
+          // Put null values at the end
+          const aScore = a.asymmetryScore;
+          const bScore = b.asymmetryScore;
+          if (aScore === null && bScore === null) comparison = 0;
+          else if (aScore === null) comparison = -1; // nulls go to end in desc, start in asc
+          else if (bScore === null) comparison = 1;
+          else comparison = aScore - bScore;
+          break;
+        }
+        case 'recommendation': {
+          // Sort by recommendation: BUY > HOLD > AVOID
+          const aRec = (a.latestRecommendation || '').toUpperCase();
+          const bRec = (b.latestRecommendation || '').toUpperCase();
+          const aRank = aRec.includes('BUY') ? 3 : aRec.includes('AVOID') ? 1 : 2;
+          const bRank = bRec.includes('BUY') ? 3 : bRec.includes('AVOID') ? 1 : 2;
+          comparison = aRank - bRank;
+          break;
+        }
         default:
-          aVal = a.score7d;
-          bVal = b.score7d;
+          comparison = (a.score7d || 0) - (b.score7d || 0);
       }
 
-      return order === "desc" ? bVal - aVal : aVal - bVal;
+      return order === "desc" ? -comparison : comparison;
     });
 
     // Paginate
@@ -884,6 +956,7 @@ export class MemStorage implements IStorage {
       trialStartDate: data.trialStartDate ?? existing?.trialStartDate ?? null,
       weeklyAnalysesUsed: data.weeklyAnalysesUsed ?? existing?.weeklyAnalysesUsed ?? 0,
       weeklyResetDate: data.weeklyResetDate ?? existing?.weeklyResetDate ?? null,
+      referredBy: data.referredBy ?? existing?.referredBy ?? null,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     };
@@ -962,6 +1035,18 @@ export class MemStorage implements IStorage {
     return true;
   }
 
+  async setReferralCode(userId: string, referralCode: string): Promise<void> {
+    let sub = this.subscriptions.get(userId);
+    if (!sub) {
+      sub = await this.createOrUpdateSubscription({ userId });
+    }
+    // Only set if not already set
+    if (!sub.referredBy) {
+      sub.referredBy = referralCode;
+      sub.updatedAt = new Date();
+    }
+  }
+
   async createAnalysis(data: InsertTokenAnalysis): Promise<TokenAnalysis> {
     const id = this.analysisCounter++;
     const now = new Date();
@@ -1031,6 +1116,12 @@ export class MemStorage implements IStorage {
         (a.status === "pending" || a.status === "processing") &&
         a.createdAt <= cutoffTime
       );
+  }
+
+  async getAnalysesByTokenId(tokenId: string): Promise<TokenAnalysis[]> {
+    return Array.from(this.analyses.values())
+      .filter((a) => a.tokenId === tokenId && a.status === "completed")
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
   async getLeaderboard(_options: any): Promise<{ items: any[]; total: number }> {

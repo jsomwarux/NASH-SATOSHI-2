@@ -120,6 +120,63 @@ function cleanTextPreserveStructure(text: string | undefined | null): string {
     .trim();
 }
 
+// Strip common field label prefixes from values
+// Many fields come through with their label included (e.g., "narrative: AI Agents")
+const FIELD_LABEL_PREFIXES = [
+  'narrative:',
+  'thesis:',
+  'display_summary:',
+  'display summary:',
+  'recommendation:',
+  'confidence:',
+  'phase_name:',
+  'phase name:',
+  'winning_side:',
+  'winning side:',
+  'equilibrium_type:',
+  'equilibrium type:',
+  'team_status:',
+  'team status:',
+  'notable_backers:',
+  'notable backers:',
+  'unlock_warning:',
+  'unlock warning:',
+  'x_sentiment:',
+  'x sentiment:',
+  'x_top_kols:',
+  'x top kols:',
+  'x_mentions_trend:',
+  'x mentions trend:',
+  'schelling_position:',
+  'schelling position:',
+  'narrative_rank:',
+  'narrative rank:',
+];
+
+function stripFieldLabelPrefix(text: string): string {
+  if (!text) return "";
+  let result = text.trim();
+
+  // Simple direct string check - more reliable than regex
+  const lowerResult = result.toLowerCase();
+  for (const prefix of FIELD_LABEL_PREFIXES) {
+    if (lowerResult.startsWith(prefix)) {
+      result = result.substring(prefix.length).trim();
+      console.log(`stripFieldLabelPrefix: Stripped "${prefix}" -> "${result}"`);
+      break;
+    }
+    // Also check with space after colon
+    const prefixWithSpace = prefix.replace(':', ': ');
+    if (lowerResult.startsWith(prefixWithSpace)) {
+      result = result.substring(prefixWithSpace.length).trim();
+      console.log(`stripFieldLabelPrefix: Stripped "${prefixWithSpace}" -> "${result}"`);
+      break;
+    }
+  }
+
+  return result;
+}
+
 // ==================== OUTPUT SUMMARY PARSER (PRIMARY STRATEGY) ====================
 // The OUTPUT SUMMARY section at the end of Gumloop output is the most reliable source
 // It uses a consistent `field_name: value` format on each line
@@ -222,12 +279,18 @@ const FIELD_ALIASES: Record<string, string> = {
 
   'narrative_modifier': 'narrative_modifier',
   'narrative modifier': 'narrative_modifier',
+  'meta_modifier': 'narrative_modifier',
+  'meta modifier': 'narrative_modifier',
 
   'narrative_heat': 'narrative_heat',
   'narrative heat': 'narrative_heat',
+  'meta_heat': 'narrative_heat',
+  'meta heat': 'narrative_heat',
 
   'exit_liquidity_modifier': 'exit_liquidity_modifier',
   'exit liquidity modifier': 'exit_liquidity_modifier',
+  'exit_liq_modifier': 'exit_liquidity_modifier',
+  'exitliq_modifier': 'exit_liquidity_modifier',
 
   'peak_proximity_modifier': 'peak_proximity_modifier',
   'peak proximity modifier': 'peak_proximity_modifier',
@@ -262,38 +325,68 @@ const FIELD_ALIASES: Record<string, string> = {
   'grok score': 'grok_score',
   'grok': 'grok_score',
 
-  // Model verdicts
+  // Model verdicts (handle all case/separator variations)
   'gpt_verdict': 'gpt_verdict',
   'gpt verdict': 'gpt_verdict',
+  'gptverdict': 'gpt_verdict',
   'chatgpt_verdict': 'gpt_verdict',
+  'chatgpt verdict': 'gpt_verdict',
+  'chatgptverdict': 'gpt_verdict',
   'claude_verdict': 'claude_verdict',
   'claude verdict': 'claude_verdict',
+  'claudeverdict': 'claude_verdict',
   'gemini_verdict': 'gemini_verdict',
   'gemini verdict': 'gemini_verdict',
+  'geminiverdict': 'gemini_verdict',
   'grok_verdict': 'grok_verdict',
   'grok verdict': 'grok_verdict',
+  'grokverdict': 'grok_verdict',
 
-  // Model reasoning
+  // Model reasoning (handle all case/separator variations)
   'gpt_reasoning': 'gpt_reasoning',
   'gpt reasoning': 'gpt_reasoning',
+  'gptreasoning': 'gpt_reasoning',
   'chatgpt_reasoning': 'gpt_reasoning',
+  'chatgpt reasoning': 'gpt_reasoning',
+  'chatgptreasoning': 'gpt_reasoning',
+  'gpt_analysis': 'gpt_reasoning',
+  'gpt analysis': 'gpt_reasoning',
   'claude_reasoning': 'claude_reasoning',
   'claude reasoning': 'claude_reasoning',
+  'claudereasoning': 'claude_reasoning',
+  'claude_analysis': 'claude_reasoning',
+  'claude analysis': 'claude_reasoning',
   'gemini_reasoning': 'gemini_reasoning',
   'gemini reasoning': 'gemini_reasoning',
+  'geminireasoning': 'gemini_reasoning',
+  'gemini_analysis': 'gemini_reasoning',
+  'gemini analysis': 'gemini_reasoning',
   'grok_reasoning': 'grok_reasoning',
   'grok reasoning': 'grok_reasoning',
+  'grokreasoning': 'grok_reasoning',
+  'grok_analysis': 'grok_reasoning',
+  'grok analysis': 'grok_reasoning',
 
-  // Model risks
+  // Model risks (handle all case/separator variations)
   'gpt_risks': 'gpt_risks',
   'gpt risks': 'gpt_risks',
+  'gptrisks': 'gpt_risks',
   'chatgpt_risks': 'gpt_risks',
+  'chatgpt risks': 'gpt_risks',
+  'chatgptrisks': 'gpt_risks',
+  'gpt_key_risks': 'gpt_risks',
   'claude_risks': 'claude_risks',
   'claude risks': 'claude_risks',
+  'clauderisks': 'claude_risks',
+  'claude_key_risks': 'claude_risks',
   'gemini_risks': 'gemini_risks',
   'gemini risks': 'gemini_risks',
+  'geminirisks': 'gemini_risks',
+  'gemini_key_risks': 'gemini_risks',
   'grok_risks': 'grok_risks',
   'grok risks': 'grok_risks',
+  'grokrisks': 'grok_risks',
+  'grok_key_risks': 'grok_risks',
 
   // Other fields
   'thesis': 'thesis',
@@ -310,6 +403,29 @@ const FIELD_ALIASES: Record<string, string> = {
 
   'schelling_position': 'schelling_position',
   'schelling position': 'schelling_position',
+
+  // Asymmetry floor/ceiling variations
+  'asymmetry_floor': 'asymmetry_floor',
+  'asymmetry floor': 'asymmetry_floor',
+  'asymmetry_floor_score': 'asymmetry_floor',
+  'asymmetry floor score': 'asymmetry_floor',
+  'downside_risk': 'asymmetry_floor',
+  'downside risk': 'asymmetry_floor',
+
+  'asymmetry_ceiling': 'asymmetry_ceiling',
+  'asymmetry ceiling': 'asymmetry_ceiling',
+  'asymmetry_ceiling_score': 'asymmetry_ceiling',
+  'asymmetry ceiling score': 'asymmetry_ceiling',
+  'upside_potential': 'asymmetry_ceiling',
+  'upside potential': 'asymmetry_ceiling',
+
+  // X Sentiment variations
+  'x_sentiment': 'x_sentiment',
+  'x sentiment': 'x_sentiment',
+  'xsentiment': 'x_sentiment',
+  'twitter_sentiment': 'x_sentiment',
+  'twitter sentiment': 'x_sentiment',
+  'sentiment': 'x_sentiment',
 };
 
 // Normalize a field name to its canonical form
@@ -449,7 +565,8 @@ function getStringFromMap(map: Map<string, string>, key: string): string | null 
   const canonicalKey = normalizeFieldName(key);
   const value = map.get(canonicalKey);
   if (value && value !== 'N/A' && value !== 'undefined' && value !== 'null') {
-    return cleanText(value);
+    // Clean text and strip any field label prefix
+    return stripFieldLabelPrefix(cleanText(value));
   }
   return null;
 }
@@ -500,6 +617,8 @@ function extractField(text: string, fieldName: string): string | null {
       let value = match[1].replace(/\*\*/g, '').replace(/`/g, '').trim();
       // Remove trailing backticks from code blocks
       value = value.replace(/```.*$/, '').trim();
+      // Strip any field label prefix from the value
+      value = stripFieldLabelPrefix(value);
       if (value && value !== '-' && value !== 'N/A' && value.length > 0) {
         return value;
       }
@@ -568,9 +687,11 @@ function extractNarrativeField(text: string): string | null {
   for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
-      const value = cleanText(match[1].trim());
+      // Apply cleanText first, then strip any field label prefix
+      let value = cleanText(match[1].trim());
+      value = stripFieldLabelPrefix(value);
       if (isValidNarrative(value)) {
-        console.log(`extractNarrativeField: Found valid narrative: "${value}"`);
+        console.log(`extractNarrativeField: Found valid narrative: "${value}" (after cleaning)`);
         return value;
       }
     }
@@ -772,10 +893,13 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   const penalties = extractNumericField(parseText, 'penalties');
   if (penalties !== undefined) result.penalties = penalties;
 
+  // Log all modifiers for debugging
+  console.log(`Parser: Modifiers - phase: ${result.phaseModifier}, narrative: ${result.narrativeModifier}, exitLiq: ${result.exitLiquidityModifier}, peakProx: ${result.peakProximityModifier}, dataQuality: ${result.dataQualityModifier}, marketCap: ${result.marketCapModifier}, total: ${result.totalModifiers}`);
+
   // Narrative - use dedicated extraction with multiple patterns
   const narrative = extractNarrativeField(parseText);
   if (narrative) {
-    result.narrative = narrative;
+    result.narrative = stripFieldLabelPrefix(narrative);
   }
 
   const narrativeHeat = extractNumericField(parseText, 'narrative_heat');
@@ -788,9 +912,22 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
     result.narrativeRank = cleanText(narrativeRank);
   }
 
-  const schellingPosition = extractField(parseText, 'schelling_position');
+  // Schelling Position - should be short value like "1st", "2nd", etc.
+  // Use narrative_rank as primary source, schelling_position as fallback
+  let schellingPosition = extractField(parseText, 'schelling_position');
   if (schellingPosition) {
-    result.schellingPosition = cleanText(schellingPosition);
+    schellingPosition = stripFieldLabelPrefix(cleanText(schellingPosition));
+    // Validate it's a short, valid position value (not reasoning text)
+    if (schellingPosition.length <= 50 && !schellingPosition.includes('.')) {
+      result.schellingPosition = schellingPosition;
+    } else {
+      console.log(`Parser: Rejected long schellingPosition (${schellingPosition.length} chars), using narrativeRank fallback`);
+    }
+  }
+  // If schellingPosition not set or invalid, use narrativeRank
+  if (!result.schellingPosition && result.narrativeRank) {
+    result.schellingPosition = result.narrativeRank;
+    console.log(`Parser: Using narrativeRank "${result.narrativeRank}" as schellingPosition`);
   }
 
   const equilibriumType = extractField(parseText, 'equilibrium_type');
@@ -804,20 +941,26 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
     result.dominantStrategies = cleanText(dominantStrategy);
   }
 
-  const asymmetryFloor = extractField(parseText, 'asymmetry_floor') || extractField(parseText, 'downside_risk');
-  if (asymmetryFloor && asymmetryFloor.length > 1) {
+  const asymmetryFloor = extractField(parseText, 'asymmetry_floor') ||
+                         extractField(parseText, 'asymmetry_floor_score') ||
+                         extractField(parseText, 'downside_risk');
+  if (asymmetryFloor && asymmetryFloor.length > 0) {
     result.asymmetryFloor = cleanText(asymmetryFloor);
+    console.log(`Parser: Extracted asymmetryFloor: "${result.asymmetryFloor}"`);
   }
 
-  const asymmetryCeiling = extractField(parseText, 'asymmetry_ceiling') || extractField(parseText, 'upside_potential');
-  if (asymmetryCeiling && asymmetryCeiling.length > 1) {
+  const asymmetryCeiling = extractField(parseText, 'asymmetry_ceiling') ||
+                           extractField(parseText, 'asymmetry_ceiling_score') ||
+                           extractField(parseText, 'upside_potential');
+  if (asymmetryCeiling && asymmetryCeiling.length > 0) {
     result.asymmetryCeiling = cleanText(asymmetryCeiling);
+    console.log(`Parser: Extracted asymmetryCeiling: "${result.asymmetryCeiling}"`);
   }
 
   // Project Context (NEW fields)
   const thesis = extractField(parseText, 'thesis');
   if (thesis && thesis.length > 3) {
-    result.thesis = cleanText(thesis);
+    result.thesis = stripFieldLabelPrefix(cleanText(thesis));
   }
 
   // Catalysts (individual fields)
@@ -851,17 +994,21 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   // Social Signals (NEW)
   const xMentionsTrend = extractField(parseText, 'x_mentions_trend');
   if (xMentionsTrend) {
-    result.xMentionsTrend = cleanText(xMentionsTrend);
+    result.xMentionsTrend = stripFieldLabelPrefix(cleanText(xMentionsTrend));
   }
 
-  const xSentiment = extractField(parseText, 'x_sentiment');
+  const xSentiment = extractField(parseText, 'x_sentiment') || extractField(parseText, 'sentiment');
   if (xSentiment) {
-    result.xSentiment = cleanText(xSentiment);
+    result.xSentiment = stripFieldLabelPrefix(cleanText(xSentiment));
+    console.log(`Parser: Extracted xSentiment: "${result.xSentiment}"`);
+  } else {
+    console.log(`Parser: xSentiment NOT found in text`);
   }
 
-  const xTopKols = extractField(parseText, 'x_top_kols');
+  const xTopKols = extractField(parseText, 'x_top_kols') || extractField(parseText, 'top_kols') || extractField(parseText, 'notable_kols');
   if (xTopKols) {
-    result.xTopKols = cleanText(xTopKols);
+    result.xTopKols = stripFieldLabelPrefix(cleanText(xTopKols));
+    console.log(`Parser: Extracted xTopKols: "${result.xTopKols}"`);
   }
 
   // Team/Project Info (NEW)
@@ -909,6 +1056,7 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   const gptVerdict = extractField(parseText, 'gpt_verdict');
   const gptReasoning = extractField(parseText, 'gpt_reasoning');
   const gptRisks = extractField(parseText, 'gpt_risks');
+  console.log(`Parser: GPT analysis fields - verdict: ${gptVerdict ? 'found' : 'missing'}, reasoning: ${gptReasoning ? 'found' : 'missing'}, risks: ${gptRisks ? 'found' : 'missing'}`);
   if (gptScore !== undefined || gptVerdict || gptReasoning) {
     result.modelAnalyses.gpt = {
       score: gptScore ?? 0,
@@ -994,7 +1142,7 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   // Display Text
   const displaySummary = extractField(parseText, 'display_summary');
   if (displaySummary) {
-    result.displaySummary = cleanText(displaySummary);
+    result.displaySummary = stripFieldLabelPrefix(cleanText(displaySummary));
   }
 
   const verdict = extractField(parseText, 'verdict');
@@ -1220,7 +1368,7 @@ function parseLegacyFormat(rawText: string, result: ParsedGumloopResponse): void
     for (const pattern of narrativePatterns) {
       const match = rawText.match(pattern);
       if (match && match[1]) {
-        const narrative = cleanText(match[1]);
+        const narrative = stripFieldLabelPrefix(cleanText(match[1]));
         if (narrative.length > 3 && narrative.length < 60 &&
             !narrative.includes('AT_RISK') && !narrative.includes('USER')) {
           result.narrative = narrative;
@@ -1331,7 +1479,17 @@ function parseLegacyFormat(rawText: string, result: ParsedGumloopResponse): void
   }
   if (!result.schellingPosition) {
     const schellingMatch = rawText.match(/Schelling\s*(?:Point|Position|Focal)[:\s]*([^\n|]+)/i);
-    if (schellingMatch) result.schellingPosition = cleanText(schellingMatch[1]);
+    if (schellingMatch) {
+      const value = stripFieldLabelPrefix(cleanText(schellingMatch[1]));
+      // Only use if it's a short, valid value
+      if (value.length <= 50 && !value.includes('.')) {
+        result.schellingPosition = value;
+      }
+    }
+    // If still no schellingPosition, use narrativeRank
+    if (!result.schellingPosition && result.narrativeRank) {
+      result.schellingPosition = result.narrativeRank;
+    }
   }
   if (!result.asymmetryFloor) {
     const floorMatch = rawText.match(/(?:Downside|Floor|Risk)[:\s]*(-?\d+%?(?:\s*to\s*-?\d+%?)?)/i);
@@ -1400,8 +1558,8 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
 
       const summaryNarrative = getStringFromMap(summaryMap, 'narrative');
       if (summaryNarrative && summaryNarrative.length > 2 && summaryNarrative.length < 100) {
-        result.narrative = summaryNarrative;
-        console.log(`Parser: Got narrative from OUTPUT SUMMARY: ${summaryNarrative}`);
+        result.narrative = stripFieldLabelPrefix(summaryNarrative);
+        console.log(`Parser: Got narrative from OUTPUT SUMMARY: ${result.narrative}`);
       }
 
       const summaryTokenType = getStringFromMap(summaryMap, 'token_type');
@@ -1473,7 +1631,7 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
 
       // Other fields from OUTPUT SUMMARY
       const summaryThesis = getStringFromMap(summaryMap, 'thesis');
-      if (summaryThesis) result.thesis = summaryThesis;
+      if (summaryThesis) result.thesis = stripFieldLabelPrefix(summaryThesis);
 
       const summaryVerdict = getStringFromMap(summaryMap, 'verdict');
       if (summaryVerdict) result.verdict = summaryVerdict;
@@ -1527,6 +1685,12 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
     // Log after legacy parsing
     console.log(`Parser: After parseLegacyFormat - narrative: "${result.narrative || 'undefined'}"`);
     console.log(`Parser: Final values - score: ${result.finalScore}, tier: ${result.tier}, narrative: "${result.narrative || 'undefined'}"`);
+    console.log(`Parser: Model analyses captured: ${Object.keys(result.modelAnalyses).join(', ') || 'none'}`);
+    if (Object.keys(result.modelAnalyses).length > 0) {
+      for (const [model, analysis] of Object.entries(result.modelAnalyses)) {
+        console.log(`Parser: ${model} - score: ${analysis.score}, verdict: ${analysis.verdict ? 'yes' : 'no'}, reasoning: ${analysis.reasoning ? 'yes' : 'no'}, risks: ${analysis.risks?.length || 0}`);
+      }
+    }
 
     // Calculate tier from score if not parsed successfully
     if (!result.tier || result.tier === '') {
@@ -1545,7 +1709,8 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
       if (!result.gameTheoryBonus) result.gameTheoryBonus = Math.round(base * 0.15 * 10) / 10;
     }
 
-    // Build display summary if not present
+    // Use display_summary as-is if present, otherwise try verdict/reasoning
+    // Do NOT generate generic fallback text - let UI show "Summary not available"
     if (!result.displaySummary) {
       let summary = result.verdict || result.reasoning || "";
       const sentences = summary.match(/[^.!?]+[.!?]+/g) || [];
@@ -1554,15 +1719,31 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
       }
       summary = summary.replace(/^[:\s\-–—]+/, '').trim();
 
-      if (!summary || summary.length < 20) {
-        summary = `${result.tier}-tier token with ${result.consensusLevel.toLowerCase()} model consensus scoring ${result.finalScore.toFixed(1)}/100. ${
-          result.recommendation === 'BUY' ? 'Favorable risk/reward profile.' :
-          result.recommendation === 'AVOID' ? 'Elevated risk factors detected.' :
-          'Moderate opportunity requiring careful position sizing.'
-        }`;
+      // Only use if we have meaningful content (not generic)
+      if (summary && summary.length >= 50) {
+        result.displaySummary = summary;
       }
-      result.displaySummary = summary;
+      // Otherwise leave displaySummary undefined - UI will show "Summary not available"
     }
+
+    // FINAL FALLBACK: If schellingPosition not set, use narrativeRank
+    if (!result.schellingPosition && result.narrativeRank) {
+      result.schellingPosition = result.narrativeRank;
+      console.log(`Parser: Using narrativeRank "${result.narrativeRank}" as schellingPosition fallback`);
+    }
+
+    // Strip any remaining prefixes from key text fields (final safety net)
+    if (result.narrative) {
+      result.narrative = stripFieldLabelPrefix(result.narrative);
+    }
+    if (result.thesis) {
+      result.thesis = stripFieldLabelPrefix(result.thesis);
+    }
+    if (result.displaySummary) {
+      result.displaySummary = stripFieldLabelPrefix(result.displaySummary);
+    }
+
+    console.log(`Parser: FINAL - narrative: "${result.narrative}", thesis: "${result.thesis?.substring(0, 50)}...", schellingPosition: "${result.schellingPosition}"`);
 
   } catch (error) {
     console.error('Error parsing Gumloop response:', error);
@@ -1698,7 +1879,7 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   // Narrative data
   const narrative = getString('narrative');
   if (narrative && narrative.length > 2) {
-    result.narrative = narrative;
+    result.narrative = stripFieldLabelPrefix(narrative);
   }
 
   const narrativeHeat = getNumber('narrative_heat');
@@ -1714,7 +1895,7 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   // Project context (NEW)
   const thesis = getString('thesis');
   if (thesis) {
-    result.thesis = thesis;
+    result.thesis = stripFieldLabelPrefix(thesis);
   }
 
   // Catalysts
@@ -1753,13 +1934,18 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
 
   // Social signals (NEW)
   const xMentionsTrend = getString('x_mentions_trend');
-  if (xMentionsTrend) result.xMentionsTrend = xMentionsTrend;
+  if (xMentionsTrend) result.xMentionsTrend = stripFieldLabelPrefix(xMentionsTrend);
 
-  const xSentiment = getString('x_sentiment');
-  if (xSentiment) result.xSentiment = xSentiment;
+  const xSentiment = getString('x_sentiment') || getString('sentiment');
+  if (xSentiment) {
+    result.xSentiment = stripFieldLabelPrefix(xSentiment);
+    console.log(`Parser (outputs): Extracted xSentiment: "${result.xSentiment}"`);
+  } else {
+    console.log(`Parser (outputs): xSentiment NOT found`);
+  }
 
   const xTopKols = getString('x_top_kols');
-  if (xTopKols) result.xTopKols = xTopKols;
+  if (xTopKols) result.xTopKols = stripFieldLabelPrefix(xTopKols);
 
   // Team/Project info (NEW)
   const unlockWarning = getString('unlock_warning');
@@ -1804,6 +1990,19 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   const equilibriumType = getString('equilibrium_type');
   if (equilibriumType) result.equilibriumType = equilibriumType;
 
+  // Asymmetry floor/ceiling - try multiple field names
+  const asymmetryFloor = getString('asymmetry_floor') || getString('asymmetry_floor_score');
+  if (asymmetryFloor) {
+    result.asymmetryFloor = asymmetryFloor;
+    console.log(`Parser (outputs): Extracted asymmetryFloor: "${result.asymmetryFloor}"`);
+  }
+
+  const asymmetryCeiling = getString('asymmetry_ceiling') || getString('asymmetry_ceiling_score');
+  if (asymmetryCeiling) {
+    result.asymmetryCeiling = asymmetryCeiling;
+    console.log(`Parser (outputs): Extracted asymmetryCeiling: "${result.asymmetryCeiling}"`);
+  }
+
   // Recommendation
   const recommendation = getString('recommendation');
   if (recommendation) {
@@ -1814,7 +2013,7 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   }
 
   const displaySummary = getString('display_summary');
-  if (displaySummary) result.displaySummary = displaySummary;
+  if (displaySummary) result.displaySummary = stripFieldLabelPrefix(displaySummary);
 
   // Component scores
   const coordinationScore = getNumber('coordination_score');
@@ -1944,14 +2143,8 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
     if (!result.gameTheoryBonus) result.gameTheoryBonus = Math.round(base * 0.15 * 10) / 10;
   }
 
-  // Build display summary if not present
-  if (!result.displaySummary && result.finalScore > 0) {
-    result.displaySummary = `${result.tier}-tier token with ${result.consensusLevel.toLowerCase()} model consensus scoring ${result.finalScore.toFixed(1)}/100. ${
-      result.recommendation === 'BUY' ? 'Favorable risk/reward profile.' :
-      result.recommendation === 'AVOID' ? 'Elevated risk factors detected.' :
-      'Moderate opportunity requiring careful position sizing.'
-    }`;
-  }
+  // Do NOT generate generic fallback text for display_summary
+  // Let UI show "Summary not available" if no actual summary exists
 
   // FALLBACK: If narrative wasn't found in direct fields, search all text content in outputs
   if (!result.narrative) {
@@ -2000,6 +2193,25 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
       }
     }
   }
+
+  // FINAL FALLBACK: If schellingPosition not set, use narrativeRank
+  if (!result.schellingPosition && result.narrativeRank) {
+    result.schellingPosition = result.narrativeRank;
+    console.log(`parseGumloopOutputs: Using narrativeRank "${result.narrativeRank}" as schellingPosition fallback`);
+  }
+
+  // Strip any remaining prefixes from key text fields (final safety net)
+  if (result.narrative) {
+    result.narrative = stripFieldLabelPrefix(result.narrative);
+  }
+  if (result.thesis) {
+    result.thesis = stripFieldLabelPrefix(result.thesis);
+  }
+  if (result.displaySummary) {
+    result.displaySummary = stripFieldLabelPrefix(result.displaySummary);
+  }
+
+  console.log(`parseGumloopOutputs: FINAL - narrative: "${result.narrative}", thesis: "${result.thesis?.substring(0, 50)}...", schellingPosition: "${result.schellingPosition}"`);
 
   return result;
 }
