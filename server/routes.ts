@@ -1207,32 +1207,43 @@ export async function registerRoutes(
 
       // If there's a Gumloop run ID, terminate the pipeline
       let gumloopTerminated = false;
+      console.log(`Cancel analysis ${analysisId}: gumloopRunId=${analysis.gumloopRunId}, hasApiKey=${!!GUMLOOP_API_KEY}, hasUserId=${!!GUMLOOP_USER_ID}`);
+
+      let killError: string | null = null;
       if (analysis.gumloopRunId && GUMLOOP_API_KEY && GUMLOOP_USER_ID) {
         try {
-          console.log(`Terminating Gumloop run ${analysis.gumloopRunId} for analysis ${analysisId}`);
+          console.log(`Killing Gumloop run ${analysis.gumloopRunId} for analysis ${analysisId}`);
 
-          const terminateUrl = new URL("https://api.gumloop.com/api/v1/terminate_pl_run");
-          terminateUrl.searchParams.set("run_id", analysis.gumloopRunId);
-          terminateUrl.searchParams.set("user_id", GUMLOOP_USER_ID);
+          // Use the correct Gumloop API endpoint: /kill_pipeline
+          // Parameters must be in the request body, not query params
+          const killUrl = "https://api.gumloop.com/api/v1/kill_pipeline";
 
-          const terminateResponse = await fetch(terminateUrl.toString(), {
+          const killResponse = await fetch(killUrl, {
             method: "POST",
             headers: {
               "Authorization": `Bearer ${GUMLOOP_API_KEY}`,
               "Content-Type": "application/json",
             },
+            body: JSON.stringify({
+              run_id: analysis.gumloopRunId,
+              user_id: GUMLOOP_USER_ID,
+            }),
           });
 
-          if (terminateResponse.ok) {
+          const responseText = await killResponse.text();
+          console.log(`Gumloop kill response: ${killResponse.status} - ${responseText}`);
+
+          if (killResponse.ok) {
             gumloopTerminated = true;
-            console.log(`Gumloop run ${analysis.gumloopRunId} terminated successfully`);
+            console.log(`Gumloop run ${analysis.gumloopRunId} killed successfully`);
           } else {
-            const errorText = await terminateResponse.text();
-            console.warn(`Failed to terminate Gumloop run ${analysis.gumloopRunId}: ${terminateResponse.status} - ${errorText}`);
+            killError = `${killResponse.status}: ${responseText}`;
+            console.warn(`Failed to kill Gumloop run ${analysis.gumloopRunId}: ${killError}`);
             // Continue anyway - we'll still mark the analysis as cancelled
           }
-        } catch (terminateError) {
-          console.warn(`Error terminating Gumloop run ${analysis.gumloopRunId}:`, terminateError);
+        } catch (err) {
+          killError = err instanceof Error ? err.message : String(err);
+          console.warn(`Error killing Gumloop run ${analysis.gumloopRunId}:`, err);
           // Continue anyway - we'll still mark the analysis as cancelled
         }
       }
@@ -1252,6 +1263,14 @@ export async function registerRoutes(
         status: "cancelled",
         message: "Analysis cancelled successfully",
         gumloopTerminated,
+        // Debug info
+        debug: {
+          hadRunId: !!analysis.gumloopRunId,
+          runId: analysis.gumloopRunId || null,
+          hadApiKey: !!GUMLOOP_API_KEY,
+          hadUserId: !!GUMLOOP_USER_ID,
+          killError: killError,
+        },
       });
     } catch (error) {
       console.error("Error cancelling analysis:", error);

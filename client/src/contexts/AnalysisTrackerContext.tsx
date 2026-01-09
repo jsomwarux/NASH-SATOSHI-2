@@ -111,8 +111,27 @@ export function AnalysisTrackerProvider({ children }: { children: React.ReactNod
               variant: "destructive",
             });
             untrackAnalysis(tracked.id);
+          } else if (status.status === "cancelled") {
+            // Analysis was cancelled - silently untrack it
+            untrackAnalysis(tracked.id);
           }
         } catch (error) {
+          // Handle specific error cases
+          const errorMessage = error instanceof Error ? error.message : String(error);
+
+          // If analysis not found, untrack it silently
+          if (errorMessage.includes("not found") || errorMessage.includes("404")) {
+            console.log(`Analysis ${tracked.id} not found, removing from tracker`);
+            untrackAnalysis(tracked.id);
+            continue;
+          }
+
+          // If rate limited, just skip this poll cycle (don't spam console)
+          if (errorMessage.includes("rate limit") || errorMessage.includes("429") || errorMessage.includes("Too Many Requests")) {
+            // Silently skip - will retry next poll
+            continue;
+          }
+
           console.error(`Error polling analysis ${tracked.id}:`, error);
         }
       }
