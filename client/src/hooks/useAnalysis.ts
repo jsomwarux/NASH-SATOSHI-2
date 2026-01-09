@@ -133,6 +133,8 @@ export function useTokenAnalyzer() {
     mutationFn: async ({ request, authToken }: { request: AnalyzeTokenRequest; authToken?: string }) => {
       return analyzeToken(request, authToken);
     },
+    retry: 3, // Retry on transient failures
+    retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 5000),
     onSuccess: (data, variables) => {
       // Track the analysis for background monitoring
       trackAnalysis({
