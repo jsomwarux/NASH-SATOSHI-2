@@ -314,6 +314,7 @@ export const tokenAnalyses = pgTable("token_analyses", {
 
   // Model consensus
   modelScores: jsonb("model_scores").$type<ModelScores>(),
+  modelAnalyses: jsonb("model_analyses").$type<ModelAnalyses>(),
 
   // Market data snapshot
   currentPrice: numeric("current_price", { precision: 20, scale: 10 }),
@@ -343,6 +344,22 @@ export interface ModelScores {
   claude?: number;
   gemini?: number;
   grok?: number;
+}
+
+// Model Analysis Interface - detailed analysis from each model
+export interface ModelAnalysis {
+  score: number;
+  verdict?: string;
+  reasoning?: string;
+  risks?: string[];
+}
+
+// Full Model Analyses - one entry per model
+export interface ModelAnalyses {
+  gpt?: ModelAnalysis;
+  claude?: ModelAnalysis;
+  gemini?: ModelAnalysis;
+  grok?: ModelAnalysis;
 }
 
 // Analysis Details for backward compatibility

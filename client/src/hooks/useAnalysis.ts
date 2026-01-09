@@ -47,8 +47,8 @@ export function useAnalysis(analysisId: number | null) {
     enabled: !!analysisId && analysisId > 0,
     staleTime: 0, // Always refetch to get fresh data
     gcTime: 0, // Don't cache completed analyses to avoid stale data
-    retry: 3, // Retry up to 3 times on failure
-    retryDelay: (attemptIndex) => Math.min(1000 * (attemptIndex + 1), 3000), // 1s, 2s, 3s delays
+    retry: 5, // Retry up to 5 times on failure (handles transient DB errors)
+    retryDelay: (attemptIndex) => Math.min(500 * Math.pow(2, attemptIndex), 5000), // Exponential: 500ms, 1s, 2s, 4s, 5s
   });
 
   // Check if we need to poll for status updates
@@ -103,7 +103,8 @@ export function useAnalysisByToken(tokenId: string | null) {
     queryKey: ["analysisByToken", tokenId],
     queryFn: () => getAnalysisByToken(tokenId!),
     enabled: !!tokenId,
-    retry: false, // Don't retry on 404
+    retry: 3, // Retry for transient errors
+    retryDelay: (attemptIndex) => Math.min(500 * Math.pow(2, attemptIndex), 3000),
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   });
 }

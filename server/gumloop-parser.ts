@@ -1,4 +1,4 @@
-import type { ModelScores } from "@shared/schema";
+import type { ModelScores, ModelAnalyses } from "@shared/schema";
 
 export interface ParsedGumloopResponse {
   // Primary results
@@ -82,6 +82,7 @@ export interface ParsedGumloopResponse {
 
   // Model scores
   modelScores: ModelScores;
+  modelAnalyses: ModelAnalyses;
   modelAgreement?: string;
 }
 
@@ -260,6 +261,39 @@ const FIELD_ALIASES: Record<string, string> = {
   'grok_score': 'grok_score',
   'grok score': 'grok_score',
   'grok': 'grok_score',
+
+  // Model verdicts
+  'gpt_verdict': 'gpt_verdict',
+  'gpt verdict': 'gpt_verdict',
+  'chatgpt_verdict': 'gpt_verdict',
+  'claude_verdict': 'claude_verdict',
+  'claude verdict': 'claude_verdict',
+  'gemini_verdict': 'gemini_verdict',
+  'gemini verdict': 'gemini_verdict',
+  'grok_verdict': 'grok_verdict',
+  'grok verdict': 'grok_verdict',
+
+  // Model reasoning
+  'gpt_reasoning': 'gpt_reasoning',
+  'gpt reasoning': 'gpt_reasoning',
+  'chatgpt_reasoning': 'gpt_reasoning',
+  'claude_reasoning': 'claude_reasoning',
+  'claude reasoning': 'claude_reasoning',
+  'gemini_reasoning': 'gemini_reasoning',
+  'gemini reasoning': 'gemini_reasoning',
+  'grok_reasoning': 'grok_reasoning',
+  'grok reasoning': 'grok_reasoning',
+
+  // Model risks
+  'gpt_risks': 'gpt_risks',
+  'gpt risks': 'gpt_risks',
+  'chatgpt_risks': 'gpt_risks',
+  'claude_risks': 'claude_risks',
+  'claude risks': 'claude_risks',
+  'gemini_risks': 'gemini_risks',
+  'gemini risks': 'gemini_risks',
+  'grok_risks': 'grok_risks',
+  'grok risks': 'grok_risks',
 
   // Other fields
   'thesis': 'thesis',
@@ -802,6 +836,65 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
     result.modelAgreement = cleanText(modelAgreement);
   }
 
+  // Model Analysis - verdict, reasoning, and risks for each model
+  // Helper to parse comma-separated risks into array
+  const parseRisksString = (risksStr: string): string[] => {
+    if (!risksStr) return [];
+    return risksStr.split(',').map(r => r.trim()).filter(r => r.length > 0);
+  };
+
+  // GPT Analysis
+  const gptVerdict = extractField(parseText, 'gpt_verdict');
+  const gptReasoning = extractField(parseText, 'gpt_reasoning');
+  const gptRisks = extractField(parseText, 'gpt_risks');
+  if (gptScore !== undefined || gptVerdict || gptReasoning) {
+    result.modelAnalyses.gpt = {
+      score: gptScore ?? 0,
+      verdict: gptVerdict ? cleanText(gptVerdict) : undefined,
+      reasoning: gptReasoning ? cleanTextPreserveStructure(gptReasoning) : undefined,
+      risks: gptRisks ? parseRisksString(gptRisks) : undefined,
+    };
+  }
+
+  // Claude Analysis
+  const claudeVerdict = extractField(parseText, 'claude_verdict');
+  const claudeReasoning = extractField(parseText, 'claude_reasoning');
+  const claudeRisks = extractField(parseText, 'claude_risks');
+  if (claudeScore !== undefined || claudeVerdict || claudeReasoning) {
+    result.modelAnalyses.claude = {
+      score: claudeScore ?? 0,
+      verdict: claudeVerdict ? cleanText(claudeVerdict) : undefined,
+      reasoning: claudeReasoning ? cleanTextPreserveStructure(claudeReasoning) : undefined,
+      risks: claudeRisks ? parseRisksString(claudeRisks) : undefined,
+    };
+  }
+
+  // Gemini Analysis
+  const geminiVerdict = extractField(parseText, 'gemini_verdict');
+  const geminiReasoning = extractField(parseText, 'gemini_reasoning');
+  const geminiRisks = extractField(parseText, 'gemini_risks');
+  if (geminiScore !== undefined || geminiVerdict || geminiReasoning) {
+    result.modelAnalyses.gemini = {
+      score: geminiScore ?? 0,
+      verdict: geminiVerdict ? cleanText(geminiVerdict) : undefined,
+      reasoning: geminiReasoning ? cleanTextPreserveStructure(geminiReasoning) : undefined,
+      risks: geminiRisks ? parseRisksString(geminiRisks) : undefined,
+    };
+  }
+
+  // Grok Analysis
+  const grokVerdict = extractField(parseText, 'grok_verdict');
+  const grokReasoning = extractField(parseText, 'grok_reasoning');
+  const grokRisks = extractField(parseText, 'grok_risks');
+  if (grokScore !== undefined || grokVerdict || grokReasoning) {
+    result.modelAnalyses.grok = {
+      score: grokScore ?? 0,
+      verdict: grokVerdict ? cleanText(grokVerdict) : undefined,
+      reasoning: grokReasoning ? cleanTextPreserveStructure(grokReasoning) : undefined,
+      risks: grokRisks ? parseRisksString(grokRisks) : undefined,
+    };
+  }
+
   // Risks array (from individual fields or legacy)
   const risks: string[] = [];
   if (result.risk1) risks.push(result.risk1);
@@ -1209,6 +1302,7 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
     confidence: 'M',
     recommendation: 'HOLD',
     modelScores: {},
+    modelAnalyses: {},
   };
 
   if (!rawText || rawText.length < 100) {
@@ -1452,6 +1546,7 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
     confidence: 'M',
     recommendation: 'HOLD',
     modelScores: {},
+    modelAnalyses: {},
   };
 
   // Check if fields are nested inside analysis_result
@@ -1709,6 +1804,66 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
 
   const grokScore = getNumber('grok_score');
   if (grokScore !== undefined) result.modelScores.grok = grokScore;
+
+  // Model analyses - verdict, reasoning, and risks for each model
+  // Helper to parse comma-separated risks
+  const parseRisksFromString = (risksStr: string | undefined): string[] | undefined => {
+    if (!risksStr) return undefined;
+    const risks = risksStr.split(',').map(r => r.trim()).filter(r => r.length > 0);
+    return risks.length > 0 ? risks : undefined;
+  };
+
+  // GPT Analysis
+  const gptVerdict = getString('gpt_verdict');
+  const gptReasoning = getString('gpt_reasoning');
+  const gptRisksStr = getString('gpt_risks');
+  if (gptScore !== undefined || gptVerdict || gptReasoning) {
+    result.modelAnalyses.gpt = {
+      score: gptScore ?? 0,
+      verdict: gptVerdict,
+      reasoning: gptReasoning,
+      risks: parseRisksFromString(gptRisksStr),
+    };
+  }
+
+  // Claude Analysis
+  const claudeVerdict = getString('claude_verdict');
+  const claudeReasoning = getString('claude_reasoning');
+  const claudeRisksStr = getString('claude_risks');
+  if (claudeScore !== undefined || claudeVerdict || claudeReasoning) {
+    result.modelAnalyses.claude = {
+      score: claudeScore ?? 0,
+      verdict: claudeVerdict,
+      reasoning: claudeReasoning,
+      risks: parseRisksFromString(claudeRisksStr),
+    };
+  }
+
+  // Gemini Analysis
+  const geminiVerdict = getString('gemini_verdict');
+  const geminiReasoning = getString('gemini_reasoning');
+  const geminiRisksStr = getString('gemini_risks');
+  if (geminiScore !== undefined || geminiVerdict || geminiReasoning) {
+    result.modelAnalyses.gemini = {
+      score: geminiScore ?? 0,
+      verdict: geminiVerdict,
+      reasoning: geminiReasoning,
+      risks: parseRisksFromString(geminiRisksStr),
+    };
+  }
+
+  // Grok Analysis
+  const grokVerdict = getString('grok_verdict');
+  const grokReasoning = getString('grok_reasoning');
+  const grokRisksStr = getString('grok_risks');
+  if (grokScore !== undefined || grokVerdict || grokReasoning) {
+    result.modelAnalyses.grok = {
+      score: grokScore ?? 0,
+      verdict: grokVerdict,
+      reasoning: grokReasoning,
+      risks: parseRisksFromString(grokRisksStr),
+    };
+  }
 
   // Calculate tier from score if not set
   if (!result.tier || result.tier === '') {

@@ -1,5 +1,5 @@
 import { eq, and, desc, sql, gte, lte, ilike, or, count, isNotNull } from "drizzle-orm";
-import { getDb } from "./db";
+import { getDb, withRetry } from "./db";
 import {
   userSubscriptions,
   dailyUsage,
@@ -145,13 +145,15 @@ export class PostgresStorage implements IStorage {
   // ==================== SUBSCRIPTION METHODS ====================
 
   async getUserSubscription(userId: string): Promise<UserSubscription | null> {
-    const db = getDb();
-    const result = await db
-      .select()
-      .from(userSubscriptions)
-      .where(eq(userSubscriptions.userId, userId))
-      .limit(1);
-    return result[0] || null;
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(userSubscriptions)
+        .where(eq(userSubscriptions.userId, userId))
+        .limit(1);
+      return result[0] || null;
+    });
   }
 
   async getSubscriptionByStripeCustomerId(customerId: string): Promise<UserSubscription | null> {
@@ -349,73 +351,85 @@ export class PostgresStorage implements IStorage {
   // ==================== ANALYSIS METHODS ====================
 
   async createAnalysis(data: InsertTokenAnalysis): Promise<TokenAnalysis> {
-    const db = getDb();
-    const result = await db.insert(tokenAnalyses).values(data as any).returning();
-    return result[0];
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db.insert(tokenAnalyses).values(data as any).returning();
+      return result[0];
+    });
   }
 
   async getAnalysis(id: number): Promise<TokenAnalysis | null> {
-    const db = getDb();
-    const result = await db
-      .select()
-      .from(tokenAnalyses)
-      .where(eq(tokenAnalyses.id, id))
-      .limit(1);
-    return result[0] || null;
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(tokenAnalyses)
+        .where(eq(tokenAnalyses.id, id))
+        .limit(1);
+      return result[0] || null;
+    });
   }
 
   async getAnalysisByToken(tokenId: string): Promise<TokenAnalysis | null> {
-    const db = getDb();
-    const result = await db
-      .select()
-      .from(tokenAnalyses)
-      .where(eq(tokenAnalyses.tokenId, tokenId))
-      .orderBy(desc(tokenAnalyses.createdAt))
-      .limit(1);
-    return result[0] || null;
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(tokenAnalyses)
+        .where(eq(tokenAnalyses.tokenId, tokenId))
+        .orderBy(desc(tokenAnalyses.createdAt))
+        .limit(1);
+      return result[0] || null;
+    });
   }
 
   async getAnalysisByRunId(runId: string): Promise<TokenAnalysis | null> {
-    const db = getDb();
-    const result = await db
-      .select()
-      .from(tokenAnalyses)
-      .where(eq(tokenAnalyses.gumloopRunId, runId))
-      .limit(1);
-    return result[0] || null;
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(tokenAnalyses)
+        .where(eq(tokenAnalyses.gumloopRunId, runId))
+        .limit(1);
+      return result[0] || null;
+    });
   }
 
   async getUserAnalyses(userId: string, limit = 20, offset = 0): Promise<{ items: TokenAnalysis[]; total: number }> {
-    const db = getDb();
+    return withRetry(async () => {
+      const db = getDb();
 
-    const [items, countResult] = await Promise.all([
-      db
-        .select()
-        .from(tokenAnalyses)
-        .where(eq(tokenAnalyses.userId, userId))
-        .orderBy(desc(tokenAnalyses.createdAt))
-        .limit(limit)
-        .offset(offset),
-      db
-        .select({ count: count() })
-        .from(tokenAnalyses)
-        .where(eq(tokenAnalyses.userId, userId)),
-    ]);
+      const [items, countResult] = await Promise.all([
+        db
+          .select()
+          .from(tokenAnalyses)
+          .where(eq(tokenAnalyses.userId, userId))
+          .orderBy(desc(tokenAnalyses.createdAt))
+          .limit(limit)
+          .offset(offset),
+        db
+          .select({ count: count() })
+          .from(tokenAnalyses)
+          .where(eq(tokenAnalyses.userId, userId)),
+      ]);
 
-    return {
-      items,
-      total: countResult[0]?.count || 0,
-    };
+      return {
+        items,
+        total: countResult[0]?.count || 0,
+      };
+    });
   }
 
   async updateAnalysis(id: number, data: Partial<InsertTokenAnalysis>): Promise<TokenAnalysis | null> {
-    const db = getDb();
-    const result = await db
-      .update(tokenAnalyses)
-      .set({ ...data, updatedAt: new Date() } as any)
-      .where(eq(tokenAnalyses.id, id))
-      .returning();
-    return result[0] || null;
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .update(tokenAnalyses)
+        .set({ ...data, updatedAt: new Date() } as any)
+        .where(eq(tokenAnalyses.id, id))
+        .returning();
+      return result[0] || null;
+    });
   }
 
   async getRunningAnalysesCount(userId: string): Promise<number> {
@@ -484,8 +498,9 @@ export class PostgresStorage implements IStorage {
       marketCapTier?: string;
     };
   }): Promise<{ items: any[]; total: number }> {
-    const db = getDb();
-    const { limit = 50, offset = 0, sortBy = "score7d", order = "desc", filters } = options;
+    return withRetry(async () => {
+      const db = getDb();
+      const { limit = 50, offset = 0, sortBy = "score7d", order = "desc", filters } = options;
 
     // Build WHERE conditions
     const conditions = [eq(tokenAnalyses.status, "completed")];
@@ -685,6 +700,7 @@ export class PostgresStorage implements IStorage {
       items: paginatedItems,
       total: items.length,
     };
+    });
   }
 
   async getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[]; tokenTypes: string[]; marketCapTiers: string[] }> {

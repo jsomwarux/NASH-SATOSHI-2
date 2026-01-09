@@ -1153,9 +1153,6 @@ async function startGumloopAnalysis(
     console.log(`Starting Gumloop analysis for ${tokenSymbol} (${tokenId})`);
     console.log(`Token details - Symbol: "${tokenSymbol}", Name: "${tokenName}", ID: "${tokenId}"`);
 
-    // Wait for rate limit slot before making request
-    await waitForGumloopSlot();
-
     // Ensure we have a valid token input - use symbol, fall back to name or ID
     // CoinGecko expects the raw symbol without $ prefix
     const tokenInput = tokenSymbol || tokenName || tokenId;
@@ -1163,81 +1160,121 @@ async function startGumloopAnalysis(
       throw new Error("No valid token identifier provided");
     }
 
-    let runId: string;
+    let runId: string | undefined;
 
-    // Method 1: Use webhook URL if available (simpler payload format)
-    if (hasWebhook) {
-      console.log("Using Gumloop webhook URL method with direct field mapping");
+    // Retry configuration for transient errors (rate limits, timeouts, server errors)
+    const MAX_RETRIES = 3;
+    const INITIAL_DELAY_MS = 2000;
 
-      // Webhook uses direct field mapping - input names as top-level keys
-      // Only sending "Token Input" - CoinGecko handles chain detection internally
-      const webhookPayload = {
-        "Token Input": tokenInput,
-      };
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // Wait for rate limit slot before making request
+        await waitForGumloopSlot();
 
-      console.log(`Gumloop webhook payload (direct mapping):`, JSON.stringify(webhookPayload, null, 2));
-      console.log(`Token Input value being sent: "${tokenInput}"`);
+        // Method 1: Use webhook URL if available (simpler payload format)
+        if (hasWebhook) {
+          console.log(`[Attempt ${attempt}/${MAX_RETRIES}] Using Gumloop webhook URL method`);
 
-      const webhookResponse = await fetch(GUMLOOP_WEBHOOK_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${GUMLOOP_API_KEY}`,
-        },
-        body: JSON.stringify(webhookPayload),
-      });
+          const webhookPayload = {
+            "Token Input": tokenInput,
+          };
 
-      const webhookResponseText = await webhookResponse.text();
-      console.log(`Gumloop webhook response (${webhookResponse.status}):`, webhookResponseText);
+          const webhookResponse = await fetch(GUMLOOP_WEBHOOK_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${GUMLOOP_API_KEY}`,
+            },
+            body: JSON.stringify(webhookPayload),
+          });
 
-      if (!webhookResponse.ok) {
-        console.error("Gumloop webhook error:", webhookResponseText);
-        throw new Error(`Gumloop webhook error: ${webhookResponse.status}`);
+          const webhookResponseText = await webhookResponse.text();
+          console.log(`Gumloop webhook response (${webhookResponse.status}):`, webhookResponseText);
+
+          if (!webhookResponse.ok) {
+            // Check if this is a retryable error (rate limit, server error, timeout)
+            const isRetryable = webhookResponse.status === 429 ||
+                               webhookResponse.status >= 500 ||
+                               webhookResponse.status === 408;
+
+            if (isRetryable && attempt < MAX_RETRIES) {
+              const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
+              console.log(`Retryable error (${webhookResponse.status}), waiting ${delay}ms before retry...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              continue;
+            }
+
+            throw new Error(`Gumloop webhook error: ${webhookResponse.status}`);
+          }
+
+          const webhookData = JSON.parse(webhookResponseText);
+          runId = webhookData.run_id;
+          break; // Success, exit retry loop
+        }
+        // Method 2: Use start_pipeline API with pipeline_inputs array (recommended per docs)
+        else {
+          console.log(`[Attempt ${attempt}/${MAX_RETRIES}] Using Gumloop start_pipeline API method`);
+
+          const apiUrl = new URL("https://api.gumloop.com/api/v1/start_pipeline");
+          apiUrl.searchParams.set("user_id", GUMLOOP_USER_ID!);
+          apiUrl.searchParams.set("saved_item_id", GUMLOOP_PIPELINE_ID!);
+
+          const requestPayload = {
+            pipeline_inputs: [
+              { input_name: "Token Input", value: tokenInput },
+            ],
+          };
+
+          const startResponse = await fetch(apiUrl.toString(), {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${GUMLOOP_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(requestPayload),
+          });
+
+          const responseText = await startResponse.text();
+          console.log(`Gumloop start response (${startResponse.status}):`, responseText);
+
+          if (!startResponse.ok) {
+            // Check if this is a retryable error
+            const isRetryable = startResponse.status === 429 ||
+                               startResponse.status >= 500 ||
+                               startResponse.status === 408;
+
+            if (isRetryable && attempt < MAX_RETRIES) {
+              const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
+              console.log(`Retryable error (${startResponse.status}), waiting ${delay}ms before retry...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              continue;
+            }
+
+            throw new Error(`Gumloop API error: ${startResponse.status}`);
+          }
+
+          const startData = JSON.parse(responseText);
+          runId = startData.run_id;
+          break; // Success, exit retry loop
+        }
+      } catch (fetchError) {
+        // Handle network errors (timeout, connection refused, etc.)
+        const isNetworkError = fetchError instanceof TypeError ||
+                              (fetchError instanceof Error && fetchError.message.includes('fetch'));
+
+        if (isNetworkError && attempt < MAX_RETRIES) {
+          const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
+          console.log(`Network error on attempt ${attempt}, waiting ${delay}ms before retry:`, fetchError);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        throw fetchError;
       }
-
-      const webhookData = JSON.parse(webhookResponseText);
-      runId = webhookData.run_id;
     }
-    // Method 2: Use start_pipeline API with pipeline_inputs array (recommended per docs)
-    else {
-      console.log("Using Gumloop start_pipeline API method with pipeline_inputs array");
 
-      // Per Gumloop docs: user_id and saved_item_id are URL query parameters
-      const apiUrl = new URL("https://api.gumloop.com/api/v1/start_pipeline");
-      apiUrl.searchParams.set("user_id", GUMLOOP_USER_ID!);
-      apiUrl.searchParams.set("saved_item_id", GUMLOOP_PIPELINE_ID!);
-
-      // Using pipeline_inputs array format (Option 1 - Recommended per Gumloop docs)
-      // Only sending "Token Input" - CoinGecko handles chain detection internally
-      const requestPayload = {
-        pipeline_inputs: [
-          { input_name: "Token Input", value: tokenInput },
-        ],
-      };
-
-      console.log(`Gumloop API URL: ${apiUrl.toString()}`);
-      console.log(`Gumloop request payload:`, JSON.stringify(requestPayload, null, 2));
-      console.log(`Token Input value being sent: "${tokenInput}"`);
-
-      const startResponse = await fetch(apiUrl.toString(), {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${GUMLOOP_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestPayload),
-      });
-
-      const responseText = await startResponse.text();
-      console.log(`Gumloop start response (${startResponse.status}):`, responseText);
-
-      if (!startResponse.ok) {
-        console.error("Gumloop start error:", responseText);
-        throw new Error(`Gumloop API error: ${startResponse.status}`);
-      }
-
-      const startData = JSON.parse(responseText);
-      runId = startData.run_id;
+    // Ensure we got a run ID
+    if (!runId) {
+      throw new Error("Failed to start Gumloop analysis after all retries");
     }
 
     console.log(`Gumloop run started with ID: ${runId}`);
@@ -1477,6 +1514,7 @@ async function pollGumloopStatus(
           verdict: parsed.verdict,
           reasoning: parsed.reasoning,
           modelScores: parsed.modelScores,
+          modelAnalyses: parsed.modelAnalyses,
           rawGumloopResponse: rawResponseToSave,
         });
         return;
@@ -1754,6 +1792,7 @@ async function processGumloopCompletion(
     verdict: parsed.verdict,
     reasoning: parsed.reasoning,
     modelScores: parsed.modelScores,
+          modelAnalyses: parsed.modelAnalyses,
     rawGumloopResponse: rawResponseToSave,
   });
 

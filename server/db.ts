@@ -67,3 +67,90 @@ export async function closeDb(): Promise<void> {
 }
 
 export { db };
+
+// ==================== RETRY UTILITY ====================
+// Wraps database operations with exponential backoff retry logic
+// for handling transient connection errors
+
+export interface RetryOptions {
+  maxRetries?: number;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  retryableErrors?: string[];
+}
+
+const DEFAULT_RETRY_OPTIONS: Required<RetryOptions> = {
+  maxRetries: 3,
+  initialDelayMs: 100,
+  maxDelayMs: 2000,
+  retryableErrors: [
+    'ECONNRESET',
+    'ETIMEDOUT',
+    'ECONNREFUSED',
+    'connection terminated',
+    'Connection terminated',
+    'timeout expired',
+    'Client has encountered a connection error',
+    'sorry, too many clients already',
+    'remaining connection slots are reserved',
+  ],
+};
+
+function isRetryableError(error: unknown, retryablePatterns: string[]): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  const name = error.name.toLowerCase();
+
+  return retryablePatterns.some(pattern =>
+    message.includes(pattern.toLowerCase()) || name.includes(pattern.toLowerCase())
+  );
+}
+
+/**
+ * Executes a database operation with automatic retry on transient failures.
+ * Uses exponential backoff between retries.
+ */
+export async function withRetry<T>(
+  operation: () => Promise<T>,
+  options?: RetryOptions
+): Promise<T> {
+  const opts = { ...DEFAULT_RETRY_OPTIONS, ...options };
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= opts.maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Check if this is a retryable error
+      if (!isRetryableError(error, opts.retryableErrors)) {
+        throw error; // Not retryable, fail immediately
+      }
+
+      // If we've exhausted retries, throw
+      if (attempt >= opts.maxRetries) {
+        console.error(`Database operation failed after ${attempt} attempts:`, lastError.message);
+        throw error;
+      }
+
+      // Calculate delay with exponential backoff and jitter
+      const baseDelay = Math.min(
+        opts.initialDelayMs * Math.pow(2, attempt - 1),
+        opts.maxDelayMs
+      );
+      const jitter = Math.random() * baseDelay * 0.3; // 30% jitter
+      const delay = Math.round(baseDelay + jitter);
+
+      console.warn(
+        `Database operation failed (attempt ${attempt}/${opts.maxRetries}), ` +
+        `retrying in ${delay}ms: ${lastError.message}`
+      );
+
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  // Should never reach here, but TypeScript needs this
+  throw lastError;
+}

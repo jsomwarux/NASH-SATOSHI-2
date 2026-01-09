@@ -41,7 +41,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { ShareModal } from "./ShareModal";
-import type { TokenAnalysis, ModelScores } from "@shared/schema";
+import { ModelAnalysisModal } from "./ModelAnalysisModal";
+import type { TokenAnalysis, ModelScores, ModelAnalyses } from "@shared/schema";
 
 interface ScoreCardProps {
   analysis: TokenAnalysis;
@@ -748,6 +749,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
   const [showReasoning, setShowReasoning] = useState(false);
   const [loadingStartTime] = useState(Date.now());
   const [showShareModal, setShowShareModal] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<'gpt' | 'claude' | 'gemini' | 'grok' | null>(null);
 
   const finalScore = parseFloat(analysis.finalScore as string) || 0;
   const priceChange24h = analysis.priceChange24h ? parseFloat(analysis.priceChange24h as string) : null;
@@ -759,6 +761,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
   const recStyle = getRecommendationStyle(analysis.recommendation);
   const exitStyle = getExitLiquidityDisplay(analysis.winningSide);
   const modelScores = analysis.modelScores as ModelScores | null;
+  const modelAnalyses = analysis.modelAnalyses as ModelAnalyses | null;
   const coordinationRisks = analysis.coordinationRisks as string[] | null;
   const catalysts = analysis.catalysts as string[] | null;
 
@@ -1147,36 +1150,52 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {modelScores.gpt !== undefined && (
-                  <div className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.gpt)}`}>
+                  <button
+                    onClick={() => setSelectedModel('gpt')}
+                    className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.gpt)} text-left transition-all hover:scale-[1.02] hover:shadow-lg cursor-pointer`}
+                  >
                     <div className="text-xs text-muted-foreground mb-1">ChatGPT-5.2</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.gpt)}`}>
                       {modelScores.gpt.toFixed(1)}
                     </div>
-                  </div>
+                    <div className="text-[10px] text-primary/70 mt-1">Click for details</div>
+                  </button>
                 )}
                 {modelScores.claude !== undefined && (
-                  <div className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.claude)}`}>
+                  <button
+                    onClick={() => setSelectedModel('claude')}
+                    className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.claude)} text-left transition-all hover:scale-[1.02] hover:shadow-lg cursor-pointer`}
+                  >
                     <div className="text-xs text-muted-foreground mb-1">Claude Opus 4.5</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.claude)}`}>
                       {modelScores.claude.toFixed(1)}
                     </div>
-                  </div>
+                    <div className="text-[10px] text-primary/70 mt-1">Click for details</div>
+                  </button>
                 )}
                 {modelScores.gemini !== undefined && (
-                  <div className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.gemini)}`}>
+                  <button
+                    onClick={() => setSelectedModel('gemini')}
+                    className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.gemini)} text-left transition-all hover:scale-[1.02] hover:shadow-lg cursor-pointer`}
+                  >
                     <div className="text-xs text-muted-foreground mb-1">Gemini 3 Pro</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.gemini)}`}>
                       {modelScores.gemini.toFixed(1)}
                     </div>
-                  </div>
+                    <div className="text-[10px] text-primary/70 mt-1">Click for details</div>
+                  </button>
                 )}
                 {modelScores.grok !== undefined && (
-                  <div className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.grok)}`}>
+                  <button
+                    onClick={() => setSelectedModel('grok')}
+                    className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.grok)} text-left transition-all hover:scale-[1.02] hover:shadow-lg cursor-pointer`}
+                  >
                     <div className="text-xs text-muted-foreground mb-1">Grok 4</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.grok)}`}>
                       {modelScores.grok.toFixed(1)}
                     </div>
-                  </div>
+                    <div className="text-[10px] text-primary/70 mt-1">Click for details</div>
+                  </button>
                 )}
               </div>
             </CardContent>
@@ -1658,6 +1677,25 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
         analysis={analysis}
+      />
+
+      {/* Model Analysis Modal */}
+      <ModelAnalysisModal
+        isOpen={selectedModel !== null}
+        onClose={() => setSelectedModel(null)}
+        modelName={
+          selectedModel === 'gpt' ? 'ChatGPT-5.2' :
+          selectedModel === 'claude' ? 'Claude Opus 4.5' :
+          selectedModel === 'gemini' ? 'Gemini 3 Pro' :
+          selectedModel === 'grok' ? 'Grok 4' : ''
+        }
+        modelAnalysis={
+          selectedModel && modelAnalyses
+            ? modelAnalyses[selectedModel]
+            : selectedModel && modelScores?.[selectedModel] !== undefined
+              ? { score: modelScores[selectedModel]! }
+              : undefined
+        }
       />
     </div>
   );
