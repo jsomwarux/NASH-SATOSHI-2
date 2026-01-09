@@ -28,13 +28,20 @@ interface LeaderboardTableProps {
   onSort: (field: SortField) => void;
 }
 
-// Score color helpers based on spec: red (<40), yellow (40-54), light green (55-69), green (70-84), gold (85+)
-function getScoreColor(score: number): string {
-  if (score >= 85) return "text-amber-400";
-  if (score >= 70) return "text-green-400";
-  if (score >= 55) return "text-emerald-400";
-  if (score >= 40) return "text-yellow-400";
-  return "text-red-400";
+// Score color based on tier - matches tier badge colors
+function getScoreColorByTier(tier: string): string {
+  switch (tier) {
+    case "S+":
+      return "text-purple-400";
+    case "S":
+      return "text-green-400";
+    case "A":
+      return "text-emerald-400";
+    case "B":
+      return "text-yellow-400";
+    default:
+      return "text-red-400";
+  }
 }
 
 function getTierBadgeStyle(tier: string): string {
@@ -236,7 +243,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <div className="flex items-center justify-center gap-1 cursor-help">
-                        <span className={`text-lg font-bold font-mono ${getScoreColor(score7d)}`}>
+                        <span className={`text-lg font-bold font-mono ${getScoreColorByTier(item.latestTier)}`}>
                           {formatScore(score7d)}
                         </span>
                         <ConfidenceIcon className={`w-3 h-3 ${confidenceInfo.color}`} />
@@ -248,7 +255,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
                   </Tooltip>
                 </TableCell>
                 <TableCell className="text-center hidden sm:table-cell">
-                  <span className={`text-sm font-mono ${getScoreColor(score30d)} opacity-70`}>
+                  <span className={`text-sm font-mono ${getScoreColorByTier(item.latestTier)} opacity-70`}>
                     {formatScore(score30d)}
                   </span>
                 </TableCell>
@@ -280,7 +287,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
                   {item.asymmetryScore !== null ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span className={`text-sm font-mono font-bold ${getScoreColor(item.asymmetryScore * 4)}`}>
+                        <span className={`text-sm font-mono font-bold ${getScoreColorByTier(item.latestTier)}`}>
                           {formatComponentScore(item.asymmetryScore)}
                         </span>
                       </TooltipTrigger>

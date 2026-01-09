@@ -117,7 +117,7 @@ function getRecommendationStyle(rec: string | null): { bg: string; text: string;
   return { bg: "bg-yellow-500/20", text: "text-yellow-400", label: "HOLD" };
 }
 
-// Better exit liquidity display
+// Position card display based on winning_side
 function getExitLiquidityDisplay(side: string | null): { bg: string; text: string; label: string; description: string } {
   const winningSide = side?.toUpperCase() || "AT_RISK";
   if (winningSide.includes("USER")) {
@@ -128,7 +128,7 @@ function getExitLiquidityDisplay(side: string | null): { bg: string; text: strin
       description: "You're positioned on the winning side"
     };
   }
-  if (winningSide.includes("EXIT") || winningSide.includes("LIQ")) {
+  if (winningSide.includes("EXIT_LIQUIDITY") || winningSide === "EXIT_LIQ") {
     return {
       bg: "bg-red-500/10 border border-red-500/30",
       text: "text-red-400",
@@ -136,10 +136,11 @@ function getExitLiquidityDisplay(side: string | null): { bg: string; text: strin
       description: "Risk of being exit liquidity"
     };
   }
+  // AT_RISK or any other value - middle tier with caution
   return {
     bg: "bg-yellow-500/10 border border-yellow-500/30",
     text: "text-yellow-400",
-    label: "Neutral",
+    label: "Caution",
     description: "Mixed signals on positioning"
   };
 }
@@ -1639,7 +1640,10 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   {/* Schelling Position */}
                   <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
                     <div className="text-xs text-muted-foreground mb-1">Schelling Position</div>
-                    <div className="text-sm">{analysis.schellingPosition || '—'}</div>
+                    <div className="text-sm">
+                      {analysis.schellingPosition?.toLowerCase() === 'lower' ? '4th+' :
+                       analysis.schellingPosition || '—'}
+                    </div>
                   </div>
 
                   {/* Market Equilibrium */}
@@ -1688,6 +1692,22 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   {/* Asymmetry Profile */}
                   <div className="p-3 rounded-lg bg-secondary/30 border border-white/5 col-span-2">
                     <div className="text-xs text-muted-foreground mb-1">Asymmetry Profile</div>
+                    {/* Qualitative label */}
+                    {(analysis.asymmetryCeiling || analysis.asymmetryFloor) && (() => {
+                      const ceiling = parseFloat(analysis.asymmetryCeiling as string) || 0;
+                      const floor = parseFloat(analysis.asymmetryFloor as string) || 0;
+                      const ceilingLabel = ceiling >= 10 ? 'High Ceiling' : ceiling >= 6 ? 'Moderate Ceiling' : 'Low Ceiling';
+                      const floorLabel = floor >= 10 ? 'Protected Floor' : floor >= 6 ? 'Moderate Floor' : 'Weak Floor';
+                      const ceilingColor = ceiling >= 10 ? 'text-green-400' : ceiling >= 6 ? 'text-yellow-400' : 'text-red-400';
+                      const floorColor = floor >= 10 ? 'text-green-400' : floor >= 6 ? 'text-yellow-400' : 'text-red-400';
+                      return (
+                        <div className="text-sm font-medium mb-2">
+                          <span className={ceilingColor}>{ceilingLabel}</span>
+                          <span className="text-muted-foreground"> + </span>
+                          <span className={floorColor}>{floorLabel}</span>
+                        </div>
+                      );
+                    })()}
                     <div className="flex items-center gap-4 text-sm">
                       <div className="flex items-center gap-1">
                         <ArrowDown className="w-3 h-3 text-red-400" />
