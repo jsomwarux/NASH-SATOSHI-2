@@ -2,6 +2,7 @@ import { X, AlertTriangle, Brain } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import type { ModelAnalysis } from "@shared/schema";
+import { formatScore } from "@/lib/utils";
 
 interface ModelAnalysisModalProps {
   isOpen: boolean;
@@ -66,7 +67,7 @@ export function ModelAnalysisModal({ isOpen, onClose, modelName, modelAnalysis }
             <div className={`p-4 rounded-xl border ${getScoreBgColor(score)} text-center`}>
               <div className="text-xs text-muted-foreground mb-1">Model Score</div>
               <div className={`text-4xl font-bold font-mono ${getScoreColor(score)}`}>
-                {score.toFixed(1)}
+                {formatScore(score)}
               </div>
               <div className="text-xs text-muted-foreground mt-1">out of 100</div>
             </div>

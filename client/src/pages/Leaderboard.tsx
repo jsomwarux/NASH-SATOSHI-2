@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { useLeaderboard, useFilterOptions, useLeaderboardStats } from "@/hooks/useLeaderboard";
 import type { LeaderboardFilters } from "@shared/schema";
+import { formatScore } from "@/lib/utils";
 
 type SortField = "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "recommendation";
 type SortOrder = "asc" | "desc";
@@ -160,7 +161,7 @@ export default function Leaderboard() {
                       : leaderboardStats.topNarrative.narrative}
                   </div>
                   <div className="text-[10px] text-muted-foreground font-mono">
-                    avg {leaderboardStats.topNarrative.avgScore.toFixed(1)} • {leaderboardStats.topNarrative.tokenCount} tokens
+                    avg {formatScore(leaderboardStats.topNarrative.avgScore)} • {leaderboardStats.topNarrative.tokenCount} tokens
                   </div>
                 </div>
               ) : (
@@ -180,7 +181,7 @@ export default function Leaderboard() {
                     ${leaderboardStats.winner24h.symbol}
                   </div>
                   <div className="text-[10px] text-muted-foreground font-mono">
-                    score {leaderboardStats.winner24h.score.toFixed(1)}
+                    score {formatScore(leaderboardStats.winner24h.score)}
                   </div>
                 </div>
               ) : (

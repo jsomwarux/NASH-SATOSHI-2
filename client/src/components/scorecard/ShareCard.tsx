@@ -1,6 +1,7 @@
 import { forwardRef } from "react";
 import { Trophy, TrendingUp, Zap, Target, Users, Brain } from "lucide-react";
 import type { TokenAnalysis } from "@shared/schema";
+import { formatScore, formatComponentScore } from "@/lib/utils";
 
 interface ShareCardProps {
   analysis: TokenAnalysis;
@@ -123,7 +124,7 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
             <div className="text-center">
               <div className="text-xs uppercase tracking-widest text-gray-500 mb-1">Game Theory Score</div>
               <div className={`text-7xl font-black ${getScoreColor(finalScore)} drop-shadow-lg`} style={{ textShadow: '0 0 40px currentColor' }}>
-                {finalScore.toFixed(1)}
+                {formatScore(finalScore)}
               </div>
               <div className="text-gray-500 text-sm mt-1">out of 100</div>
               <div className={`inline-block mt-2 px-3 py-1 rounded-full text-xs font-bold ${recStyle.bg} ${recStyle.text}`}>
@@ -156,7 +157,7 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
                       style={{ width: `${Math.min(100, pct)}%` }}
                     />
                   </div>
-                  <div className="text-xs font-bold text-white">{item.value.toFixed(1)}</div>
+                  <div className="text-xs font-bold text-white">{formatComponentScore(item.value)}</div>
                 </div>
               );
             })}

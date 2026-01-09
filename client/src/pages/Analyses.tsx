@@ -29,6 +29,7 @@ import { useUserAnalyses } from "@/hooks/useAnalyses";
 import { useAuth } from "@/contexts/AuthContext";
 import { AuthModal } from "@/components/auth/AuthModal";
 import type { TokenAnalysis } from "@shared/schema";
+import { formatScore } from "@/lib/utils";
 
 // Score color helpers
 function getScoreColor(score: number): string {
@@ -188,7 +189,7 @@ function AnalysisCard({ analysis, index }: { analysis: TokenAnalysis; index: num
               <div className="flex items-center gap-4 mb-4">
                 <div className="flex items-baseline gap-1">
                   <span className={`text-4xl font-bold font-mono ${getScoreColor(finalScore)}`}>
-                    {finalScore.toFixed(1)}
+                    {formatScore(finalScore)}
                   </span>
                   <span className="text-muted-foreground text-sm font-mono">/100</span>
                 </div>
@@ -490,7 +491,7 @@ export default function Analyses() {
                       const completed = data.items.filter(a => a.status === 'completed');
                       if (completed.length === 0) return '—';
                       const avg = completed.reduce((acc, a) => acc + (parseFloat(a.finalScore as string) || 0), 0) / completed.length;
-                      return avg.toFixed(1);
+                      return formatScore(avg);
                     })()}
                   </div>
                 </div>

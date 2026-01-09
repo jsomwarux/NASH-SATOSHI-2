@@ -1168,8 +1168,11 @@ export async function registerRoutes(
     }
   });
 
-  // Cancel an in-progress analysis (within 30s window before Gumloop starts)
+  // Cancel an in-progress analysis - terminates Gumloop pipeline if running
   app.post("/api/analyze/:id/cancel", requireAuth, async (req: Request, res: Response) => {
+    const GUMLOOP_API_KEY = process.env.GUMLOOP_API_KEY;
+    const GUMLOOP_USER_ID = process.env.GUMLOOP_USER_ID;
+
     try {
       const userId = req.userId!;
       const analysisId = parseInt(req.params.id, 10);
@@ -1193,25 +1196,48 @@ export async function registerRoutes(
         return;
       }
 
-      // Check if cancellable: must be pending/processing AND gumloopRunId must be null
-      // Once gumloopRunId is set, the analysis has been sent to Gumloop and is consuming credits
-      const isCancellable = (
-        (analysis.status === "pending" || analysis.status === "processing") &&
-        analysis.gumloopRunId === null
-      );
-
-      if (!isCancellable) {
+      // Check if cancellable: must be pending or processing
+      if (analysis.status !== "pending" && analysis.status !== "processing") {
         res.status(400).json({
-          message: analysis.gumloopRunId
-            ? "Analysis already in progress with AI research. Too late to cancel."
-            : "Analysis cannot be cancelled in its current state.",
+          message: "Analysis cannot be cancelled in its current state.",
           currentStatus: analysis.status,
-          hasRunId: !!analysis.gumloopRunId,
         });
         return;
       }
 
-      // Cancel the analysis
+      // If there's a Gumloop run ID, terminate the pipeline
+      let gumloopTerminated = false;
+      if (analysis.gumloopRunId && GUMLOOP_API_KEY && GUMLOOP_USER_ID) {
+        try {
+          console.log(`Terminating Gumloop run ${analysis.gumloopRunId} for analysis ${analysisId}`);
+
+          const terminateUrl = new URL("https://api.gumloop.com/api/v1/terminate_pl_run");
+          terminateUrl.searchParams.set("run_id", analysis.gumloopRunId);
+          terminateUrl.searchParams.set("user_id", GUMLOOP_USER_ID);
+
+          const terminateResponse = await fetch(terminateUrl.toString(), {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${GUMLOOP_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+          });
+
+          if (terminateResponse.ok) {
+            gumloopTerminated = true;
+            console.log(`Gumloop run ${analysis.gumloopRunId} terminated successfully`);
+          } else {
+            const errorText = await terminateResponse.text();
+            console.warn(`Failed to terminate Gumloop run ${analysis.gumloopRunId}: ${terminateResponse.status} - ${errorText}`);
+            // Continue anyway - we'll still mark the analysis as cancelled
+          }
+        } catch (terminateError) {
+          console.warn(`Error terminating Gumloop run ${analysis.gumloopRunId}:`, terminateError);
+          // Continue anyway - we'll still mark the analysis as cancelled
+        }
+      }
+
+      // Cancel the analysis in our database
       await storage.updateAnalysis(analysisId, {
         status: "cancelled",
         errorCode: "USER_CANCELLED",
@@ -1219,12 +1245,13 @@ export async function registerRoutes(
         chargeType: null, // Clear any charge type so nothing gets charged
       });
 
-      console.log(`Analysis ${analysisId} cancelled by user ${userId}`);
+      console.log(`Analysis ${analysisId} cancelled by user ${userId}${gumloopTerminated ? ' (Gumloop terminated)' : ''}`);
 
       res.json({
         analysisId,
         status: "cancelled",
         message: "Analysis cancelled successfully",
+        gumloopTerminated,
       });
     } catch (error) {
       console.error("Error cancelling analysis:", error);
@@ -1735,24 +1762,23 @@ async function pollGumloopStatus(
         const marketCap = marketCapStr ? parseFloat(marketCapStr) : null;
 
         // Determine market cap tier and apply hard caps
-        let marketCapTier = "nano";
+        // Thresholds: Micro <$10M, Small $10M-$50M, Mid $50M-$250M, Large $250M-$1B, Mega >$1B
+        let marketCapTier = "micro";
         let scoreCap = 100;
         if (marketCap !== null && !isNaN(marketCap)) {
-          if (marketCap > 5_000_000_000) {
+          if (marketCap > 1_000_000_000) {
             marketCapTier = "mega";
             scoreCap = 80;
-          } else if (marketCap > 1_000_000_000) {
+          } else if (marketCap > 250_000_000) {
             marketCapTier = "large";
             scoreCap = 85;
-          } else if (marketCap > 500_000_000) {
+          } else if (marketCap > 50_000_000) {
             marketCapTier = "mid";
             scoreCap = 90;
-          } else if (marketCap > 100_000_000) {
-            marketCapTier = "small";
           } else if (marketCap > 10_000_000) {
-            marketCapTier = "micro";
+            marketCapTier = "small";
           } else {
-            marketCapTier = "nano";
+            marketCapTier = "micro";
           }
         }
 
@@ -2092,24 +2118,23 @@ async function processGumloopCompletion(
   const marketCap = marketCapStr ? parseFloat(marketCapStr as string) : null;
 
   // Determine market cap tier and apply hard caps
-  let marketCapTier = "nano";
+  // Thresholds: Micro <$10M, Small $10M-$50M, Mid $50M-$250M, Large $250M-$1B, Mega >$1B
+  let marketCapTier = "micro";
   let scoreCap = 100;
   if (marketCap !== null && !isNaN(marketCap)) {
-    if (marketCap > 5_000_000_000) {
+    if (marketCap > 1_000_000_000) {
       marketCapTier = "mega";
       scoreCap = 80;
-    } else if (marketCap > 1_000_000_000) {
+    } else if (marketCap > 250_000_000) {
       marketCapTier = "large";
       scoreCap = 85;
-    } else if (marketCap > 500_000_000) {
+    } else if (marketCap > 50_000_000) {
       marketCapTier = "mid";
       scoreCap = 90;
-    } else if (marketCap > 100_000_000) {
-      marketCapTier = "small";
     } else if (marketCap > 10_000_000) {
-      marketCapTier = "micro";
+      marketCapTier = "small";
     } else {
-      marketCapTier = "nano";
+      marketCapTier = "micro";
     }
   }
 

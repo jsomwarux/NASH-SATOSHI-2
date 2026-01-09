@@ -50,8 +50,12 @@ export default function Analyze() {
   };
 
   const handleCancel = () => {
+    console.log(`[Analyze] handleCancel called, analysisId: ${analysisId}`);
     if (analysisId) {
+      console.log(`[Analyze] Triggering cancel mutation for ${analysisId}`);
       cancelMutation.mutate({ analysisId });
+    } else {
+      console.error("[Analyze] handleCancel: No analysisId available");
     }
   };
 

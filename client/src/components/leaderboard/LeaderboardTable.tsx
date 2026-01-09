@@ -17,6 +17,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { AggregatedLeaderboardItem } from "@/types/leaderboard";
+import { formatScore, formatComponentScore } from "@/lib/utils";
 
 type SortField = "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "recommendation";
 
@@ -236,7 +237,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
                     <TooltipTrigger asChild>
                       <div className="flex items-center justify-center gap-1 cursor-help">
                         <span className={`text-lg font-bold font-mono ${getScoreColor(score7d)}`}>
-                          {score7d.toFixed(1)}
+                          {formatScore(score7d)}
                         </span>
                         <ConfidenceIcon className={`w-3 h-3 ${confidenceInfo.color}`} />
                       </div>
@@ -248,7 +249,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
                 </TableCell>
                 <TableCell className="text-center hidden sm:table-cell">
                   <span className={`text-sm font-mono ${getScoreColor(score30d)} opacity-70`}>
-                    {score30d.toFixed(1)}
+                    {formatScore(score30d)}
                   </span>
                 </TableCell>
                 <TableCell className="text-center">
@@ -280,7 +281,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort }: LeaderboardTa
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span className={`text-sm font-mono font-bold ${getScoreColor(item.asymmetryScore * 4)}`}>
-                          {item.asymmetryScore.toFixed(1)}
+                          {formatComponentScore(item.asymmetryScore)}
                         </span>
                       </TooltipTrigger>
                       <TooltipContent side="top" className="cyber-card border-primary/20">

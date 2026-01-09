@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { ShareCard } from "./ShareCard";
 import type { TokenAnalysis } from "@shared/schema";
+import { formatScore } from "@/lib/utils";
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -111,7 +112,7 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
 
     const shareText = `${tierEmoji} Nash Satoshi $${analysis.tokenSymbol} Game Theory Analysis
 
-Score: ${finalScore.toFixed(1)}/100 (${analysis.tier} Tier)
+Score: ${formatScore(finalScore)}/100 (${analysis.tier} Tier)
 Signal: ${recEmoji} ${analysis.recommendation || 'PENDING'}
 Consensus: ${analysis.consensusLevel || 'MIXED'}
 

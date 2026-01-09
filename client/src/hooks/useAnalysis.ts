@@ -163,19 +163,26 @@ export function useCancelAnalysis() {
 
   return useMutation({
     mutationFn: async ({ analysisId }: { analysisId: number }) => {
+      console.log(`[Cancel] Starting cancel for analysis ${analysisId}`);
       const authToken = await getAccessToken();
       if (!authToken) {
+        console.error("[Cancel] No auth token available");
         throw new Error("Authentication required");
       }
+      console.log(`[Cancel] Calling cancel API for analysis ${analysisId}`);
       return cancelAnalysis(analysisId, authToken);
     },
     onSuccess: (data, variables) => {
+      console.log(`[Cancel] Successfully cancelled analysis ${variables.analysisId}`, data);
       // Remove from tracker since it's cancelled
       untrackAnalysis(variables.analysisId);
       // Invalidate the analysis query to trigger refetch
       queryClient.invalidateQueries({ queryKey: ["analysis", data.analysisId] });
       queryClient.invalidateQueries({ queryKey: ["analysisStatus", data.analysisId] });
       queryClient.invalidateQueries({ queryKey: ["userAnalyses"] });
+    },
+    onError: (error, variables) => {
+      console.error(`[Cancel] Failed to cancel analysis ${variables.analysisId}:`, error);
     },
   });
 }

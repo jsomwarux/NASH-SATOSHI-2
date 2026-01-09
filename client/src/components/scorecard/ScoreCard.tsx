@@ -44,6 +44,7 @@ import { Button } from "@/components/ui/button";
 import { ShareModal } from "./ShareModal";
 import { ModelAnalysisModal } from "./ModelAnalysisModal";
 import type { TokenAnalysis, ModelScores, ModelAnalyses, TokenStats } from "@shared/schema";
+import { formatScore, formatComponentScore, formatModifier } from "@/lib/utils";
 
 interface ScoreCardProps {
   analysis: TokenAnalysis;
@@ -451,6 +452,9 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
   // Use server elapsed time if available, otherwise use local tracking from createdAt
   const elapsedTime = serverElapsed ?? localElapsed;
 
+  // Debug cancel button visibility
+  console.log(`[LoadingScreen] elapsedTime: ${elapsedTime}, onCancel defined: ${!!onCancel}, showCancelButton: ${!!onCancel && elapsedTime < 60}`);
+
   // Initialize progress based on elapsed time with 25-minute assumption (linear)
   const initialProgress = Math.min(98, (initialElapsed / DEFAULT_TOTAL_TIME) * 100);
   const [progress, setProgress] = useState(Math.max(2, initialProgress));
@@ -758,12 +762,15 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
         </CardContent>
       </Card>
 
-      {/* Cancel Button - only show for first 30 seconds */}
-      {onCancel && elapsedTime < 30 && (
+      {/* Cancel Button - only show for first 60 seconds */}
+      {onCancel && elapsedTime < 60 && (
         <div className="flex justify-center mt-6 mb-4">
           <Button
             variant="outline"
-            onClick={onCancel}
+            onClick={() => {
+              console.log("[ScoreCard] Cancel button clicked");
+              onCancel();
+            }}
             disabled={isCancelling}
             className="gap-2 border-red-500/30 text-red-400 hover:bg-red-500/10"
           >
@@ -775,7 +782,7 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
             ) : (
               <>
                 <XCircle className="w-4 h-4" />
-                Cancel Analysis ({30 - elapsedTime}s)
+                Cancel Analysis ({60 - elapsedTime}s)
               </>
             )}
           </Button>
@@ -1142,53 +1149,31 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                     </Badge>
                   </div>
                   {/* Action buttons row */}
-                  <div className="flex items-center gap-2 mt-2">
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => setShowShareModal(true)}
-                            className="h-8 w-8 bg-primary/10 border-primary/30 hover:bg-primary/20 hover:border-primary/50 text-primary"
-                          >
-                            <Share2 className="w-4 h-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Share Analysis</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                  <div className="flex items-center gap-2 mt-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowShareModal(true)}
+                      className="h-8 px-3 bg-primary/10 border-primary/30 hover:bg-primary/20 hover:border-primary/50 text-primary text-xs"
+                    >
+                      <Share2 className="w-3.5 h-3.5 mr-1.5" />
+                      Share
+                    </Button>
                     {onReanalyze && (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              onClick={onReanalyze}
-                              disabled={isReanalyzing}
-                              className="h-8 w-8 bg-accent/10 border-accent/30 hover:bg-accent/20 hover:border-accent/50 text-accent"
-                            >
-                              {isReanalyzing ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <RefreshCw className="w-4 h-4" />
-                              )}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{isReanalyzing ? 'Starting new analysis...' : 'Run Fresh Analysis'}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    )}
-                    {/* Token Stats Badge */}
-                    {tokenStats && tokenStats.analysisCount > 1 && (
-                      <Badge variant="outline" className="text-xs bg-blue-500/10 border-blue-500/30 text-blue-400">
-                        Latest of {tokenStats.analysisCount}
-                      </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={onReanalyze}
+                        disabled={isReanalyzing}
+                        className="h-8 px-3 bg-accent/10 border-accent/30 hover:bg-accent/20 hover:border-accent/50 text-accent text-xs"
+                      >
+                        {isReanalyzing ? (
+                          <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                        )}
+                        {isReanalyzing ? 'Starting...' : 'Reanalyze'}
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -1232,17 +1217,20 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   </TooltipProvider>
                 </div>
                 <div className={`text-5xl sm:text-6xl md:text-7xl font-bold font-mono bg-gradient-to-r ${getScoreGradient(finalScore)} bg-clip-text text-transparent`}>
-                  {finalScore.toFixed(1)}
+                  {formatScore(finalScore)}
                 </div>
                 <div className="text-sm text-muted-foreground mt-1">out of 100</div>
                 {/* Average Score Display */}
                 {tokenStats && tokenStats.analysisCount > 1 && (
                   <div className="text-xs text-muted-foreground mt-2 flex items-center gap-1.5">
+                    <span className="bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                      #{tokenStats.analysisCount}
+                    </span>
                     <span>Avg:</span>
                     <span className={`font-mono font-medium ${getScoreColor(tokenStats.averageScore)}`}>
-                      {tokenStats.averageScore.toFixed(1)}
+                      {formatScore(tokenStats.averageScore)}
                     </span>
-                    <span>from {tokenStats.analysisCount} analyses</span>
+                    <span>across all runs</span>
                   </div>
                 )}
                 <div className="flex items-center gap-2 mt-2 flex-wrap justify-center">
@@ -1252,9 +1240,18 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   <Badge variant="outline" className="text-xs">
                     {analysis.confidence === 'H' ? 'High' : analysis.confidence === 'L' ? 'Low' : 'Medium'} Confidence
                   </Badge>
-                  {marketCapTier && marketCapTier !== 'small' && (
-                    <Badge variant="outline" className="text-xs bg-blue-500/10 border-blue-500/30 text-blue-400">
-                      {marketCapTier === 'mega' ? 'Mega Cap' : marketCapTier === 'large' ? 'Large Cap' : 'Mid Cap'}
+                  {marketCapTier && (
+                    <Badge variant="outline" className={`text-xs ${
+                      marketCapTier === 'mega' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' :
+                      marketCapTier === 'large' ? 'bg-green-500/10 border-green-500/30 text-green-400' :
+                      marketCapTier === 'mid' ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' :
+                      marketCapTier === 'small' ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' :
+                      'bg-purple-500/10 border-purple-500/30 text-purple-400'
+                    }`}>
+                      {marketCapTier === 'mega' ? 'Mega Cap' :
+                       marketCapTier === 'large' ? 'Large Cap' :
+                       marketCapTier === 'mid' ? 'Mid Cap' :
+                       marketCapTier === 'small' ? 'Small Cap' : 'Micro Cap'}
                     </Badge>
                   )}
                 </div>
@@ -1264,7 +1261,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                     <div className="text-xs text-blue-400 bg-blue-500/10 px-3 py-1.5 rounded-full inline-flex items-center gap-1.5">
                       <span className="font-medium">Excellent for size</span>
                       <span className="text-blue-400/70">
-                        (uncapped: {uncappedScore.toFixed(1)})
+                        (uncapped: {formatScore(uncappedScore)})
                       </span>
                     </div>
                   </div>
@@ -1332,10 +1329,10 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                     </div>
                     <div className="text-sm text-muted-foreground">
                       {marketCapTier === 'mega'
-                        ? `This token's $${formatMarketCap(analysis.marketCap as string)} market cap means scores are capped at 80. An 80 for a mega-cap is exceptional—equivalent to a 90+ for smaller tokens. Raw score: ${uncappedScore.toFixed(1)}.`
+                        ? `This token's $${formatMarketCap(analysis.marketCap as string)} market cap means scores are capped at 80. An 80 for a mega-cap is exceptional—equivalent to a 90+ for smaller tokens. Raw score: ${formatScore(uncappedScore)}.`
                         : marketCapTier === 'large'
-                          ? `Large caps ($1B-$5B) are capped at 85. This reflects reduced asymmetric upside for established tokens. Raw score: ${uncappedScore.toFixed(1)}.`
-                          : `Mid caps ($500M-$1B) are capped at 90 to account for moderate size constraints. Raw score: ${uncappedScore.toFixed(1)}.`
+                          ? `Large caps ($250M-$1B) are capped at 85. This reflects reduced asymmetric upside for established tokens. Raw score: ${formatScore(uncappedScore)}.`
+                          : `Mid caps ($50M-$250M) are capped at 90 to account for moderate size constraints. Raw score: ${formatScore(uncappedScore)}.`
                       }
                     </div>
                   </div>
@@ -1460,7 +1457,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   >
                     <div className="text-xs text-muted-foreground mb-1">ChatGPT-5.2</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.gpt)}`}>
-                      {modelScores.gpt.toFixed(1)}
+                      {formatScore(modelScores.gpt)}
                     </div>
                     <div className="text-[10px] text-primary/70 mt-1">Click for details</div>
                   </button>
@@ -1472,7 +1469,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   >
                     <div className="text-xs text-muted-foreground mb-1">Claude Opus 4.5</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.claude)}`}>
-                      {modelScores.claude.toFixed(1)}
+                      {formatScore(modelScores.claude)}
                     </div>
                     <div className="text-[10px] text-primary/70 mt-1">Click for details</div>
                   </button>
@@ -1484,7 +1481,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   >
                     <div className="text-xs text-muted-foreground mb-1">Gemini 3 Pro</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.gemini)}`}>
-                      {modelScores.gemini.toFixed(1)}
+                      {formatScore(modelScores.gemini)}
                     </div>
                     <div className="text-[10px] text-primary/70 mt-1">Click for details</div>
                   </button>
@@ -1496,7 +1493,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   >
                     <div className="text-xs text-muted-foreground mb-1">Grok 4</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.grok)}`}>
-                      {modelScores.grok.toFixed(1)}
+                      {formatScore(modelScores.grok)}
                     </div>
                     <div className="text-[10px] text-primary/70 mt-1">Click for details</div>
                   </button>
@@ -1522,7 +1519,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
               </div>
               {hasComponentScores && (
                 <span className="text-sm font-normal text-muted-foreground">
-                  {totalComponentScore.toFixed(1)} / {maxComponentScore} pts
+                  {formatComponentScore(totalComponentScore)} / {maxComponentScore} pts
                 </span>
               )}
             </CardTitle>
@@ -1541,7 +1538,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                           <span className="text-sm text-muted-foreground">{component.label}</span>
                         </div>
                         <span className={`font-mono font-bold ${getScoreColor(percentage)}`}>
-                          {component.score.toFixed(1)}/{component.max}
+                          {formatComponentScore(component.score)}/{component.max}
                         </span>
                       </div>
                       <Progress value={percentage} className="h-2" />
@@ -1567,14 +1564,14 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                     totalModifiersValue < 0 ? "text-red-400" :
                     "text-muted-foreground"
                   }`}>
-                    Total: {totalModifiersValue > 0 ? "+" : ""}{totalModifiersValue.toFixed(1)}
+                    Total: {formatModifier(totalModifiersValue)}
                   </div>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+                <div className="flex flex-wrap gap-2">
                   {modifiers.map((mod) => (
                     <div
                       key={mod.label}
-                      className={`p-2 rounded-lg border text-center ${
+                      className={`flex-1 min-w-[80px] max-w-[120px] p-2 rounded-lg border text-center ${
                         mod.value > 0
                           ? "bg-green-500/10 border-green-500/30"
                           : mod.value < 0
@@ -1582,13 +1579,13 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                             : "bg-secondary/50 border-white/10"
                       }`}
                     >
-                      <div className="text-xs text-muted-foreground">{mod.label}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{mod.label}</div>
                       <div className={`text-sm font-mono font-bold ${
                         mod.value > 0 ? "text-green-400" :
                         mod.value < 0 ? "text-red-400" :
                         "text-muted-foreground"
                       }`}>
-                        {mod.value > 0 ? "+" : ""}{mod.value.toFixed(1)}
+                        {formatModifier(mod.value)}
                       </div>
                     </div>
                   ))}
@@ -1667,7 +1664,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                           parseFloat(analysis.reflexivityScore as string) >= 12 ? 'text-green-400' :
                           parseFloat(analysis.reflexivityScore as string) >= 8 ? 'text-yellow-400' :
                           'text-muted-foreground'
-                        }`}>{parseFloat(analysis.reflexivityScore as string).toFixed(1)}</span>
+                        }`}>{formatComponentScore(analysis.reflexivityScore)}</span>
                         <span className="text-xs text-muted-foreground">/15</span>
                       </div>
                     ) : (
@@ -1696,7 +1693,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                             parseFloat(analysis.asymmetryScore as string) >= 20 ? 'text-green-400' :
                             parseFloat(analysis.asymmetryScore as string) >= 12 ? 'text-yellow-400' :
                             'text-muted-foreground'
-                          }`}>{parseFloat(analysis.asymmetryScore as string).toFixed(1)}/25</span>
+                          }`}>{formatComponentScore(analysis.asymmetryScore)}/25</span>
                         </div>
                       )}
                     </div>
