@@ -776,19 +776,8 @@ export async function registerRoutes(
         return;
       }
 
-      // Check global system limit to prevent overload (max 100 concurrent across all users)
-      const MAX_GLOBAL_CONCURRENT = 100;
-      const totalRunning = await storage.getTotalRunningAnalyses();
-      if (totalRunning >= MAX_GLOBAL_CONCURRENT) {
-        console.warn(`Global concurrent limit reached: ${totalRunning}/${MAX_GLOBAL_CONCURRENT}`);
-        res.status(503).json({
-          message: "System is at capacity. Please try again in a few minutes.",
-          code: "SYSTEM_BUSY",
-          totalRunning,
-          maxGlobal: MAX_GLOBAL_CONCURRENT,
-        });
-        return;
-      }
+      // Note: No global concurrent limit needed - Gumloop queues excess requests automatically
+      // and per-user limit of 2 prevents individual abuse
 
       // Fetch current price data from CoinGecko
       let currentPrice: string | null = null;
