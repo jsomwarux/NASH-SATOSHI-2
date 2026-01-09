@@ -1411,6 +1411,49 @@ async function pollGumloopStatus(
           rawResponseToSave = output;
         }
 
+        // FALLBACK: If model scores are empty after direct parsing, try text extraction
+        if (Object.keys(parsed.modelScores).length === 0 && output && output.length > 100) {
+          console.log(`Analysis ${analysisId}: Model scores empty, attempting text extraction fallback`);
+          const textParsed = parseGumloopResponse(output);
+          if (Object.keys(textParsed.modelScores).length > 0) {
+            parsed.modelScores = textParsed.modelScores;
+            console.log(`Analysis ${analysisId}: Recovered model scores from text: ${JSON.stringify(parsed.modelScores)}`);
+          }
+          // Also try to recover narrative from text if missing
+          if (!parsed.narrative && textParsed.narrative) {
+            parsed.narrative = textParsed.narrative;
+            console.log(`Analysis ${analysisId}: Recovered narrative from text: ${parsed.narrative}`);
+          }
+          // Recover model analyses if missing
+          if (Object.keys(parsed.modelAnalyses).length === 0 && Object.keys(textParsed.modelAnalyses).length > 0) {
+            parsed.modelAnalyses = textParsed.modelAnalyses;
+            console.log(`Analysis ${analysisId}: Recovered model analyses from text`);
+          }
+        }
+
+        // FALLBACK: Try to extract narrative from analysis_result text if still missing
+        if (!parsed.narrative && outputs['analysis_result'] && typeof outputs['analysis_result'] === 'string') {
+          const analysisText = outputs['analysis_result'];
+          // Look for common narrative patterns in the text
+          const narrativePatterns = [
+            /narrative[:\s]+([^\n|,]+)/i,
+            /\*\*narrative\*\*[:\s]+([^\n|*]+)/i,
+            /category[:\s]+([^\n|,]+)/i,
+            /sector[:\s]+([^\n|,]+)/i,
+          ];
+          for (const pattern of narrativePatterns) {
+            const match = analysisText.match(pattern);
+            if (match && match[1]) {
+              const extractedNarrative = match[1].trim();
+              if (extractedNarrative.length > 2 && extractedNarrative.length < 50) {
+                parsed.narrative = extractedNarrative;
+                console.log(`Analysis ${analysisId}: Extracted narrative from text: ${parsed.narrative}`);
+                break;
+              }
+            }
+          }
+        }
+
         // Provide fallback narrative if not found
         if (!parsed.narrative) {
           const tokenType = parsed.tokenType?.toUpperCase() || 'UTILITY';
@@ -1692,6 +1735,49 @@ async function processGumloopCompletion(
     console.log(`Analysis ${analysisId}: Using text-based parser (legacy format)`);
     parsed = parseGumloopResponse(output);
     rawResponseToSave = output;
+  }
+
+  // FALLBACK: If model scores are empty after direct parsing, try text extraction
+  if (Object.keys(parsed.modelScores).length === 0 && output && output.length > 100) {
+    console.log(`Analysis ${analysisId}: Model scores empty, attempting text extraction fallback`);
+    const textParsed = parseGumloopResponse(output);
+    if (Object.keys(textParsed.modelScores).length > 0) {
+      parsed.modelScores = textParsed.modelScores;
+      console.log(`Analysis ${analysisId}: Recovered model scores from text: ${JSON.stringify(parsed.modelScores)}`);
+    }
+    // Also try to recover narrative from text if missing
+    if (!parsed.narrative && textParsed.narrative) {
+      parsed.narrative = textParsed.narrative;
+      console.log(`Analysis ${analysisId}: Recovered narrative from text: ${parsed.narrative}`);
+    }
+    // Recover model analyses if missing
+    if (Object.keys(parsed.modelAnalyses).length === 0 && Object.keys(textParsed.modelAnalyses).length > 0) {
+      parsed.modelAnalyses = textParsed.modelAnalyses;
+      console.log(`Analysis ${analysisId}: Recovered model analyses from text`);
+    }
+  }
+
+  // FALLBACK: Try to extract narrative from analysis_result text if still missing
+  if (!parsed.narrative && outputs['analysis_result'] && typeof outputs['analysis_result'] === 'string') {
+    const analysisText = outputs['analysis_result'];
+    // Look for common narrative patterns in the text
+    const narrativePatterns = [
+      /narrative[:\s]+([^\n|,]+)/i,
+      /\*\*narrative\*\*[:\s]+([^\n|*]+)/i,
+      /category[:\s]+([^\n|,]+)/i,
+      /sector[:\s]+([^\n|,]+)/i,
+    ];
+    for (const pattern of narrativePatterns) {
+      const match = analysisText.match(pattern);
+      if (match && match[1]) {
+        const extractedNarrative = match[1].trim();
+        if (extractedNarrative.length > 2 && extractedNarrative.length < 50) {
+          parsed.narrative = extractedNarrative;
+          console.log(`Analysis ${analysisId}: Extracted narrative from text: ${parsed.narrative}`);
+          break;
+        }
+      }
+    }
   }
 
   // Provide fallback narrative if not found

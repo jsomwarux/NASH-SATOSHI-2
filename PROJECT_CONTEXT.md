@@ -145,6 +145,45 @@ const requestPayload = {
 - Max 540 attempts (45 minutes timeout)
 - States: STARTED, RUNNING, DONE, TERMINATED, FAILED
 
+### Gumloop Output Format (IMPORTANT)
+
+Gumloop returns a **single text response** in `analysis_result`, NOT structured JSON. The format is LLM-generated markdown with a structured **OUTPUT SUMMARY** section at the end.
+
+#### OUTPUT SUMMARY Format
+```
+#OUTPUT SUMMARY
+final_score: 72.5
+final_tier: A
+narrative: AI Infrastructure
+token_type: UTILITY
+gpt_score: 71
+claude_score: 74
+gemini_score: 73
+grok_score: 72
+coordination_score: 8
+reflexivity_score: 7
+```
+
+#### Parsing Strategy (server/gumloop-parser.ts)
+1. **Primary**: Find the OUTPUT SUMMARY section (look for `#OUTPUT SUMMARY`, `**OUTPUT SUMMARY**`, etc.)
+2. **Parse line by line** using pattern: `/^([a-z_]+):\s*(.+)$/`
+3. **Build key-value map** with normalized field names
+4. **Fallback**: If field missing from OUTPUT SUMMARY, extract from markdown body
+
+#### Field Name Normalization
+Field names may have spaces OR underscores - the parser handles both:
+
+| Expected Key | Variations Handled |
+|--------------|-------------------|
+| `final_score` | `final score`, `finalscore`, `score` |
+| `final_tier` | `final tier`, `tier` |
+| `narrative` | `narrative/meta`, `meta`, `primary_narrative` |
+| `peak_proximity_pct` | `peak proximity`, `peak_proximity` |
+| `token_type` | `tokentype`, `token type`, `type` |
+| `gpt_score` | `gpt score`, `chatgpt_score`, `chatgpt` |
+
+See `FIELD_ALIASES` in `gumloop-parser.ts` for full mapping.
+
 ---
 
 ## Database Schema Highlights
@@ -181,8 +220,10 @@ const requestPayload = {
 
 | File | Purpose |
 |------|---------|
-| `server/routes.ts` | All API endpoints, Gumloop integration |
+| `server/routes.ts` | All API endpoints, Gumloop integration, polling logic |
+| `server/gumloop-parser.ts` | **Parses Gumloop text output** - OUTPUT SUMMARY extraction, field normalization |
 | `server/storage.ts` | Database operations, leaderboard calculation |
+| `server/db.ts` | Database connection, retry wrapper for transient errors |
 | `client/src/components/scorecard/ScoreCard.tsx` | Analysis display + loading screen |
 | `client/src/pages/Home.tsx` | Main page with token search |
 | `client/src/pages/Analyze.tsx` | Analysis results page |

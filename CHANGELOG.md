@@ -4,6 +4,49 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
+## Session: 2026-01-09 (Update 3)
+
+### Summary
+Improved OUTPUT SUMMARY parser to better handle Gumloop's text-based markdown output format. Added comprehensive documentation.
+
+### Changes Made
+1. **Improved OUTPUT SUMMARY section detection** - Added more regex patterns including `---OUTPUT SUMMARY---`, kv-block detection as last resort
+2. **Added fallback kv-block detection** - If no header found, scans from end of text for consecutive `field: value` lines
+3. **Improved line parsing** - Now handles bullet points (`- field: value`), numbered lists (`1. field: value`), and various markdown formatting
+4. **Added logging** - Parser now logs how many fields were extracted and which fields were found
+5. **Updated PROJECT_CONTEXT.md** - Added comprehensive documentation on Gumloop output format and parsing strategy
+
+### Files Modified
+- `server/gumloop-parser.ts` - Rewrote `extractOutputSummarySection()` and `parseOutputSummaryToMap()` for better robustness
+- `PROJECT_CONTEXT.md` - Added "Gumloop Output Format" section explaining the text-based format and field aliases
+
+### Key Understanding
+Gumloop returns a **single text string** (not JSON) containing:
+- LLM-generated markdown analysis
+- An OUTPUT SUMMARY section at the end with `field_name: value` pairs
+
+The parser prioritizes the OUTPUT SUMMARY section, then falls back to extracting from markdown body.
+
+---
+
+## Session: 2026-01-09 (Update 2)
+
+### Summary
+Fixed missing 4-Model Consensus section and narrative defaulting to "Utility/Infrastructure" by adding fallback parsing logic.
+
+### Changes Made
+1. **Added fallback model score extraction** - If direct field parser returns empty model scores, now falls back to text-based extraction from the raw output
+2. **Added fallback narrative extraction** - If narrative is missing, extracts it from analysis_result text using regex patterns
+3. **Added fallback model analyses extraction** - Recovers per-model verdict/reasoning/risks from text if missing
+
+### Files Modified
+- `server/routes.ts` - Added fallback parsing in both polling locations (lines ~1414-1455 and ~1740-1781)
+
+### Root Cause
+The Gumloop output format may vary - sometimes fields are in structured format, sometimes embedded in text. The parser was only trying one method. Now it tries direct field parsing first, then falls back to text extraction.
+
+---
+
 ## Session: 2026-01-09
 
 ### Summary

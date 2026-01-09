@@ -320,25 +320,65 @@ function normalizeFieldName(name: string): string {
 
 // Extract the OUTPUT SUMMARY section from text
 function extractOutputSummarySection(text: string): string | null {
-  // Look for OUTPUT SUMMARY markers
+  // Look for OUTPUT SUMMARY markers - try multiple patterns
   const patterns = [
     // ════ bordered section
     /═{3,}[^\n]*OUTPUT\s*SUMMARY[^\n]*═*\s*\n([\s\S]*?)(?=═{3,}|$)/i,
-    // ## OUTPUT SUMMARY or # OUTPUT SUMMARY
+    // ## OUTPUT SUMMARY or # OUTPUT SUMMARY (markdown headers)
     /#{1,3}\s*OUTPUT\s*SUMMARY\s*\n([\s\S]*?)(?=\n#{1,3}\s|$)/i,
-    // **OUTPUT SUMMARY**
-    /\*\*OUTPUT\s*SUMMARY\*\*\s*\n([\s\S]*?)(?=\n\*\*[A-Z]|\n#{1,3}|$)/i,
-    // OUTPUT SUMMARY: or OUTPUT SUMMARY (plain)
-    /OUTPUT\s*SUMMARY[:\s]*\n([\s\S]*?)$/i,
+    // **OUTPUT SUMMARY** (bold markdown)
+    /\*\*\s*OUTPUT\s*SUMMARY\s*\*\*\s*:?\s*\n([\s\S]*?)(?=\n\*\*[A-Z]|\n#{1,3}|$)/i,
+    // --- OUTPUT SUMMARY --- (with dashes)
+    /-{3,}\s*OUTPUT\s*SUMMARY\s*-*\s*\n([\s\S]*?)(?=-{3,}|$)/i,
+    // OUTPUT SUMMARY: or OUTPUT SUMMARY (plain, captures to end)
+    /OUTPUT\s*SUMMARY\s*:?\s*\n([\s\S]*?)$/i,
+    // Just look for lines starting with common field names after any "summary" marker
+    /(?:summary|output)\s*:?\s*\n((?:[a-z_]+\s*:\s*[^\n]+\n?)+)/i,
   ];
 
   for (const pattern of patterns) {
     const match = text.match(pattern);
-    if (match && match[1] && match[1].trim().length > 20) {
-      return match[1].trim();
+    if (match && match[1]) {
+      const content = match[1].trim();
+      // Validate that it looks like key-value pairs (at least 3 lines with colons)
+      const lines = content.split('\n').filter(l => l.includes(':'));
+      if (lines.length >= 3 || content.length > 50) {
+        console.log(`Parser: Found OUTPUT SUMMARY section (${content.length} chars, ${lines.length} kv lines)`);
+        return content;
+      }
     }
   }
 
+  // Last resort: find the last section that looks like structured data
+  // Look for a block of consecutive "field: value" lines near the end
+  const lines = text.split('\n');
+  let kvStart = -1;
+  let kvEnd = -1;
+  const kvPattern = /^[a-z_\s]+:\s*.+/i;
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (kvPattern.test(line)) {
+      if (kvEnd === -1) kvEnd = i;
+      kvStart = i;
+    } else if (kvEnd !== -1 && kvStart !== -1 && (kvEnd - kvStart) >= 3) {
+      // Found a block of 4+ consecutive kv lines
+      break;
+    } else if (kvEnd !== -1 && line.length > 0 && !line.startsWith('#') && !line.startsWith('-')) {
+      // Non-empty, non-header line breaks the sequence
+      if ((kvEnd - kvStart) >= 3) break;
+      kvEnd = -1;
+      kvStart = -1;
+    }
+  }
+
+  if (kvStart !== -1 && kvEnd !== -1 && (kvEnd - kvStart) >= 3) {
+    const summaryLines = lines.slice(kvStart, kvEnd + 1).join('\n');
+    console.log(`Parser: Found OUTPUT SUMMARY via kv-block detection (lines ${kvStart}-${kvEnd})`);
+    return summaryLines;
+  }
+
+  console.log(`Parser: No OUTPUT SUMMARY section found in text of ${text.length} chars`);
   return null;
 }
 
@@ -351,32 +391,54 @@ function parseOutputSummaryToMap(summaryText: string): Map<string, string> {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('|') || trimmed.startsWith('-')) {
+    // Skip empty lines, markdown headers, table separators
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('|') || /^[-=]+$/.test(trimmed)) {
       continue;
     }
 
-    // Match pattern: field_name: value (with optional ** around field name)
-    const match = trimmed.match(/^\*?\*?([a-z_\s/]+)\*?\*?\s*:\s*(.+)$/i);
-    if (match && match[1] && match[2]) {
-      const rawKey = match[1].trim();
-      const rawValue = match[2].trim();
+    // Try multiple patterns to match key: value
+    const patterns = [
+      // Standard: field_name: value (with optional ** or * around field name)
+      /^\*{0,2}([a-z_\s/]+)\*{0,2}\s*:\s*(.+)$/i,
+      // With bullet: - field_name: value
+      /^[-•]\s*\*{0,2}([a-z_\s/]+)\*{0,2}\s*:\s*(.+)$/i,
+      // With number: 1. field_name: value
+      /^\d+\.\s*\*{0,2}([a-z_\s/]+)\*{0,2}\s*:\s*(.+)$/i,
+    ];
 
-      // Skip if value looks like a markdown header or empty
-      if (!rawValue || rawValue === '-' || rawValue === 'N/A' || rawValue.startsWith('#')) {
-        continue;
-      }
+    let matched = false;
+    for (const pattern of patterns) {
+      const match = trimmed.match(pattern);
+      if (match && match[1] && match[2]) {
+        const rawKey = match[1].trim();
+        const rawValue = match[2].trim();
 
-      const canonicalKey = normalizeFieldName(rawKey);
-      // Clean the value (remove trailing markdown, extra quotes)
-      const cleanedValue = rawValue
-        .replace(/\*\*/g, '')
-        .replace(/^\s*["']|["']\s*$/g, '')
-        .trim();
+        // Skip if value looks like a markdown header, empty, or placeholder
+        if (!rawValue || rawValue === '-' || rawValue === 'N/A' ||
+            rawValue === 'undefined' || rawValue === 'null' || rawValue.startsWith('#')) {
+          continue;
+        }
 
-      if (cleanedValue) {
-        result.set(canonicalKey, cleanedValue);
+        const canonicalKey = normalizeFieldName(rawKey);
+        // Clean the value (remove trailing markdown, extra quotes, brackets)
+        let cleanedValue = rawValue
+          .replace(/\*\*/g, '')
+          .replace(/^\s*["'\[\(]|["'\]\)]\s*$/g, '')
+          .replace(/\s*\|.*$/, '') // Remove table continuation
+          .trim();
+
+        if (cleanedValue) {
+          result.set(canonicalKey, cleanedValue);
+          matched = true;
+          break;
+        }
       }
     }
+  }
+
+  console.log(`Parser: Parsed ${result.size} fields from OUTPUT SUMMARY`);
+  if (result.size > 0) {
+    console.log(`Parser: OUTPUT SUMMARY fields: ${Array.from(result.keys()).join(', ')}`);
   }
 
   return result;
