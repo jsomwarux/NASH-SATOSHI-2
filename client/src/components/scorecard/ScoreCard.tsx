@@ -1571,7 +1571,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   {modifiers.map((mod) => (
                     <div
                       key={mod.label}
-                      className={`flex-1 min-w-[80px] max-w-[120px] p-2 rounded-lg border text-center ${
+                      className={`flex-1 min-w-[70px] max-w-[110px] p-2 rounded-lg border text-center ${
                         mod.value > 0
                           ? "bg-green-500/10 border-green-500/30"
                           : mod.value < 0
@@ -1835,7 +1835,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         </motion.div>
       )}
 
-      {/* Social Signals - Always show all three fields */}
+      {/* Social Signals - 4-card layout with reliable fields */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -1849,24 +1849,33 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {/* Narrative/Meta Heat */}
               <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
                 <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">{isMemecoin ? 'Meta Heat' : 'Narrative Heat'}</div>
                 {narrativeHeat !== null ? (
-                  <div className="flex items-center gap-2">
-                    <Flame className={`w-4 h-4 ${
-                      narrativeHeat >= 7 ? 'text-orange-400' :
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-1.5">
+                      <Flame className={`w-4 h-4 ${
+                        narrativeHeat >= 8 ? 'text-red-400' :
+                        narrativeHeat >= 6 ? 'text-orange-400' :
+                        narrativeHeat >= 4 ? 'text-yellow-400' :
+                        'text-blue-400'
+                      }`} />
+                      <span className={`text-lg font-bold font-mono ${
+                        narrativeHeat >= 8 ? 'text-red-400' :
+                        narrativeHeat >= 6 ? 'text-orange-400' :
+                        narrativeHeat >= 4 ? 'text-yellow-400' :
+                        'text-blue-400'
+                      }`}>{narrativeHeat.toFixed(1)}/10</span>
+                    </div>
+                    <span className={`text-xs mt-0.5 ${
+                      narrativeHeat >= 8 ? 'text-red-400' :
+                      narrativeHeat >= 6 ? 'text-orange-400' :
                       narrativeHeat >= 4 ? 'text-yellow-400' :
-                      'text-muted-foreground'
-                    }`} />
-                    <span className={`text-lg font-bold font-mono ${
-                      narrativeHeat >= 7 ? 'text-orange-400' :
-                      narrativeHeat >= 4 ? 'text-yellow-400' :
-                      'text-muted-foreground'
-                    }`}>{narrativeHeat.toFixed(1)}/10</span>
-                    <span className="text-xs text-muted-foreground">
-                      {narrativeHeat >= 7 ? 'Hot' : narrativeHeat >= 4 ? 'Warm' : 'Cool'}
+                      'text-blue-400'
+                    }`}>
+                      {narrativeHeat >= 8 ? 'On Fire' : narrativeHeat >= 6 ? 'Hot' : narrativeHeat >= 4 ? 'Warm' : 'Cold'}
                     </span>
                   </div>
                 ) : (
@@ -1874,30 +1883,56 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                 )}
               </div>
 
-              {/* X Sentiment - Always show */}
+              {/* Community Status - new reliable field */}
               <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
-                <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">X Sentiment</div>
-                {analysis.xSentiment && !analysis.xSentiment.toLowerCase().includes('n/a') ? (
-                  <div className={`text-sm font-medium ${
-                    analysis.xSentiment.toLowerCase().includes('bullish') || analysis.xSentiment.toLowerCase().includes('positive') ? 'text-green-400' :
-                    analysis.xSentiment.toLowerCase().includes('bearish') || analysis.xSentiment.toLowerCase().includes('negative') ? 'text-red-400' :
-                    ''
-                  }`}>
-                    {analysis.xSentiment}
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">—</div>
-                )}
+                <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Community</div>
+                {(() => {
+                  const status = (analysis.communityStatus as string)?.toLowerCase() || '';
+                  const displayStatus = analysis.communityStatus as string;
+                  if (!displayStatus || displayStatus.toLowerCase().includes('n/a')) {
+                    return <div className="text-sm text-muted-foreground">—</div>;
+                  }
+                  const colorClass =
+                    status.includes('very active') ? 'text-green-400' :
+                    status.includes('active') ? 'text-emerald-400' :
+                    status.includes('moderate') ? 'text-yellow-400' :
+                    status.includes('low') ? 'text-orange-400' :
+                    status.includes('dead') ? 'text-red-400' :
+                    'text-muted-foreground';
+                  return <div className={`text-sm font-medium ${colorClass}`}>{displayStatus}</div>;
+                })()}
               </div>
 
-              {/* Notable KOLs - Always show */}
+              {/* Account Quality - new reliable field */}
+              <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Account Quality</div>
+                {(() => {
+                  const quality = (analysis.accountQuality as string)?.toLowerCase() || '';
+                  const displayQuality = analysis.accountQuality as string;
+                  if (!displayQuality || displayQuality.toLowerCase().includes('n/a')) {
+                    return <div className="text-sm text-muted-foreground">—</div>;
+                  }
+                  const colorClass =
+                    quality.includes('builder') || quality.includes('researcher') ? 'text-green-400' :
+                    quality.includes('trader') || quality.includes('degen') ? 'text-cyan-400' :
+                    quality.includes('mixed') ? 'text-yellow-400' :
+                    quality.includes('promoter') || quality.includes('shill') ? 'text-orange-400' :
+                    quality.includes('bot') || quality.includes('spam') ? 'text-red-400' :
+                    'text-muted-foreground';
+                  return <div className={`text-sm font-medium ${colorClass}`}>{displayQuality}</div>;
+                })()}
+              </div>
+
+              {/* Notable KOLs */}
               <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
                 <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Notable KOLs</div>
-                {analysis.xTopKols && !analysis.xTopKols.toLowerCase().includes('n/a') ? (
-                  <div className="text-sm text-muted-foreground">{analysis.xTopKols}</div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">—</div>
-                )}
+                {(() => {
+                  const kols = analysis.xTopKols as string;
+                  if (!kols || kols.toLowerCase().includes('n/a') || kols.toLowerCase() === 'none') {
+                    return <div className="text-sm text-muted-foreground">None identified</div>;
+                  }
+                  return <div className="text-sm text-sky-400">{kols}</div>;
+                })()}
               </div>
             </div>
           </CardContent>

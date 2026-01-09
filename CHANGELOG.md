@@ -4,7 +4,64 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-09 Part 2 (Latest)
+## Session: 2026-01-09 Part 3 (Latest)
+
+### Summary
+Fixed missing Market Cap modifier in Score Modifiers section. Updated Social Signals section with more reliable fields (Community Status, Account Quality) replacing unreliable X Sentiment and X Mentions Trend.
+
+### Changes Made
+
+#### 1. Market Cap Modifier Fix
+- **Server-side calculation** - Added logic to calculate `marketCapModifier` when a score is capped
+- **Calculation**: `cappedScore - uncappedScore` (e.g., -15 for mega-cap capped from 95 to 80)
+- **Fallback**: Uses Gumloop-provided value if available, otherwise calculates server-side
+- **Updated both handlers** - Polling handler and webhook handler in routes.ts
+- **Adjusted modifier box sizing** - Reduced min-w to 70px and max-w to 110px for 6 modifiers on one row
+
+#### 2. Social Signals Section Overhaul
+- **New 4-card layout** - Changed from 3-column to 4-column grid (2x2 on mobile)
+- **New fields**:
+  - `communityStatus` - Very Active/Active/Moderate/Low/Dead
+  - `accountQuality` - Builders/Researchers, Traders/Degens, Mixed Quality, Promoters/Shills
+- **Replaced unreliable fields** - X Sentiment and X Mentions Trend often showed "N/A"
+- **Color coding for Community Status**:
+  - Very Active → green, Active → emerald, Moderate → yellow, Low → orange, Dead → red
+- **Color coding for Account Quality**:
+  - Builders/Researchers → green, Traders/Degens → cyan, Mixed → yellow, Promoters/Shills → orange, Bots/Spam → red
+- **Notable KOLs** - Shows "None identified" instead of "—" when empty
+- **Backward compatibility** - Parser falls back to old long field names for existing analyses
+
+#### 3. Gumloop Parser Updates
+- Added `communityStatus` and `accountQuality` to ParsedGumloopResponse interface
+- Added field aliases with fallbacks:
+  - `community_status` → `community_coordination_active_community_status`
+  - `account_quality` → `account_analysis_account_quality_assessment`
+  - `top_kols` → `x_top_kols`
+- Updated both text-based parser and direct outputs parser
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/routes.ts` | Added server-side marketCapModifier calculation in both handlers |
+| `server/gumloop-parser.ts` | Added communityStatus, accountQuality fields with fallback aliases |
+| `shared/schema.ts` | Added community_status and account_quality columns |
+| `client/src/components/scorecard/ScoreCard.tsx` | New 4-card Social Signals layout, adjusted modifier box sizing |
+
+### Database Migration Required
+```sql
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS community_status TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS account_quality TEXT;
+```
+
+### Current State
+- Market Cap modifier now displays for capped analyses (mid/large/mega cap tokens)
+- Social Signals shows 4 cards: Narrative Heat, Community Status, Account Quality, Notable KOLs
+- No more "N/A" values in Social Signals section
+- All TypeScript compiles successfully
+
+---
+
+## Session: 2026-01-09 Part 2
 
 ### Summary
 Score formatting standardization, market cap badge fixes, ScoreCard UI improvements, and critical cancel analysis fix (Gumloop API integration). Also improved error handling in AnalysisTrackerContext.

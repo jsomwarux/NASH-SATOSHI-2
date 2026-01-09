@@ -262,9 +262,11 @@ export const tokenAnalyses = pgTable("token_analyses", {
   risk3: text("risk_3"),
 
   // Social signals
-  xMentionsTrend: text("x_mentions_trend"), // ↑/↓/→
-  xSentiment: text("x_sentiment"), // positive/mixed/negative
+  xMentionsTrend: text("x_mentions_trend"), // ↑/↓/→ (deprecated, often N/A)
+  xSentiment: text("x_sentiment"), // positive/mixed/negative (deprecated, often N/A)
   xTopKols: text("x_top_kols"), // influencer mentions
+  communityStatus: text("community_status"), // Very Active/Active/Moderate/Low/Dead
+  accountQuality: text("account_quality"), // Builders/Researchers, Traders/Degens, Mixed Quality, etc.
 
   // Team/Project info
   unlockWarning: text("unlock_warning"),

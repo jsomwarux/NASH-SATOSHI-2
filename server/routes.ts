@@ -1806,8 +1806,15 @@ async function pollGumloopStatus(
         const cappedScore = Math.min(parsed.finalScore, scoreCap);
         const scoreCapped = cappedScore < uncappedScore;
 
+        // Calculate market cap modifier as the penalty applied by score capping
+        // If Gumloop provided a modifier, use that; otherwise calculate from cap
+        const calculatedMarketCapModifier = scoreCapped ? (cappedScore - uncappedScore) : 0;
+        const finalMarketCapModifier = parsed.marketCapModifier !== undefined
+          ? parsed.marketCapModifier
+          : calculatedMarketCapModifier;
+
         if (scoreCapped) {
-          console.log(`Analysis ${analysisId}: Score capped from ${uncappedScore} to ${cappedScore} (${marketCapTier} cap, market cap: $${marketCap?.toLocaleString()})`);
+          console.log(`Analysis ${analysisId}: Score capped from ${uncappedScore} to ${cappedScore} (${marketCapTier} cap, market cap: $${marketCap?.toLocaleString()}, modifier: ${finalMarketCapModifier})`);
         }
 
         // Update the analysis with parsed results
@@ -1837,6 +1844,8 @@ async function pollGumloopStatus(
           xMentionsTrend: parsed.xMentionsTrend,
           xSentiment: parsed.xSentiment,
           xTopKols: parsed.xTopKols,
+          communityStatus: parsed.communityStatus,
+          accountQuality: parsed.accountQuality,
           // Team/Project info (NEW)
           unlockWarning: parsed.unlockWarning,
           teamStatus: parsed.teamStatus,
@@ -1856,7 +1865,7 @@ async function pollGumloopStatus(
           exitLiquidityModifier: parsed.exitLiquidityModifier?.toString(),
           peakProximityModifier: parsed.peakProximityModifier?.toString(),
           dataQualityModifier: parsed.dataQualityModifier?.toString(),
-          marketCapModifier: parsed.marketCapModifier?.toString(),
+          marketCapModifier: finalMarketCapModifier.toString(),
           // Market cap scaling fields
           marketCapTier: marketCapTier,
           scoreCapped: scoreCapped,
@@ -2162,8 +2171,15 @@ async function processGumloopCompletion(
   const cappedScore = Math.min(parsed.finalScore, scoreCap);
   const scoreCapped = cappedScore < uncappedScore;
 
+  // Calculate market cap modifier as the penalty applied by score capping
+  // If Gumloop provided a modifier, use that; otherwise calculate from cap
+  const calculatedMarketCapModifier = scoreCapped ? (cappedScore - uncappedScore) : 0;
+  const finalMarketCapModifier = parsed.marketCapModifier !== undefined
+    ? parsed.marketCapModifier
+    : calculatedMarketCapModifier;
+
   if (scoreCapped) {
-    console.log(`Analysis ${analysisId}: Score capped from ${uncappedScore} to ${cappedScore} (${marketCapTier} cap)`);
+    console.log(`Analysis ${analysisId}: Score capped from ${uncappedScore} to ${cappedScore} (${marketCapTier} cap, modifier: ${finalMarketCapModifier})`);
   }
 
   // Update the analysis with parsed results
@@ -2191,6 +2207,8 @@ async function processGumloopCompletion(
     xMentionsTrend: parsed.xMentionsTrend,
     xSentiment: parsed.xSentiment,
     xTopKols: parsed.xTopKols,
+    communityStatus: parsed.communityStatus,
+    accountQuality: parsed.accountQuality,
     unlockWarning: parsed.unlockWarning,
     teamStatus: parsed.teamStatus,
     notableBackers: parsed.notableBackers,
@@ -2208,7 +2226,7 @@ async function processGumloopCompletion(
     exitLiquidityModifier: parsed.exitLiquidityModifier?.toString(),
     peakProximityModifier: parsed.peakProximityModifier?.toString(),
     dataQualityModifier: parsed.dataQualityModifier?.toString(),
-    marketCapModifier: parsed.marketCapModifier?.toString(),
+    marketCapModifier: finalMarketCapModifier.toString(),
     marketCapTier: marketCapTier,
     scoreCapped: scoreCapped,
     uncappedScore: uncappedScore.toString(),

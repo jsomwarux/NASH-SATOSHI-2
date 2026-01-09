@@ -24,9 +24,11 @@ export interface ParsedGumloopResponse {
   risk3?: string;
 
   // Social signals (NEW)
-  xMentionsTrend?: string; // ↑/↓/→
-  xSentiment?: string; // positive/mixed/negative
-  xTopKols?: string;
+  xMentionsTrend?: string; // ↑/↓/→ (deprecated, often N/A)
+  xSentiment?: string; // positive/mixed/negative (deprecated, often N/A)
+  xTopKols?: string; // Notable KOLs
+  communityStatus?: string; // Very Active/Active/Moderate/Low/Dead
+  accountQuality?: string; // Builders/Researchers, Traders/Degens, Mixed Quality, Promoters/Shills
 
   // Team/Project info (NEW)
   unlockWarning?: string;
@@ -419,13 +421,35 @@ const FIELD_ALIASES: Record<string, string> = {
   'upside_potential': 'asymmetry_ceiling',
   'upside potential': 'asymmetry_ceiling',
 
-  // X Sentiment variations
+  // X Sentiment variations (deprecated - often N/A)
   'x_sentiment': 'x_sentiment',
   'x sentiment': 'x_sentiment',
   'xsentiment': 'x_sentiment',
   'twitter_sentiment': 'x_sentiment',
   'twitter sentiment': 'x_sentiment',
   'sentiment': 'x_sentiment',
+
+  // Community Status - new reliable field
+  'community_status': 'community_status',
+  'community status': 'community_status',
+  'community_coordination_active_community_status': 'community_status',
+  'active_community_status': 'community_status',
+  'active community status': 'community_status',
+
+  // Account Quality - new reliable field
+  'account_quality': 'account_quality',
+  'account quality': 'account_quality',
+  'account_analysis_account_quality_assessment': 'account_quality',
+  'account_quality_assessment': 'account_quality',
+  'account quality assessment': 'account_quality',
+
+  // Top KOLs variations
+  'top_kols': 'top_kols',
+  'top kols': 'top_kols',
+  'x_top_kols': 'top_kols',
+  'x top kols': 'top_kols',
+  'notable_kols': 'top_kols',
+  'notable kols': 'top_kols',
 };
 
 // Normalize a field name to its canonical form
@@ -991,7 +1015,7 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
     result.risk3 = cleanText(risk3);
   }
 
-  // Social Signals (NEW)
+  // Social Signals (NEW) - with reliable new fields and fallbacks
   const xMentionsTrend = extractField(parseText, 'x_mentions_trend');
   if (xMentionsTrend) {
     result.xMentionsTrend = stripFieldLabelPrefix(cleanText(xMentionsTrend));
@@ -1005,10 +1029,31 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
     console.log(`Parser: xSentiment NOT found in text`);
   }
 
-  const xTopKols = extractField(parseText, 'x_top_kols') || extractField(parseText, 'top_kols') || extractField(parseText, 'notable_kols');
+  // Top KOLs with multiple fallbacks
+  const xTopKols = extractField(parseText, 'top_kols')
+    || extractField(parseText, 'x_top_kols')
+    || extractField(parseText, 'notable_kols');
   if (xTopKols) {
     result.xTopKols = stripFieldLabelPrefix(cleanText(xTopKols));
     console.log(`Parser: Extracted xTopKols: "${result.xTopKols}"`);
+  }
+
+  // Community Status - new reliable field with fallback to old long field name
+  const communityStatus = extractField(parseText, 'community_status')
+    || extractField(parseText, 'community_coordination_active_community_status')
+    || extractField(parseText, 'active_community_status');
+  if (communityStatus) {
+    result.communityStatus = stripFieldLabelPrefix(cleanText(communityStatus));
+    console.log(`Parser: Extracted communityStatus: "${result.communityStatus}"`);
+  }
+
+  // Account Quality - new reliable field with fallback to old long field name
+  const accountQuality = extractField(parseText, 'account_quality')
+    || extractField(parseText, 'account_analysis_account_quality_assessment')
+    || extractField(parseText, 'account_quality_assessment');
+  if (accountQuality) {
+    result.accountQuality = stripFieldLabelPrefix(cleanText(accountQuality));
+    console.log(`Parser: Extracted accountQuality: "${result.accountQuality}"`);
   }
 
   // Team/Project Info (NEW)
@@ -1932,7 +1977,7 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
     result.coordinationRisks = riskArray;
   }
 
-  // Social signals (NEW)
+  // Social signals (NEW) - with reliable new fields and fallbacks
   const xMentionsTrend = getString('x_mentions_trend');
   if (xMentionsTrend) result.xMentionsTrend = stripFieldLabelPrefix(xMentionsTrend);
 
@@ -1944,8 +1989,32 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
     console.log(`Parser (outputs): xSentiment NOT found`);
   }
 
-  const xTopKols = getString('x_top_kols');
-  if (xTopKols) result.xTopKols = stripFieldLabelPrefix(xTopKols);
+  // Top KOLs with multiple fallbacks
+  const xTopKols = getString('top_kols')
+    || getString('x_top_kols')
+    || getString('notable_kols');
+  if (xTopKols) {
+    result.xTopKols = stripFieldLabelPrefix(xTopKols);
+    console.log(`Parser (outputs): Extracted xTopKols: "${result.xTopKols}"`);
+  }
+
+  // Community Status - new reliable field with fallback to old long field name
+  const communityStatus = getString('community_status')
+    || getString('community_coordination_active_community_status')
+    || getString('active_community_status');
+  if (communityStatus) {
+    result.communityStatus = stripFieldLabelPrefix(communityStatus);
+    console.log(`Parser (outputs): Extracted communityStatus: "${result.communityStatus}"`);
+  }
+
+  // Account Quality - new reliable field with fallback to old long field name
+  const accountQuality = getString('account_quality')
+    || getString('account_analysis_account_quality_assessment')
+    || getString('account_quality_assessment');
+  if (accountQuality) {
+    result.accountQuality = stripFieldLabelPrefix(accountQuality);
+    console.log(`Parser (outputs): Extracted accountQuality: "${result.accountQuality}"`);
+  }
 
   // Team/Project info (NEW)
   const unlockWarning = getString('unlock_warning');
