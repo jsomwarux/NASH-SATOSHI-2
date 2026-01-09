@@ -4,7 +4,60 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-09 Part 4 (Latest)
+## Session: 2026-01-09 Part 5 (Latest)
+
+### Summary
+Updated FDV category thresholds to 8 tiers with new ranges. Added Giga Cap tier and Upper Mid Cap tier.
+
+### Changes Made
+
+#### 1. New FDV Category Thresholds
+Updated all FDV tier calculations with new thresholds:
+| Tier | FDV Range | Score Cap | Badge Color |
+|------|-----------|-----------|-------------|
+| Nano Cap | <$5M | None | Pink (vibrant) |
+| Micro Cap | $5M-$15M | None | Purple (vibrant) |
+| Small Cap | $15M-$50M | None | Blue |
+| Mid Cap | $50M-$150M | None | Cyan |
+| Upper Mid Cap | $150M-$500M | 90 | Emerald |
+| Large Cap | $500M-$1B | 85 | Green |
+| Mega Cap | $1B-$5B | 80 | Amber |
+| Giga Cap | >$5B | 75 | Yellow |
+
+#### 2. Server Updates
+- Updated FDV tier calculation in both polling and webhook handlers
+- Added new tier values: `giga` and `upper_mid`
+- Adjusted score caps: Giga=75, Mega=80, Large=85, Upper Mid=90
+
+#### 3. ScoreCard Updates
+- Added Giga Cap and Upper Mid Cap to badge display
+- Updated FDV Scaling Explanation for all 4 capped tiers
+- Colors: smaller caps use vibrant pink/purple, larger caps use neutral green/amber/yellow
+
+#### 4. Leaderboard Filter Updates
+- Added 8 filter options matching new thresholds
+- Filter values: giga, mega, large, upper_mid, mid, small, micro, nano
+
+#### 5. Phase Modifier Range Verification
+- Verified Score Modifiers display handles +12 to -30 range
+- `formatModifier` function works correctly with any value
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/routes.ts` | Updated FDV tier thresholds (both handlers) |
+| `client/src/components/scorecard/ScoreCard.tsx` | Added giga/upper_mid tiers, updated colors and explanations |
+| `client/src/pages/Leaderboard.tsx` | Updated FDV filter with 8 tiers |
+
+### Current State
+- 8 FDV tiers with new thresholds
+- Vibrant colors for high-asymmetry tiers (Nano, Micro)
+- Neutral colors for established tiers (Large, Mega, Giga)
+- All TypeScript compiles successfully
+
+---
+
+## Session: 2026-01-09 Part 4
 
 ### Summary
 Replaced Market Cap with FDV (Fully Diluted Valuation) throughout the scorecard. Updated tier thresholds to use FDV-based calculations.

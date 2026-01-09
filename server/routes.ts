@@ -1784,22 +1784,27 @@ async function pollGumloopStatus(
         const fdvValue = fdvStr ? parseFloat(fdvStr as string) : null;
 
         // Determine FDV tier and apply hard caps
-        // Thresholds: Nano <$1M, Micro $1M-$10M, Small $10M-$50M, Mid $50M-$200M, Large $200M-$1B, Mega >$1B
-        let fdvTier = "micro";
+        // Thresholds: Nano <$5M, Micro $5M-$15M, Small $15M-$50M, Mid $50M-$150M, Upper Mid $150M-$500M, Large $500M-$1B, Mega $1B-$5B, Giga >$5B
+        let fdvTier = "nano";
         let scoreCap = 100;
         if (fdvValue !== null && !isNaN(fdvValue)) {
-          if (fdvValue > 1_000_000_000) {
+          if (fdvValue > 5_000_000_000) {
+            fdvTier = "giga";
+            scoreCap = 75;
+          } else if (fdvValue > 1_000_000_000) {
             fdvTier = "mega";
             scoreCap = 80;
-          } else if (fdvValue > 200_000_000) {
+          } else if (fdvValue > 500_000_000) {
             fdvTier = "large";
             scoreCap = 85;
+          } else if (fdvValue > 150_000_000) {
+            fdvTier = "upper_mid";
+            scoreCap = 90;
           } else if (fdvValue > 50_000_000) {
             fdvTier = "mid";
-            scoreCap = 90;
-          } else if (fdvValue > 10_000_000) {
+          } else if (fdvValue > 15_000_000) {
             fdvTier = "small";
-          } else if (fdvValue > 1_000_000) {
+          } else if (fdvValue > 5_000_000) {
             fdvTier = "micro";
           } else {
             fdvTier = "nano";
@@ -2153,22 +2158,27 @@ async function processGumloopCompletion(
   const fdvValue = fdvStr ? parseFloat(fdvStr as string) : null;
 
   // Determine FDV tier and apply hard caps
-  // Thresholds: Nano <$1M, Micro $1M-$10M, Small $10M-$50M, Mid $50M-$200M, Large $200M-$1B, Mega >$1B
-  let fdvTier = "micro";
+  // Thresholds: Nano <$5M, Micro $5M-$15M, Small $15M-$50M, Mid $50M-$150M, Upper Mid $150M-$500M, Large $500M-$1B, Mega $1B-$5B, Giga >$5B
+  let fdvTier = "nano";
   let scoreCap = 100;
   if (fdvValue !== null && !isNaN(fdvValue)) {
-    if (fdvValue > 1_000_000_000) {
+    if (fdvValue > 5_000_000_000) {
+      fdvTier = "giga";
+      scoreCap = 75;
+    } else if (fdvValue > 1_000_000_000) {
       fdvTier = "mega";
       scoreCap = 80;
-    } else if (fdvValue > 200_000_000) {
+    } else if (fdvValue > 500_000_000) {
       fdvTier = "large";
       scoreCap = 85;
+    } else if (fdvValue > 150_000_000) {
+      fdvTier = "upper_mid";
+      scoreCap = 90;
     } else if (fdvValue > 50_000_000) {
       fdvTier = "mid";
-      scoreCap = 90;
-    } else if (fdvValue > 10_000_000) {
+    } else if (fdvValue > 15_000_000) {
       fdvTier = "small";
-    } else if (fdvValue > 1_000_000) {
+    } else if (fdvValue > 5_000_000) {
       fdvTier = "micro";
     } else {
       fdvTier = "nano";

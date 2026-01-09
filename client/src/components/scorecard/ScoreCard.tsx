@@ -1242,16 +1242,20 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   </Badge>
                   {fdvTier && (
                     <Badge variant="outline" className={`text-xs ${
+                      fdvTier === 'giga' ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400' :
                       fdvTier === 'mega' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' :
                       fdvTier === 'large' ? 'bg-green-500/10 border-green-500/30 text-green-400' :
+                      fdvTier === 'upper_mid' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
                       fdvTier === 'mid' ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' :
                       fdvTier === 'small' ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' :
                       fdvTier === 'micro' ? 'bg-purple-500/10 border-purple-500/30 text-purple-400' :
                       fdvTier === 'nano' ? 'bg-pink-500/10 border-pink-500/30 text-pink-400' :
                       'bg-gray-500/10 border-gray-500/30 text-gray-400'
                     }`}>
-                      {fdvTier === 'mega' ? 'Mega Cap' :
+                      {fdvTier === 'giga' ? 'Giga Cap' :
+                       fdvTier === 'mega' ? 'Mega Cap' :
                        fdvTier === 'large' ? 'Large Cap' :
+                       fdvTier === 'upper_mid' ? 'Upper Mid Cap' :
                        fdvTier === 'mid' ? 'Mid Cap' :
                        fdvTier === 'small' ? 'Small Cap' :
                        fdvTier === 'micro' ? 'Micro Cap' :
@@ -1329,14 +1333,19 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   </div>
                   <div>
                     <div className="text-sm font-medium text-blue-400 mb-1">
-                      {fdvTier === 'mega' ? 'Mega FDV Adjustment' : fdvTier === 'large' ? 'Large FDV Adjustment' : 'Mid FDV Adjustment'}
+                      {fdvTier === 'giga' ? 'Giga Cap Adjustment' :
+                       fdvTier === 'mega' ? 'Mega Cap Adjustment' :
+                       fdvTier === 'large' ? 'Large Cap Adjustment' :
+                       'Upper Mid Cap Adjustment'}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      {fdvTier === 'mega'
-                        ? `This token's $${formatFDV((analysis.fdv || analysis.marketCap) as string)} FDV means scores are capped at 80. An 80 for a mega FDV token is exceptional—equivalent to a 90+ for smaller tokens. Raw score: ${formatScore(uncappedScore)}.`
-                        : fdvTier === 'large'
-                          ? `Large FDV tokens ($200M-$1B) are capped at 85. This reflects reduced asymmetric upside for established tokens. Raw score: ${formatScore(uncappedScore)}.`
-                          : `Mid FDV tokens ($50M-$200M) are capped at 90 to account for moderate size constraints. Raw score: ${formatScore(uncappedScore)}.`
+                      {fdvTier === 'giga'
+                        ? `This token's $${formatFDV((analysis.fdv || analysis.marketCap) as string)} FDV means scores are capped at 75. A 75 for a giga-cap is exceptional—equivalent to a 95+ for smaller tokens. Raw score: ${formatScore(uncappedScore)}.`
+                        : fdvTier === 'mega'
+                          ? `Mega cap tokens ($1B-$5B) are capped at 80. An 80 for a mega-cap is exceptional—equivalent to a 90+ for smaller tokens. Raw score: ${formatScore(uncappedScore)}.`
+                          : fdvTier === 'large'
+                            ? `Large cap tokens ($500M-$1B) are capped at 85. This reflects reduced asymmetric upside for established tokens. Raw score: ${formatScore(uncappedScore)}.`
+                            : `Upper mid cap tokens ($150M-$500M) are capped at 90 to account for moderate size constraints. Raw score: ${formatScore(uncappedScore)}.`
                       }
                     </div>
                   </div>

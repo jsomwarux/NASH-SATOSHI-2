@@ -348,12 +348,14 @@ export default function Leaderboard() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All FDVs</SelectItem>
-                    <SelectItem value="mega">Mega (&gt;$1B)</SelectItem>
-                    <SelectItem value="large">Large ($200M-$1B)</SelectItem>
-                    <SelectItem value="mid">Mid ($50M-$200M)</SelectItem>
-                    <SelectItem value="small">Small ($10M-$50M)</SelectItem>
-                    <SelectItem value="micro">Micro ($1M-$10M)</SelectItem>
-                    <SelectItem value="nano">Nano (&lt;$1M)</SelectItem>
+                    <SelectItem value="giga">Giga (&gt;$5B)</SelectItem>
+                    <SelectItem value="mega">Mega ($1B-$5B)</SelectItem>
+                    <SelectItem value="large">Large ($500M-$1B)</SelectItem>
+                    <SelectItem value="upper_mid">Upper Mid ($150M-$500M)</SelectItem>
+                    <SelectItem value="mid">Mid ($50M-$150M)</SelectItem>
+                    <SelectItem value="small">Small ($15M-$50M)</SelectItem>
+                    <SelectItem value="micro">Micro ($5M-$15M)</SelectItem>
+                    <SelectItem value="nano">Nano (&lt;$5M)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
