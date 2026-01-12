@@ -1,10 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { getLeaderboard, getFilterOptions, getLeaderboardStats, type LeaderboardOptions } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 
 export function useLeaderboard(options?: LeaderboardOptions) {
+  const { getAccessToken, user } = useAuth();
+
   return useQuery({
-    queryKey: ["leaderboard", options],
-    queryFn: () => getLeaderboard(options),
+    queryKey: ["leaderboard", options, user?.id],
+    queryFn: async () => {
+      const token = await getAccessToken();
+      return getLeaderboard(options, token || undefined);
+    },
     staleTime: 30 * 1000, // Cache for 30 seconds
     refetchOnWindowFocus: true,
     retry: 3, // Retry for transient DB errors

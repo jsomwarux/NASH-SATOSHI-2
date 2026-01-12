@@ -91,7 +91,8 @@ export interface LeaderboardResponse {
 }
 
 export async function getLeaderboard(
-  options?: LeaderboardOptions
+  options?: LeaderboardOptions,
+  authToken?: string
 ): Promise<LeaderboardResponse> {
   const params = new URLSearchParams();
 
@@ -113,7 +114,7 @@ export async function getLeaderboard(
   const queryString = params.toString();
   const url = queryString ? `/api/leaderboard?${queryString}` : "/api/leaderboard";
 
-  return fetchApi<LeaderboardResponse>(url);
+  return fetchApi<LeaderboardResponse>(url, { authToken });
 }
 
 // Get Filter Options
