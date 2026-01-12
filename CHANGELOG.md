@@ -4,7 +4,104 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-12 - Score Calculation, X Research Fields, Model Divergence & Flexible Format Fields (Latest)
+## Session: 2026-01-12 Part 2 - Security, Auth Fixes, Home Page Optimization & "Rankings" Rebrand (Latest)
+
+### Summary
+Comprehensive security audit with fixes, resolved auth session handling issues, updated sign up modal to show free tier benefits, fixed voting system bugs, fixed Stripe subscription flow, redesigned Home page "Your Edge in Crypto" section, and renamed all "Leaderboard" references to "Rankings" for brand consistency.
+
+### Changes Made
+
+#### 1. Security Audit & Fixes
+- Added path traversal protection in CoinGecko proxy endpoints
+- Added input sanitization for voting system (token ID validation)
+- Hardened Gumloop webhook with status code validation
+- All changes in `server/routes.ts`
+
+#### 2. Sign Up Modal Update
+- Replaced "7-DAY FREE TRIAL" content with "FREE ACCOUNT INCLUDES"
+- Now shows actual free tier benefits: Top 10 tokens, Full scorecards, 1 vote per day
+- File: `client/src/components/auth/AuthModal.tsx`
+
+#### 3. Voting System Bug Fixes
+- Fixed `getTopVoteRequests` query: Changed `sql\`= ANY()\`` to `inArray()` for proper Drizzle syntax
+- Fixed vote count display: PostgreSQL SUM returns bigint as string, added `Number()` conversion to prevent "10" instead of 1
+- Maintained "today only" filtering for Top Voted Tokens section
+- File: `server/storage.ts`
+
+#### 4. Stripe Subscription Flow Fixes
+- Fixed `PRICE_TO_TIER` mapping computed at module load before env vars ready
+- Converted to runtime functions `getPriceToTier()` and `getTierToPrice()`
+- Fixed `getLeaderboard` API not sending auth token
+- Files: `server/stripe.ts`, `client/src/hooks/useLeaderboard.ts`
+
+#### 5. Auth Session Handling Improvements
+- Added `scope: 'local'` to signOut for clearing stale sessions without server communication
+- Always clears React state on sign out regardless of API response
+- Added auto-clear of session in `getAccessToken()` when session error detected
+- Added comprehensive debug logging for troubleshooting
+- Files: `client/src/contexts/AuthContext.tsx`, `server/auth.ts`, `server/routes.ts`
+
+#### 6. Home Page "Your Edge in Crypto" Section Redesign
+- **FIND ASYMMETRIC PLAYS** - Outcome-focused, speaks to upside potential (replaced ELIMINATE AI BIAS)
+- **AVOID EXIT LIQUIDITY** - Addresses #1 fear of crypto traders (replaced GAME THEORY SCORING)
+- **PHASE DETECTION** - Kept, improved copy with "Time your entries and exits"
+- **TRACK RECORD** - Leverages performance tracking system (replaced RISK TRANSPARENCY)
+- Updated section header: "Your Edge in Crypto" with "Game theory analysis powered by 4-LLM consensus. No single point of failure."
+- Updated tier descriptions with risk/reward language
+- File: `client/src/pages/Home.tsx`
+
+#### 7. "Leaderboard" → "Rankings" Terminology Update
+User-facing text updated across entire app:
+| File | Changes |
+|------|---------|
+| `Home.tsx` | VIEW/EXPLORE RANKINGS, description text |
+| `Layout.tsx` | Navigation label |
+| `Leaderboard.tsx` | Page title, loading/error/empty states |
+| `Pricing.tsx` | Plan descriptions, FAQ answers |
+| `Admin.tsx` | Tab label, descriptions |
+| `Account.tsx` | Plan benefits |
+| `Vote.tsx` | Button text |
+| `Analyze.tsx` | Back button, error state |
+| `AuthModal.tsx` | Upgrade CTA |
+| `LeaderboardTable.tsx` | Tooltip, upgrade prompt |
+
+**Not changed (intentionally)**: URL route `/leaderboard`, internal variable names, API endpoints, file names
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/routes.ts` | Security fixes, admin status debug logging |
+| `server/storage.ts` | Voting query fixes (inArray, Number conversion) |
+| `server/stripe.ts` | Runtime price-to-tier mapping functions |
+| `server/auth.ts` | Debug logging for admin checks |
+| `client/src/contexts/AuthContext.tsx` | Improved signOut and getAccessToken |
+| `client/src/hooks/useLeaderboard.ts` | Pass auth token to API |
+| `client/src/components/auth/AuthModal.tsx` | Free tier benefits, "rankings" text |
+| `client/src/pages/Home.tsx` | Redesigned benefits section, "rankings" text |
+| `client/src/pages/Leaderboard.tsx` | "Rankings" terminology |
+| `client/src/pages/Pricing.tsx` | "Rankings" terminology |
+| `client/src/pages/Admin.tsx` | "Rankings" terminology |
+| `client/src/pages/Account.tsx` | "Rankings" terminology |
+| `client/src/pages/Vote.tsx` | "Rankings" terminology |
+| `client/src/pages/Analyze.tsx` | "Rankings" terminology |
+| `client/src/components/common/Layout.tsx` | Navigation "RANKINGS" |
+| `client/src/components/leaderboard/LeaderboardTable.tsx` | "Rankings" terminology |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- Security vulnerabilities addressed
+- Auth session handling more robust (handles stale sessions)
+- Voting system working correctly (vote counts accurate)
+- Stripe subscriptions grant proper access
+- Home page benefits section optimized for target user
+- Consistent "Rankings" branding throughout app
+- All TypeScript compiles successfully
+
+---
+
+## Session: 2026-01-12 - Score Calculation, X Research Fields, Model Divergence & Flexible Format Fields
 
 ### Summary
 1. Added `score_calculation` field parsing and storage to capture the LLM's arithmetic work for computing the final score average.

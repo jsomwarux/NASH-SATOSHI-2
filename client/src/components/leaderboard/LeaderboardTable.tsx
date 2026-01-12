@@ -192,7 +192,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                 <Tooltip>
                   <TooltipTrigger className="cursor-help">#</TooltipTrigger>
                   <TooltipContent side="bottom" className="cyber-card border-primary/20">
-                    <p className="text-xs font-mono">Leaderboard rank position</p>
+                    <p className="text-xs font-mono">Rankings position</p>
                   </TooltipContent>
                 </Tooltip>
               </TableHead>
@@ -317,7 +317,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                               </div>
                               <div className="text-center sm:text-left flex-1">
                                 <h3 className="text-base font-display font-bold text-amber-400 mb-0.5">
-                                  Unlock Full Leaderboard
+                                  Unlock Full Rankings
                                 </h3>
                                 <p className="text-xs text-muted-foreground font-mono">
                                   Viewing top {accessLimit}.

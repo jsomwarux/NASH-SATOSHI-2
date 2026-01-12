@@ -360,10 +360,10 @@ export default function Vote() {
           transition={{ delay: 0.4 }}
           className="text-center mt-12"
         >
-          <Link href="/leaderboard">
+          <Link href="/rankings">
             <Button variant="outline" className="font-mono gap-2">
               <BarChart3 className="w-4 h-4" />
-              View Leaderboard
+              View Rankings
               <ArrowRight className="w-4 h-4" />
             </Button>
           </Link>

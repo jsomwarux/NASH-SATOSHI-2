@@ -184,10 +184,10 @@ export default function Home() {
               transition={{ delay: 0.6 }}
               className="flex flex-col sm:flex-row items-center justify-center gap-4"
             >
-              <Link href="/leaderboard">
+              <Link href="/rankings">
                 <Button size="lg" className="font-mono text-sm gap-2 bg-primary hover:bg-primary/90">
                   <BarChart3 className="w-4 h-4" />
-                  VIEW LEADERBOARD
+                  VIEW RANKINGS
                   <ArrowRight className="w-4 h-4" />
                 </Button>
               </Link>
@@ -445,15 +445,15 @@ export default function Home() {
               <span className="text-glow-cyan">Top Tokens</span>
             </h2>
             <p className="text-muted-foreground mb-10 max-w-xl mx-auto font-mono text-sm">
-              {">"} Browse our curated leaderboard of game-theory analyzed tokens.
+              {">"} Browse our curated rankings of game-theory analyzed tokens.
               Vote for tokens you want to see analyzed next.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link href="/leaderboard">
+              <Link href="/rankings">
                 <Button size="lg" className="font-mono text-sm gap-2 bg-primary hover:bg-primary/90">
                   <BarChart3 className="w-4 h-4" />
-                  EXPLORE LEADERBOARD
+                  EXPLORE RANKINGS
                   <ArrowRight className="w-4 h-4" />
                 </Button>
               </Link>

@@ -119,7 +119,7 @@ export default function Leaderboard() {
                 <div className="w-10 h-10 rounded border border-primary/30 bg-primary/10 flex items-center justify-center">
                   <Trophy className="w-5 h-5 text-primary" />
                 </div>
-                <span className="text-glow-cyan">LEADERBOARD</span>
+                <span className="text-glow-cyan">RANKINGS</span>
               </h1>
               <p className="text-muted-foreground mt-2 font-mono text-sm">
                 {">"} All analyzed tokens ranked by game theory score
@@ -525,7 +525,7 @@ export default function Leaderboard() {
           >
             <div className="cyber-card p-8 rounded border border-primary/20 text-center">
               <Loader2 className="w-12 h-12 text-primary animate-spin mx-auto mb-4" />
-              <p className="text-muted-foreground font-mono">LOADING_LEADERBOARD...</p>
+              <p className="text-muted-foreground font-mono">LOADING_RANKINGS...</p>
             </div>
           </motion.div>
         )}
@@ -543,7 +543,7 @@ export default function Leaderboard() {
               </div>
               <h2 className="text-xl font-mono font-bold mb-2 text-red-400">LOAD_ERROR</h2>
               <p className="text-muted-foreground mb-6 font-mono text-sm">
-                Failed to retrieve leaderboard data. Please retry.
+                Failed to retrieve rankings data. Please retry.
               </p>
               <Button onClick={() => window.location.reload()} className="font-mono">
                 RETRY
@@ -569,7 +569,7 @@ export default function Leaderboard() {
               <p className="text-muted-foreground mb-6 max-w-md font-mono text-sm">
                 {hasActiveFilters
                   ? "Try adjusting your filters or search criteria."
-                  : "Be the first to analyze a token and appear on the leaderboard."}
+                  : "Be the first to analyze a token and appear on the rankings."}
               </p>
               {hasActiveFilters ? (
                 <Button onClick={clearFilters} variant="outline" className="font-mono">

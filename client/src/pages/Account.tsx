@@ -298,7 +298,7 @@ export default function Account() {
                   </div>
                   <ul className="text-sm font-mono space-y-1 text-muted-foreground">
                     <li className="flex items-center gap-2">
-                      <span className="text-green-400">✓</span> Unlimited leaderboard access
+                      <span className="text-green-400">✓</span> Unlimited rankings access
                     </li>
                     <li className="flex items-center gap-2">
                       <span className="text-green-400">✓</span> Unlimited scorecard views

@@ -162,7 +162,7 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
 
               {/* Upgrade CTA */}
               <div className="flex items-center justify-between p-3 rounded border border-white/10 bg-white/5 text-xs">
-                <span className="text-muted-foreground">Want the full leaderboard?</span>
+                <span className="text-muted-foreground">Want the full rankings?</span>
                 <Link href="/pricing" onClick={onClose} className="inline-flex items-center gap-1 text-primary hover:underline font-medium">
                   View plans <ArrowRight className="w-3 h-3" />
                 </Link>

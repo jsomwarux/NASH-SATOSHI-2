@@ -316,7 +316,7 @@ export default function Admin() {
             <div>
               <h1 className="text-2xl font-bold">Admin Panel</h1>
               <p className="text-sm text-muted-foreground">
-                Manage analyses and view full leaderboard
+                Manage analyses and view full rankings
               </p>
             </div>
           </div>
@@ -335,7 +335,7 @@ export default function Admin() {
             </TabsTrigger>
             <TabsTrigger value="leaderboard" className="flex items-center gap-2">
               <BarChart3 className="w-4 h-4" />
-              Leaderboard
+              Rankings
             </TabsTrigger>
             <TabsTrigger value="history" className="flex items-center gap-2">
               <History className="w-4 h-4" />
@@ -626,7 +626,7 @@ export default function Admin() {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Manually trigger price snapshot collection and performance metrics calculation for all leaderboard tokens.
+                  Manually trigger price snapshot collection and performance metrics calculation for all ranked tokens.
                 </p>
                 <Button
                   variant="outline"
@@ -669,7 +669,7 @@ export default function Admin() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <BarChart3 className="w-5 h-5 text-primary" />
-                  <h2 className="text-lg font-bold">Full Leaderboard</h2>
+                  <h2 className="text-lg font-bold">Full Rankings</h2>
                 </div>
                 <Badge variant="outline" className="font-mono">
                   {leaderboard?.total || 0} tokens
@@ -832,7 +832,7 @@ export default function Admin() {
                 />
               ) : (
                 <div className="cyber-card rounded border border-primary/20 p-8 text-center">
-                  <p className="text-muted-foreground">No analyses on leaderboard yet.</p>
+                  <p className="text-muted-foreground">No analyses on rankings yet.</p>
                 </div>
               )}
             </div>

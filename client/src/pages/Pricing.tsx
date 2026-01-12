@@ -209,7 +209,7 @@ export default function Pricing() {
                   ACTIVE: {status.tierName.toUpperCase()} PLAN
                 </p>
                 <p className="text-[10px] sm:text-xs text-muted-foreground font-mono">
-                  Full leaderboard access + unlimited scorecards
+                  Full rankings access + unlimited scorecards
                 </p>
               </div>
             </div>
@@ -308,7 +308,7 @@ export default function Pricing() {
                       <>
                         <p className="text-lg font-bold font-mono text-primary">TOP 10</p>
                         <p className="text-[11px] text-muted-foreground font-mono">
-                          leaderboard + scorecards
+                          rankings + scorecards
                         </p>
                         <p className="text-[10px] text-muted-foreground/60 font-mono mt-1">
                           1 vote per day • no search/filter/sort
@@ -468,11 +468,11 @@ export default function Pricing() {
               },
               {
                 q: "How accurate are the scores?",
-                a: "We track 7-day and 30-day returns for all analyzed tokens. Performance metrics are displayed on the leaderboard so you can verify our track record yourself.",
+                a: "We track 7-day and 30-day returns for all analyzed tokens. Performance metrics are displayed on the rankings page so you can verify our track record yourself.",
               },
               {
                 q: "What do free users get?",
-                a: "Access to top 10 ranked tokens with full scorecards. Upgrade to unlock the complete leaderboard with search, filter, and sort by score, tier, or volume.",
+                a: "Access to top 10 ranked tokens with full scorecards. Upgrade to unlock the complete rankings with search, filter, and sort by score, tier, or volume.",
               },
               {
                 q: "How does voting work?",

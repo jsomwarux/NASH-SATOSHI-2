@@ -38,7 +38,7 @@ export default function Analyze() {
           animate={{ opacity: 1, x: 0 }}
           className="mb-8"
         >
-          <Link href={fromAdmin ? "/admin" : "/leaderboard"}>
+          <Link href={fromAdmin ? "/admin" : "/rankings"}>
             <Button variant="ghost" size="sm" className="gap-2">
               {fromAdmin ? (
                 <>
@@ -48,7 +48,7 @@ export default function Analyze() {
               ) : (
                 <>
                   <ArrowLeft className="w-4 h-4" />
-                  Back to Leaderboard
+                  Back to Rankings
                 </>
               )}
             </Button>
@@ -82,10 +82,10 @@ export default function Analyze() {
               The requested analysis could not be found. It may have been removed or the ID is invalid.
             </p>
             <div className="flex gap-4">
-              <Link href="/leaderboard">
+              <Link href="/rankings">
                 <Button>
                   <BarChart3 className="w-4 h-4 mr-2" />
-                  View Leaderboard
+                  View Rankings
                 </Button>
               </Link>
               <Button variant="outline" onClick={() => refetch()}>

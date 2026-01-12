@@ -113,16 +113,22 @@ To test without real payments, swap ALL Stripe credentials to test mode:
 ## Key Features & Current State
 
 ### Working Features
-- **View-only leaderboard** - Browse curated token analyses
+- **View-only Rankings** - Browse curated token analyses (URL: `/leaderboard`, UI: "Rankings")
 - **Access gating** - Free users see top 10, paid users see all
 - **Voting system** - Vote for tokens you want analyzed
 - Token search via CoinGecko proxy (supports name, symbol, contract address)
 - Scorecard display with full analysis results
 - **Clickable model cards** - Opens modal with verdict, reasoning, risks
-- Leaderboard with 7D/30D aggregated scores
+- Rankings with 7D/30D aggregated scores
+- **Performance tracking** - Historical price snapshots and return calculations
 - Stripe subscription tiers (Free, Pro, Premium)
 - User authentication via Supabase
 - **Database retry logic** - Handles transient connection errors
+
+### Terminology Note
+- **Internal code**: Uses "leaderboard" (API routes, file names, variables)
+- **User-facing UI**: Shows "Rankings" (navigation, page titles, buttons)
+- Example: Route is `/leaderboard` but nav shows "RANKINGS"
 
 ### Subscription Tiers (Access-Based)
 | Tier | Price | Leaderboard | Scorecards | Votes/Day | Priority |
@@ -143,6 +149,26 @@ To test without real payments, swap ALL Stripe credentials to test mode:
 2. **LLM Analysis** (15-55%, ~7 min) - 4 AI models in parallel
 3. **Cross-Validation** (55-80%, ~7 min) - Models check each other
 4. **Score Aggregation** (80-100%, ~2 min) - Final consensus score
+
+### Performance Tracking System
+
+The app tracks historical performance to measure how well the scoring system predicts returns.
+
+**Components:**
+- `price_snapshots` table - Daily price captures for all leaderboard tokens
+- `performance_metrics` table - Cached aggregate performance statistics
+- Background job runs daily at midnight EST to collect prices
+- Performance metrics calculated after price collection
+
+**Metrics Tracked:**
+- Top 10 average 7-day and 30-day returns
+- Hit rate (% of BUY recommendations that are profitable)
+- Per-tier performance breakdown (S+, S, A, B, C)
+- Return since first analysis for individual tokens
+
+**Display:**
+- Leaderboard header shows aggregate performance stats
+- ScoreCard shows individual token performance since analysis
 
 ---
 
@@ -180,6 +206,13 @@ To test without real payments, swap ALL Stripe credentials to test mode:
 | `/api/subscription/tiers` | GET | No | Available tiers |
 | `/api/subscription/checkout` | POST | Required | Create Stripe checkout |
 | `/api/subscription/portal` | POST | Required | Open billing portal |
+
+### Performance Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/performance/summary` | GET | Latest cached performance metrics |
+| `/api/performance/token/:tokenId` | GET | Individual token performance data |
+| `/api/performance/history` | GET | Historical performance metrics (accepts `days` param) |
 
 ### Discontinued Endpoints (Return 410)
 - `POST /api/analyze` - User-triggered analysis removed
@@ -489,6 +522,8 @@ When user clicks a model card:
 - `token_vote_requests` - Tokens users want analyzed
 - `token_votes` - Individual user votes
 - `user_daily_votes` - Daily vote tracking per user
+- `price_snapshots` - Daily price snapshots for performance tracking
+- `performance_metrics` - Cached aggregate performance statistics
 
 ### Voting Tables
 
@@ -521,6 +556,30 @@ When user clicks a model card:
 | `user_id` | text | Supabase user ID |
 | `date` | text | YYYY-MM-DD format |
 | `votes_used` | integer | Votes used today |
+
+### Performance Tracking Tables
+
+#### price_snapshots
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | serial | Primary key |
+| `token_id` | text | CoinGecko token ID |
+| `price_usd` | numeric | Price at snapshot time |
+| `market_cap` | numeric | Market cap at snapshot |
+| `fdv` | numeric | Fully diluted valuation |
+| `volume_24h` | numeric | 24h trading volume |
+| `snapshot_date` | text | YYYY-MM-DD format |
+
+#### performance_metrics
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | serial | Primary key |
+| `metric_date` | text | YYYY-MM-DD format (unique) |
+| `top10_avg_7d_return` | numeric | Average 7-day return of top 10 |
+| `top10_avg_30d_return` | numeric | Average 30-day return of top 10 |
+| `hit_rate_7d` | numeric | % of BUY recs profitable at 7d |
+| `hit_rate_30d` | numeric | % of BUY recs profitable at 30d |
+| `tier_metrics` | jsonb | Per-tier performance breakdown |
 
 ### Analysis Fields
 | Field | Type | Purpose |
@@ -567,16 +626,20 @@ All TanStack Query hooks have retry configuration:
 | `server/storage.ts` | Database operations with retry wrapper, voting methods |
 | `server/db.ts` | Connection pool, `withRetry()` utility |
 | `server/stripe.ts` | Subscription billing (Pro/Premium tiers) |
+| `server/jobs/priceSnapshots.ts` | Daily price collection and performance metric calculation |
 | `shared/schema.ts` | Drizzle schema, TypeScript interfaces, subscription tiers |
 | `client/src/pages/Vote.tsx` | **Voting page** - search, vote, view top requests |
-| `client/src/pages/Leaderboard.tsx` | Leaderboard with access gating |
+| `client/src/pages/Leaderboard.tsx` | Rankings page with access gating |
 | `client/src/pages/Pricing.tsx` | Subscription tiers (Free/Pro/Premium) |
+| `client/src/pages/Home.tsx` | Landing page with value proposition |
 | `client/src/components/scorecard/ScoreCard.tsx` | Main analysis display |
 | `client/src/components/scorecard/ModelAnalysisModal.tsx` | Per-model details modal |
 | `client/src/lib/api.ts` | API client including voting functions |
 | `client/src/hooks/useAnalysis.ts` | Analysis fetching |
 | `client/src/hooks/useLeaderboard.ts` | Leaderboard data hooks |
+| `client/src/hooks/usePerformance.ts` | Performance metrics hooks |
 | `migrations/0003_add_voting_tables.sql` | Voting tables migration |
+| `migrations/0004_add_performance_tracking.sql` | Performance tracking tables migration |
 | `scripts/apply-indexes.sql` | Database performance indexes |
 
 ---
@@ -652,6 +715,36 @@ CREATE UNIQUE INDEX IF NOT EXISTS "idx_token_votes_unique_user_request" ON "toke
 
 -- Apply performance indexes (scripts/apply-indexes.sql)
 -- Run the full script for optimal query performance
+
+-- Performance tracking tables (added 2026-01-12) - Run migrations/0004_add_performance_tracking.sql
+CREATE TABLE IF NOT EXISTS "price_snapshots" (
+  "id" serial PRIMARY KEY,
+  "token_id" text NOT NULL,
+  "price_usd" numeric(20, 10) NOT NULL,
+  "market_cap" numeric(20, 2),
+  "fdv" numeric(20, 2),
+  "volume_24h" numeric(20, 2),
+  "snapshot_date" text NOT NULL,
+  "created_at" timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS "performance_metrics" (
+  "id" serial PRIMARY KEY,
+  "metric_date" text NOT NULL UNIQUE,
+  "top10_avg_7d_return" numeric(10, 4),
+  "top10_avg_30d_return" numeric(10, 4),
+  "hit_rate_7d" numeric(5, 2),
+  "hit_rate_30d" numeric(5, 2),
+  "tier_metrics" jsonb,
+  "created_at" timestamp DEFAULT now()
+);
+
+-- Performance indexes
+CREATE INDEX IF NOT EXISTS "idx_price_snapshots_token_date" ON "price_snapshots" ("token_id", "snapshot_date");
+CREATE INDEX IF NOT EXISTS "idx_price_snapshots_date" ON "price_snapshots" ("snapshot_date");
+
+-- Add price at analysis column to token_analyses
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS price_at_analysis numeric(20, 10);
 ```
 
 ## Stripe Configuration
@@ -664,7 +757,7 @@ STRIPE_PREMIUM_PRICE_ID=price_xxx  # $49/month Premium tier
 
 ---
 
-## Recent Architecture Decisions (2026-01-10)
+## Recent Architecture Decisions (2026-01-12)
 
 ### Leaderboard Data Aggregation
 
@@ -694,6 +787,34 @@ interface AggregatedLeaderboardItem {
 }
 ```
 
+### Authentication Session Handling
+
+**Stale Session Recovery:**
+- Sign out uses `scope: 'local'` to clear local session without server communication
+- React state (`user`, `session`) is always cleared regardless of API response
+- `getAccessToken()` auto-clears sessions that fail server verification
+- Prevents "zombie sessions" where local state differs from server
+
+**Auth Flow:**
+```typescript
+// Sign out always clears local state first
+const signOut = async () => {
+  await supabase.auth.signOut({ scope: 'local' });
+  setUser(null);
+  setSession(null);
+};
+
+// Token retrieval auto-recovers from invalid sessions
+const getAccessToken = async () => {
+  const { data: { session }, error } = await supabase.auth.getSession();
+  if (error) {
+    await supabase.auth.signOut(); // Clear invalid session
+    return null;
+  }
+  return session?.access_token ?? null;
+};
+```
+
 ### Admin System
 
 **Admin Detection:**
@@ -713,6 +834,20 @@ interface AggregatedLeaderboardItem {
 - Three tabs: Run Analysis, Leaderboard, All Analyses
 - Uses same `LeaderboardTable` component as public leaderboard
 - Links include `?from=admin` for contextual navigation
+
+### Home Page Value Proposition
+
+The home page (`/`) communicates four key benefits:
+
+1. **FIND ASYMMETRIC PLAYS** - Identify tokens with favorable risk/reward before the crowd
+2. **AVOID EXIT LIQUIDITY** - Know if buying into strength or holding bags
+3. **PHASE DETECTION** - Token lifecycle stages (Stealth, Expansion, Mania, Distribution, Dead)
+4. **TRACK RECORD** - Real performance data for system verification
+
+**Key messaging:**
+- Header: "Your Edge in Crypto"
+- Subtitle: "Game theory analysis powered by 4-LLM consensus. No single point of failure."
+- Target user: Crypto traders who want to identify opportunities and avoid being exit liquidity
 
 ### Mobile Responsiveness Patterns
 
@@ -788,6 +923,8 @@ Main content has `pb-24` padding to account for these.
 | `useTokenStats` | `client/src/hooks/useAnalysis.ts` | Aggregate stats for a token |
 | `useLeaderboard` | `client/src/hooks/useLeaderboard.ts` | Leaderboard data with filters |
 | `useSubscriptionStatus` | `client/src/hooks/useSubscription.ts` | User's current tier and limits |
+| `usePerformanceMetrics` | `client/src/hooks/usePerformance.ts` | Aggregate performance statistics |
+| `useTokenPerformance` | `client/src/hooks/usePerformance.ts` | Individual token performance data |
 
 ---
 
