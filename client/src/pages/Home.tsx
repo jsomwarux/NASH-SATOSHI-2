@@ -15,14 +15,10 @@ import {
   Scan,
   Eye,
   BarChart3,
+  Vote,
 } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
-import { TokenSearch } from "@/components/search/TokenSearch";
 import { Button } from "@/components/ui/button";
-import { AuthModal } from "@/components/auth/AuthModal";
-import { useTokenAnalyzer } from "@/hooks/useAnalysis";
-import { useAuth } from "@/contexts/AuthContext";
-import type { TokenSearchResult } from "@shared/schema";
 
 // AI Model data with cyber aesthetic
 const aiModels = [
@@ -122,69 +118,7 @@ function useTypingEffect(text: string, speed = 50) {
 
 export default function Home() {
   const [, navigate] = useLocation();
-  const { startAnalysis, isAnalyzing, error } = useTokenAnalyzer();
-  const { user } = useAuth();
-  const [selectedToken, setSelectedToken] = useState<TokenSearchResult | null>(null);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [pendingToken, setPendingToken] = useState<TokenSearchResult | null>(null);
-  const { displayText, isComplete } = useTypingEffect("Crypto Game Theory Token Analyzer", 35);
-
-  // Check if error is an auth required error
-  const isAuthError = error?.message?.includes("Sign up to analyze") ||
-                      error?.message?.includes("AUTH_REQUIRED");
-
-  // Check if error is a limit reached error
-  const isLimitError = error?.message?.includes("limit reached") ||
-                       error?.message?.includes("LIMIT_REACHED") ||
-                       error?.message?.includes("upgrade your plan");
-
-  // Check if error is a concurrent analysis limit error
-  const isConcurrentError = error?.message?.includes("analyses in progress") ||
-                            error?.message?.includes("CONCURRENT_LIMIT");
-
-  // Check if system is at capacity
-  const isSystemBusy = error?.message?.includes("System is at capacity") ||
-                       error?.message?.includes("SYSTEM_BUSY");
-
-  const handleTokenSelect = async (token: TokenSearchResult) => {
-    setSelectedToken(token);
-
-    // If user is not authenticated, show auth modal with the token they want to analyze
-    if (!user) {
-      setPendingToken(token);
-      setShowAuthModal(true);
-      return;
-    }
-
-    try {
-      const result = await startAnalysis(token);
-      navigate(`/analyze/${result.analysisId}`);
-    } catch (err) {
-      console.error("Analysis failed:", err);
-      // If it's an auth error, show the modal
-      if (err instanceof Error && (err.message.includes("Sign up") || err.message.includes("AUTH_REQUIRED"))) {
-        setPendingToken(token);
-        setShowAuthModal(true);
-      }
-    }
-  };
-
-  // When auth modal closes and user is now authenticated, start the pending analysis
-  const handleAuthModalClose = async () => {
-    setShowAuthModal(false);
-    // Small delay to allow auth state to update
-    if (pendingToken) {
-      setTimeout(async () => {
-        try {
-          const result = await startAnalysis(pendingToken);
-          navigate(`/analyze/${result.analysisId}`);
-        } catch (err) {
-          console.error("Analysis failed after auth:", err);
-        }
-        setPendingToken(null);
-      }, 500);
-    }
-  };
+  const { displayText, isComplete } = useTypingEffect("Crypto Game Theory Rankings", 35);
 
   return (
     <Layout>
@@ -200,21 +134,22 @@ export default function Home() {
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="inline-flex items-center gap-3 px-4 py-2 rounded border border-primary/30 bg-primary/5 text-primary text-xs font-mono tracking-wider mb-8"
+              className="inline-flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 rounded border border-primary/30 bg-primary/5 text-primary text-[10px] sm:text-xs font-mono tracking-wider mb-8"
             >
               <span className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                SYSTEM::ONLINE
+                <span className="hidden sm:inline">SYSTEM::</span>ONLINE
               </span>
               <span className="text-white/30">|</span>
-              <span>4 LLMs • CONSENSUS MODE • ZERO BIAS</span>
+              <span className="hidden sm:inline">4 LLMs • CONSENSUS MODE • ZERO BIAS</span>
+              <span className="sm:hidden">4 LLMs • CONSENSUS</span>
             </motion.div>
 
             {/* Main Headline - Terminal Style */}
             <div className="mb-8">
               <h1 className="text-4xl md:text-6xl lg:text-7xl font-display font-bold tracking-tight mb-4">
                 <span className="text-primary font-mono text-lg md:text-xl block mb-2 opacity-70">
-                  {">"} init_analysis.exe
+                  {">"} init_rankings.exe
                 </span>
                 <span className="text-glow-cyan block leading-tight">
                   {displayText}
@@ -222,7 +157,7 @@ export default function Home() {
                 </span>
               </h1>
               <p className="max-w-2xl mx-auto text-base md:text-lg text-muted-foreground font-mono leading-relaxed">
-                A 4-LLM ensemble that cross-checks itself to produce game-theory token ratings you can actually act on.
+                Curated token rankings powered by a 4-LLM ensemble. Game theory scores you can actually act on.
               </p>
             </div>
 
@@ -242,90 +177,27 @@ export default function Home() {
               ))}
             </div>
 
-            {/* Token Search */}
+            {/* CTA Buttons */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.6 }}
-              className="max-w-2xl mx-auto mb-6"
-            >
-              <div className="relative">
-                <div className="absolute -inset-1 bg-gradient-to-r from-primary/50 to-accent/50 rounded-lg blur opacity-30" />
-                <div className="relative">
-                  <TokenSearch onSelect={handleTokenSelect} isLoading={isAnalyzing} />
-                </div>
-              </div>
-            </motion.div>
-
-            {/* View Leaderboard Button */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.8 }}
-              className="mb-8"
+              className="flex flex-col sm:flex-row items-center justify-center gap-4"
             >
               <Link href="/leaderboard">
-                <Button variant="ghost" className="font-mono text-sm text-muted-foreground hover:text-primary gap-2">
+                <Button size="lg" className="font-mono text-sm gap-2 bg-primary hover:bg-primary/90">
                   <BarChart3 className="w-4 h-4" />
                   VIEW LEADERBOARD
                   <ArrowRight className="w-4 h-4" />
                 </Button>
               </Link>
+              <Link href="/vote">
+                <Button size="lg" variant="outline" className="font-mono text-sm gap-2 border-accent/50 text-accent hover:bg-accent/10">
+                  <Vote className="w-4 h-4" />
+                  VOTE FOR TOKENS
+                </Button>
+              </Link>
             </motion.div>
-
-            {/* Loading/Error State */}
-            {isAnalyzing && selectedToken && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex items-center justify-center gap-3 text-primary font-mono text-sm"
-              >
-                <CircuitBoard className="w-5 h-5 animate-spin" />
-                <span>
-                  INITIALIZING 4-LLM ANALYSIS FOR{" "}
-                  <span className="text-white font-bold">{selectedToken.name.toUpperCase()}</span>...
-                </span>
-              </motion.div>
-            )}
-
-            {error && !isAuthError && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className={`font-mono text-sm mt-4 p-3 border rounded ${
-                  isLimitError || isConcurrentError || isSystemBusy
-                    ? "text-amber-400 border-amber-500/30 bg-amber-500/10"
-                    : "text-red-400 border-red-500/30 bg-red-500/10"
-                }`}
-              >
-                {isSystemBusy ? (
-                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-                    <span>System is at capacity. Please try again in a few minutes.</span>
-                  </div>
-                ) : isConcurrentError ? (
-                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-                    <span>You have analyses in progress. Please wait for one to complete.</span>
-                    <Link href="/history">
-                      <Button size="sm" variant="outline" className="font-mono text-xs border-amber-500/30 text-amber-400 hover:bg-amber-500/10">
-                        VIEW HISTORY
-                      </Button>
-                    </Link>
-                  </div>
-                ) : isLimitError ? (
-                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-                    <span>Analysis limit reached for today.</span>
-                    <Link href="/pricing">
-                      <Button size="sm" variant="outline" className="font-mono text-xs border-amber-500/30 text-amber-400 hover:bg-amber-500/10">
-                        UPGRADE PLAN
-                      </Button>
-                    </Link>
-                  </div>
-                ) : (
-                  <>ERROR: Analysis failed. Please retry.</>
-                )}
-              </motion.div>
-            )}
-
           </motion.div>
         </div>
       </section>
@@ -474,7 +346,7 @@ export default function Home() {
               <p className="text-muted-foreground mb-8 leading-relaxed font-mono text-sm">
                 {">"} Our scoring system evaluates tokens across six key dimensions.
                 Each component is analyzed by all four AI models, and the consensus
-                determines your final score.
+                determines the final score.
               </p>
 
               <div className="space-y-4">
@@ -485,12 +357,12 @@ export default function Home() {
                     whileInView={{ opacity: 1, x: 0 }}
                     transition={{ delay: i * 0.05 }}
                     viewport={{ once: true }}
-                    className="flex items-center gap-4"
+                    className="flex items-center gap-2 sm:gap-4"
                   >
-                    <div className="w-16 text-right">
-                      <span className="font-mono text-xs text-primary">0-{item.max}</span>
+                    <div className="w-10 sm:w-16 text-right flex-shrink-0">
+                      <span className="font-mono text-[10px] sm:text-xs text-primary">0-{item.max}</span>
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <div className="h-2 bg-white/5 rounded-full overflow-hidden border border-white/10">
                         <motion.div
                           initial={{ width: 0 }}
@@ -501,9 +373,9 @@ export default function Home() {
                         />
                       </div>
                     </div>
-                    <div className="w-36">
-                      <div className="font-mono text-xs font-bold tracking-wider">{item.label}</div>
-                      <div className="text-[9px] text-muted-foreground">{item.desc}</div>
+                    <div className="w-24 sm:w-36 flex-shrink-0">
+                      <div className="font-mono text-[10px] sm:text-xs font-bold tracking-wider truncate">{item.label}</div>
+                      <div className="text-[8px] sm:text-[9px] text-muted-foreground truncate">{item.desc}</div>
                     </div>
                   </motion.div>
                 ))}
@@ -565,36 +437,35 @@ export default function Home() {
           >
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded border border-green-500/30 bg-green-500/5 text-green-400 text-xs font-mono tracking-wider mb-8">
               <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-              ANALYZER::READY
+              RANKINGS::LIVE
             </div>
 
             <h2 className="text-3xl md:text-5xl font-display font-bold mb-6">
-              <span className="text-muted-foreground">Ready to</span>{" "}
-              <span className="text-glow-cyan">Analyze?</span>
+              <span className="text-muted-foreground">Discover</span>{" "}
+              <span className="text-glow-cyan">Top Tokens</span>
             </h2>
             <p className="text-muted-foreground mb-10 max-w-xl mx-auto font-mono text-sm">
-              {">"} Search any token and get a comprehensive game theory analysis
-              powered by our 4-LLM ensemble in under 30 minutes.
+              {">"} Browse our curated leaderboard of game-theory analyzed tokens.
+              Vote for tokens you want to see analyzed next.
             </p>
 
-            <div className="max-w-xl mx-auto relative">
-              <div className="absolute -inset-1 bg-gradient-to-r from-primary/30 to-accent/30 rounded-lg blur" />
-              <div className="relative">
-                <TokenSearch onSelect={handleTokenSelect} isLoading={isAnalyzing} />
-              </div>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <Link href="/leaderboard">
+                <Button size="lg" className="font-mono text-sm gap-2 bg-primary hover:bg-primary/90">
+                  <BarChart3 className="w-4 h-4" />
+                  EXPLORE LEADERBOARD
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
+              </Link>
+              <Link href="/pricing">
+                <Button size="lg" variant="outline" className="font-mono text-sm gap-2">
+                  VIEW PRICING
+                </Button>
+              </Link>
             </div>
           </motion.div>
         </div>
       </section>
-
-      {/* Auth Modal for anonymous users trying to analyze */}
-      <AuthModal
-        isOpen={showAuthModal}
-        onClose={handleAuthModalClose}
-        defaultMode="signup"
-        promptMessage={pendingToken ? `Sign up to analyze ${pendingToken.name}` : "Sign up to analyze tokens"}
-        tokenName={pendingToken?.name}
-      />
     </Layout>
   );
 }

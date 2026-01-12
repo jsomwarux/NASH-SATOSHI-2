@@ -1,19 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect, useCallback } from "react";
 import {
-  analyzeToken,
   getAnalysis,
   getAnalysisByToken,
   getAnalysisStatus,
   searchTokens,
   getTokenDetails,
-  retryAnalysis,
-  cancelAnalysis,
   getTokenStats,
 } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { useAnalysisTracker } from "@/contexts/AnalysisTrackerContext";
-import type { AnalyzeTokenRequest, TokenSearchResult } from "@shared/schema";
 
 // Token Search Hook - minimal caching to prevent stale results
 export function useTokenSearch(query: string) {
@@ -41,12 +36,19 @@ export function useTokenDetails(tokenId: string | null) {
 // Analysis by ID Hook with status polling
 export function useAnalysis(analysisId: number | null) {
   const queryClient = useQueryClient();
+  const { getAccessToken } = useAuth();
   const [shouldPoll, setShouldPoll] = useState(false);
   const [lastCompletedId, setLastCompletedId] = useState<number | null>(null);
 
+  // Memoized fetch function that includes auth token
+  const fetchAnalysis = useCallback(async () => {
+    const token = await getAccessToken();
+    return getAnalysis(analysisId!, token || undefined);
+  }, [analysisId, getAccessToken]);
+
   const analysisQuery = useQuery({
     queryKey: ["analysis", analysisId],
-    queryFn: () => getAnalysis(analysisId!),
+    queryFn: fetchAnalysis,
     enabled: !!analysisId && analysisId > 0,
     staleTime: 0, // Always refetch to get fresh data
     gcTime: 0, // Don't cache completed analyses to avoid stale data
@@ -112,81 +114,6 @@ export function useAnalysisByToken(tokenId: string | null) {
   });
 }
 
-// Analyze Token Mutation
-export function useAnalyzeToken() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (request: AnalyzeTokenRequest) => analyzeToken(request),
-    onSuccess: (data, variables) => {
-      // Invalidate related queries
-      queryClient.invalidateQueries({ queryKey: ["analysisByToken", variables.tokenId] });
-      queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
-    },
-  });
-}
-
-// Retry Failed Analysis Mutation
-export function useRetryAnalysis() {
-  const queryClient = useQueryClient();
-  const { getAccessToken } = useAuth();
-  const { trackAnalysis } = useAnalysisTracker();
-
-  return useMutation({
-    mutationFn: async ({ analysisId, tokenSymbol, tokenName }: { analysisId: number; tokenSymbol: string; tokenName: string }) => {
-      const authToken = await getAccessToken();
-      if (!authToken) {
-        throw new Error("Authentication required");
-      }
-      return retryAnalysis(analysisId, authToken);
-    },
-    onSuccess: (data, variables) => {
-      // Track the analysis for background monitoring
-      trackAnalysis({
-        id: data.analysisId,
-        tokenSymbol: variables.tokenSymbol,
-        tokenName: variables.tokenName,
-      });
-      // Invalidate the analysis query to trigger refetch
-      queryClient.invalidateQueries({ queryKey: ["analysis", data.analysisId] });
-      queryClient.invalidateQueries({ queryKey: ["analysisStatus", data.analysisId] });
-      queryClient.invalidateQueries({ queryKey: ["userAnalyses"] });
-    },
-  });
-}
-
-// Cancel In-Progress Analysis Mutation
-export function useCancelAnalysis() {
-  const queryClient = useQueryClient();
-  const { getAccessToken } = useAuth();
-  const { untrackAnalysis } = useAnalysisTracker();
-
-  return useMutation({
-    mutationFn: async ({ analysisId }: { analysisId: number }) => {
-      console.log(`[Cancel] Starting cancel for analysis ${analysisId}`);
-      const authToken = await getAccessToken();
-      if (!authToken) {
-        console.error("[Cancel] No auth token available");
-        throw new Error("Authentication required");
-      }
-      console.log(`[Cancel] Calling cancel API for analysis ${analysisId}`);
-      return cancelAnalysis(analysisId, authToken);
-    },
-    onSuccess: (data, variables) => {
-      console.log(`[Cancel] Successfully cancelled analysis ${variables.analysisId}`, data);
-      // Remove from tracker since it's cancelled
-      untrackAnalysis(variables.analysisId);
-      // Invalidate the analysis query to trigger refetch
-      queryClient.invalidateQueries({ queryKey: ["analysis", data.analysisId] });
-      queryClient.invalidateQueries({ queryKey: ["analysisStatus", data.analysisId] });
-      queryClient.invalidateQueries({ queryKey: ["userAnalyses"] });
-    },
-    onError: (error, variables) => {
-      console.error(`[Cancel] Failed to cancel analysis ${variables.analysisId}:`, error);
-    },
-  });
-}
-
 // Token Stats Hook (aggregate data for tokens with multiple analyses)
 export function useTokenStats(tokenId: string | null) {
   return useQuery({
@@ -197,53 +124,4 @@ export function useTokenStats(tokenId: string | null) {
     retryDelay: (attemptIndex) => Math.min(500 * Math.pow(2, attemptIndex), 2000),
     staleTime: 60 * 1000, // Cache for 1 minute
   });
-}
-
-// Combined hook for selecting and analyzing a token
-export function useTokenAnalyzer() {
-  const queryClient = useQueryClient();
-  const { getAccessToken } = useAuth();
-  const { trackAnalysis } = useAnalysisTracker();
-
-  const analyzeTokenMutation = useMutation({
-    mutationFn: async ({ request, authToken }: { request: AnalyzeTokenRequest; authToken?: string }) => {
-      return analyzeToken(request, authToken);
-    },
-    retry: 3, // Retry on transient failures
-    retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 5000),
-    onSuccess: (data, variables) => {
-      // Track the analysis for background monitoring
-      trackAnalysis({
-        id: data.analysisId,
-        tokenSymbol: variables.request.tokenSymbol,
-        tokenName: variables.request.tokenName,
-      });
-      // Invalidate related queries
-      queryClient.invalidateQueries({ queryKey: ["analysisByToken", variables.request.tokenId] });
-      queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
-      queryClient.invalidateQueries({ queryKey: ["userAnalyses"] });
-    },
-  });
-
-  const startAnalysis = async (token: TokenSearchResult) => {
-    // Get the auth token to associate analysis with user
-    const authToken = await getAccessToken();
-
-    const result = await analyzeTokenMutation.mutateAsync({
-      request: {
-        tokenId: token.id,
-        tokenSymbol: token.symbol,
-        tokenName: token.name,
-        tokenImage: token.large || token.thumb,
-      },
-      authToken: authToken || undefined,
-    });
-    return result;
-  };
-
-  return {
-    startAnalysis,
-    isAnalyzing: analyzeTokenMutation.isPending,
-    error: analyzeTokenMutation.error,
-  };
 }

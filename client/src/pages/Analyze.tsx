@@ -1,18 +1,17 @@
-import { useParams, Link, useLocation } from "wouter";
-import { useEffect } from "react";
+import { useParams, Link, useSearch } from "wouter";
 import { motion } from "framer-motion";
-import { ArrowLeft, Loader2, AlertCircle, RefreshCw } from "lucide-react";
+import { ArrowLeft, Loader2, AlertCircle, RefreshCw, BarChart3, Shield } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { ScoreCard } from "@/components/scorecard/ScoreCard";
 import { Button } from "@/components/ui/button";
-import { useAnalysis, useRetryAnalysis, useCancelAnalysis, useTokenStats, useTokenAnalyzer } from "@/hooks/useAnalysis";
-import { useAnalysisTracker } from "@/contexts/AnalysisTrackerContext";
+import { useAnalysis, useTokenStats } from "@/hooks/useAnalysis";
 
 export default function Analyze() {
   const params = useParams();
-  const [, setLocation] = useLocation();
+  const searchString = useSearch();
+  const searchParams = new URLSearchParams(searchString);
+  const fromAdmin = searchParams.get("from") === "admin";
   const analysisId = params.id ? parseInt(params.id, 10) : null;
-  const { untrackAnalysis } = useAnalysisTracker();
 
   const {
     data: analysis,
@@ -30,60 +29,6 @@ export default function Analyze() {
     analysis?.status === "completed" ? analysis.tokenId : null
   );
 
-  // Retry mutation for failed analyses
-  const retryMutation = useRetryAnalysis();
-
-  // Cancel mutation for in-progress analyses
-  const cancelMutation = useCancelAnalysis();
-
-  // Reanalyze functionality
-  const { startAnalysis, isAnalyzing } = useTokenAnalyzer();
-
-  const handleRetry = () => {
-    if (analysis && analysisId) {
-      retryMutation.mutate({
-        analysisId,
-        tokenSymbol: analysis.tokenSymbol,
-        tokenName: analysis.tokenName,
-      });
-    }
-  };
-
-  const handleCancel = () => {
-    console.log(`[Analyze] handleCancel called, analysisId: ${analysisId}`);
-    if (analysisId) {
-      console.log(`[Analyze] Triggering cancel mutation for ${analysisId}`);
-      cancelMutation.mutate({ analysisId });
-    } else {
-      console.error("[Analyze] handleCancel: No analysisId available");
-    }
-  };
-
-  const handleReanalyze = async () => {
-    if (analysis) {
-      try {
-        const result = await startAnalysis({
-          id: analysis.tokenId,
-          symbol: analysis.tokenSymbol,
-          name: analysis.tokenName,
-          thumb: analysis.tokenImage || undefined,
-          large: analysis.tokenImage || undefined,
-        });
-        // Navigate to the new analysis
-        setLocation(`/analyze/${result.analysisId}`);
-      } catch (err) {
-        console.error("Failed to start reanalysis:", err);
-      }
-    }
-  };
-
-  // Untrack analysis when it's completed and user is viewing it
-  useEffect(() => {
-    if (analysis?.status === "completed" && analysisId) {
-      untrackAnalysis(analysisId);
-    }
-  }, [analysis?.status, analysisId, untrackAnalysis]);
-
   return (
     <Layout>
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -93,10 +38,19 @@ export default function Analyze() {
           animate={{ opacity: 1, x: 0 }}
           className="mb-8"
         >
-          <Link href="/">
+          <Link href={fromAdmin ? "/admin" : "/leaderboard"}>
             <Button variant="ghost" size="sm" className="gap-2">
-              <ArrowLeft className="w-4 h-4" />
-              Back to Search
+              {fromAdmin ? (
+                <>
+                  <Shield className="w-4 h-4" />
+                  Back to Admin Panel
+                </>
+              ) : (
+                <>
+                  <ArrowLeft className="w-4 h-4" />
+                  Back to Leaderboard
+                </>
+              )}
             </Button>
           </Link>
         </motion.div>
@@ -128,10 +82,10 @@ export default function Analyze() {
               The requested analysis could not be found. It may have been removed or the ID is invalid.
             </p>
             <div className="flex gap-4">
-              <Link href="/">
+              <Link href="/leaderboard">
                 <Button>
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Back to Search
+                  <BarChart3 className="w-4 h-4 mr-2" />
+                  View Leaderboard
                 </Button>
               </Link>
               <Button variant="outline" onClick={() => refetch()}>
@@ -150,12 +104,6 @@ export default function Analyze() {
             elapsedSeconds={elapsedSeconds}
             nodesCompleted={nodesCompleted}
             currentNode={currentNode}
-            onRetry={handleRetry}
-            isRetrying={retryMutation.isPending}
-            onCancel={handleCancel}
-            isCancelling={cancelMutation.isPending}
-            onReanalyze={handleReanalyze}
-            isReanalyzing={isAnalyzing}
             tokenStats={tokenStats}
           />
         )}

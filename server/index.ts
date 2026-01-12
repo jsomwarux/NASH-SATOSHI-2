@@ -2,11 +2,12 @@ import express, { type Request, Response, NextFunction } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import { registerRoutes, recoverStuckAnalyses } from "./routes";
+import { registerRoutes, recoverStuckAnalyses, startGumloopSyncPolling, stopGumloopSyncPolling } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initStorage } from "./storage";
 import { closeDb } from "./db";
+import { startPriceSnapshotJob, stopPriceSnapshotJob } from "./jobs/priceSnapshots";
 
 const app = express();
 const httpServer = createServer(app);
@@ -206,6 +207,10 @@ app.use((req, res, next) => {
       setTimeout(async () => {
         try {
           await recoverStuckAnalyses();
+          // Start background polling for Gumloop sync (fallback for webhook failures)
+          startGumloopSyncPolling();
+          // Start daily price snapshot collection job
+          startPriceSnapshotJob();
         } catch (err) {
           console.error("Error during analysis recovery:", err);
         }
@@ -216,6 +221,11 @@ app.use((req, res, next) => {
   // ==================== GRACEFUL SHUTDOWN ====================
   const gracefulShutdown = async (signal: string) => {
     log(`Received ${signal}. Starting graceful shutdown...`);
+
+    // Stop background polling
+    stopGumloopSyncPolling();
+    // Stop price snapshot job
+    stopPriceSnapshotJob();
 
     // Stop accepting new connections
     httpServer.close(async () => {

@@ -7,8 +7,28 @@ declare global {
     interface Request {
       userId?: string;
       userEmail?: string;
+      isAdmin?: boolean;
     }
   }
+}
+
+// Admin emails from environment variable (comma-separated)
+// Example: ADMIN_EMAILS=admin@example.com,owner@example.com
+function getAdminEmails(): string[] {
+  const adminEmails = process.env.ADMIN_EMAILS || "";
+  return adminEmails
+    .split(",")
+    .map(email => email.trim().toLowerCase())
+    .filter(email => email.length > 0);
+}
+
+/**
+ * Check if an email is an admin
+ */
+export function isAdminEmail(email: string | undefined): boolean {
+  if (!email) return false;
+  const adminEmails = getAdminEmails();
+  return adminEmails.includes(email.toLowerCase());
 }
 
 // Initialize Supabase client for token verification
@@ -85,9 +105,66 @@ export async function requireAuth(
 
     req.userId = user.id;
     req.userEmail = user.email;
+    req.isAdmin = isAdminEmail(user.email);
     next();
   } catch (error) {
     console.error("Auth error:", error);
+    res.status(401).json({ message: "Authentication failed" });
+  }
+}
+
+/**
+ * Middleware that requires admin authentication
+ * Returns 401 if not authenticated, 403 if not an admin
+ */
+export async function requireAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const token = extractToken(req.headers.authorization);
+
+  if (!token) {
+    res.status(401).json({ message: "Authentication required" });
+    return;
+  }
+
+  if (!supabase) {
+    // In production, reject if Supabase is not configured
+    if (process.env.NODE_ENV === "production") {
+      console.error("CRITICAL: Supabase not configured in production!");
+      res.status(503).json({ message: "Authentication service unavailable" });
+      return;
+    }
+    // Only allow dev bypass in development mode
+    console.warn("Supabase not configured, allowing admin request through (dev mode only)");
+    req.userId = "dev-user";
+    req.userEmail = "dev@example.com";
+    req.isAdmin = true;
+    next();
+    return;
+  }
+
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+
+    if (error || !user) {
+      res.status(401).json({ message: "Invalid or expired token" });
+      return;
+    }
+
+    req.userId = user.id;
+    req.userEmail = user.email;
+    req.isAdmin = isAdminEmail(user.email);
+
+    if (!req.isAdmin) {
+      res.status(403).json({ message: "Admin access required" });
+      return;
+    }
+
+    next();
+  } catch (error) {
+    console.error("Admin auth error:", error);
     res.status(401).json({ message: "Authentication failed" });
   }
 }
@@ -120,6 +197,7 @@ export async function optionalAuth(
     if (!error && user) {
       req.userId = user.id;
       req.userEmail = user.email;
+      req.isAdmin = isAdminEmail(user.email);
     }
   } catch (error) {
     console.error("Optional auth error:", error);

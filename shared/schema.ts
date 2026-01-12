@@ -3,78 +3,55 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Subscription Tiers Configuration
-// Pricing based on ~$1.81 cost per analysis (560 Gumloop credits)
-// All tiers get full leaderboard access - it's a free "crypto screener" habit builder
+// Access-based model: users pay for leaderboard/scorecard access and voting
 export const SUBSCRIPTION_TIERS = {
   free: {
     id: 'free',
     name: 'Free',
     price: 0,
     priceId: null,
-    // Free tier: 7-day trial (1/day), then 1/week (4/month)
-    trialDays: 7,
-    trialAnalysesPerDay: 1,
-    postTrialAnalysesPerWeek: 1, // ~4/month after trial
-    analysesPerMonth: null, // Dynamic based on trial status
-    tagline: 'Explore the leaderboard. Try a few runs.',
+    leaderboardAccess: 10, // Top 10 only
+    votesPerDay: 1,
+    priorityVotes: false,
+    tagline: 'Explore the top-ranked tokens.',
     features: [
-      'Unlimited leaderboard + token search',
-      '7-day trial: 1 analysis/day (starts on first run)',
-      'After trial: 1 analysis/week',
+      'Top 10 leaderboard',
+      'Top 10 scorecards',
+      '1 vote per day',
     ],
-    leaderboardLimit: null,
     popular: false,
-  },
-  starter: {
-    id: 'starter',
-    name: 'Starter',
-    price: 49,
-    analysesPerMonth: 10, // $18.10 COGS, $49 revenue = 63% margin
-    tagline: 'For casual scanning and watchlists.',
-    features: [
-      '10 analyses per month',
-      'View your full analysis history',
-    ],
-    leaderboardLimit: null,
-    popular: false,
-  },
-  trader: {
-    id: 'trader',
-    name: 'Trader',
-    price: 99,
-    analysesPerMonth: 25, // $45.25 COGS, $99 revenue = 54% margin
-    tagline: 'Best for active traders tracking multiple tokens.',
-    features: [
-      '25 analyses per month',
-      'Built for daily market checks',
-    ],
-    leaderboardLimit: null,
-    popular: true, // Sweet spot tier
   },
   pro: {
     id: 'pro',
     name: 'Pro',
-    price: 199,
-    analysesPerMonth: 60, // $108.60 COGS, $199 revenue = 45% margin
-    tagline: 'For serious daily research.',
+    price: 19,
+    leaderboardAccess: null, // Unlimited
+    votesPerDay: 5,
+    priorityVotes: false,
+    tagline: 'Full access to all rankings and analysis.',
     features: [
-      '60 analyses per month',
-      'Great for full market sweeps',
+      'Full leaderboard access',
+      'All scorecards',
+      '5 votes per day',
+      'Watchlist (10 tokens)',
     ],
-    leaderboardLimit: null,
-    popular: false,
+    popular: true,
   },
-  desk: {
-    id: 'desk',
-    name: 'Desk',
-    price: 399,
-    analysesPerMonth: 120, // $217.20 COGS, $399 revenue = 46% margin
-    tagline: 'High-volume research for power users.',
+  premium: {
+    id: 'premium',
+    name: 'Premium',
+    price: 49,
+    leaderboardAccess: null, // Unlimited
+    votesPerDay: 15,
+    priorityVotes: true, // Votes count 2x
+    tagline: 'Power user features with priority voting.',
     features: [
-      '120 analyses per month',
-      'Ideal for running many comparisons',
+      'Everything in Pro',
+      '15 votes per day',
+      'Priority votes (2x weight)',
+      'Unlimited watchlist',
+      'Data export',
     ],
-    leaderboardLimit: null,
     popular: false,
   },
 } as const;
@@ -268,6 +245,21 @@ export const tokenAnalyses = pgTable("token_analyses", {
   communityStatus: text("community_status"), // Very Active/Active/Moderate/Low/Dead
   accountQuality: text("account_quality"), // Builders/Researchers, Traders/Degens, Mixed Quality, etc.
 
+  // X Research qualitative fields (NEW - replacing numeric versions)
+  engagementQuality: text("engagement_quality"), // "High", "Moderate", "Low", "Bot-Heavy"
+  overallSentiment: text("overall_sentiment"), // "Strongly Bullish", "Bullish", "Mixed", "Bearish", "Strongly Bearish"
+  cultVsMercenary: text("cult_vs_mercenary"), // "Cult-Heavy", "Mercenary-Heavy", "Balanced Mix", "Unable to Assess"
+
+  // X Research flexible format fields (can be numeric OR qualitative)
+  sentimentBullishRatio: text("sentiment_bullish_ratio"), // "72%" or "High (~70%+)"
+  sentimentBearishRatio: text("sentiment_bearish_ratio"), // "8%" or "Low (<10%)"
+  sentimentNeutralRatio: text("sentiment_neutral_ratio"), // "20%" or "Moderate (~40-70%)"
+  likesPerPostAvg: text("likes_per_post_avg"), // "150" or "High (hundreds+)"
+  retweetsPerPostAvg: text("retweets_per_post_avg"), // "45" or "Moderate (tens)"
+  repliesPerPostAvg: text("replies_per_post_avg"), // "12" or "Low (minimal)"
+  cultMercenaryRatio: text("cult_mercenary_ratio"), // "80% cult / 20% mercenary" or "Cult-Heavy"
+  sentimentSampleSize: text("sentiment_sample_size"), // "25" or "~20 posts observed"
+
   // Team/Project info
   unlockWarning: text("unlock_warning"),
   teamStatus: text("team_status"),
@@ -305,6 +297,18 @@ export const tokenAnalyses = pgTable("token_analyses", {
   scoreCapped: boolean("score_capped"), // true if score was capped due to market cap
   uncappedScore: numeric("uncapped_score", { precision: 5, scale: 2 }), // original score before cap
 
+  // Upside Assessment (from Stage 4)
+  currentFdv: text("current_fdv"), // e.g., "$5M", "$44.33M"
+  realisticPeakFdv: text("realistic_peak_fdv"), // e.g., "$500M"
+  upsideMultiple: text("upside_multiple"), // e.g., "10x", "50x", "100x"
+  upsideTier: text("upside_tier"), // "<5x", "5-10x", "10-25x", "25-50x", "50-100x", "100x+"
+
+  // New Stage 4 fields
+  narrativeDurability: text("narrative_durability"), // "High", "Medium", "Low"
+  kolMentionRecency: text("kol_mention_recency"), // "Last 7 days", "Last 30 days", etc.
+  distributionWarning: text("distribution_warning"), // "DISTRIBUTION SIGNAL DETECTED" or null
+  scoreCalculation: text("score_calculation"), // LLM arithmetic work for final score verification
+
   // Game theory analysis
   equilibriumType: text("equilibrium_type"),
   equilibriumEvolution: text("equilibrium_evolution"),
@@ -314,7 +318,7 @@ export const tokenAnalyses = pgTable("token_analyses", {
   catalysts: jsonb("catalysts").$type<string[]>(),
 
   // Recommendations
-  recommendation: text("recommendation"), // BUY, HOLD, AVOID
+  recommendation: text("recommendation"), // BUY, CAUTIOUS BUY, HOLD, AVOID
   displaySummary: text("display_summary"),
   verdict: text("verdict"),
   reasoning: text("reasoning"),
@@ -323,6 +327,11 @@ export const tokenAnalyses = pgTable("token_analyses", {
   modelScores: jsonb("model_scores").$type<ModelScores>(),
   modelAnalyses: jsonb("model_analyses").$type<ModelAnalyses>(),
 
+  // Model divergence metrics (NEW)
+  scoreSpread: numeric("score_spread", { precision: 6, scale: 2 }), // Difference between highest and lowest model scores
+  divergenceFlag: text("divergence_flag"), // "HIGH" (>15 pts), "MODERATE" (10-15 pts), "LOW" (<10 pts)
+  divergenceNote: text("divergence_note"), // Explanation when divergence is HIGH
+
   // Market data snapshot
   currentPrice: numeric("current_price", { precision: 20, scale: 10 }),
   marketCap: numeric("market_cap", { precision: 20, scale: 2 }),
@@ -330,6 +339,7 @@ export const tokenAnalyses = pgTable("token_analyses", {
   volume24h: numeric("volume_24h", { precision: 20, scale: 2 }),
   priceChange24h: numeric("price_change_24h", { precision: 10, scale: 4 }),
   priceChange7d: numeric("price_change_7d", { precision: 10, scale: 4 }),
+  priceAtAnalysis: numeric("price_at_analysis", { precision: 20, scale: 10 }), // Price when analysis was created
   categories: jsonb("categories").$type<string[]>(),
 
   // Analysis status
@@ -491,6 +501,7 @@ export interface LeaderboardFilters {
   search?: string;
   tokenType?: string;
   marketCapTier?: string;
+  upsideTier?: string;
 }
 
 // Aggregated leaderboard entry - one per token with average score
@@ -506,4 +517,167 @@ export interface AggregatedLeaderboardItem {
   latestNarrative: string | null;
   latestAnalysisId: number;
   latestAnalysisDate: string; // ISO date string from API
+}
+
+// ==================== VOTING SYSTEM ====================
+// Token vote requests - users vote for tokens they want analyzed
+export const tokenVoteRequests = pgTable("token_vote_requests", {
+  id: serial("id").primaryKey(),
+  tokenId: text("token_id").notNull(),
+  tokenSymbol: text("token_symbol").notNull(),
+  tokenName: text("token_name").notNull(),
+  tokenImage: text("token_image"),
+  voteCount: integer("vote_count").default(0),
+  priorityVoteCount: integer("priority_vote_count").default(0), // 2x weight votes from premium users
+  status: text("status").default("pending"), // pending, analyzing, analyzed, rejected
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  analyzedAt: timestamp("analyzed_at"),
+  analysisId: integer("analysis_id"), // Link to resulting analysis
+});
+
+// Individual votes - track who voted for what
+export const tokenVotes = pgTable("token_votes", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  tokenVoteRequestId: integer("token_vote_request_id").notNull(),
+  isPriorityVote: boolean("is_priority_vote").default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Daily vote tracking - enforce daily limits
+export const userDailyVotes = pgTable("user_daily_votes", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  date: text("date").notNull(), // YYYY-MM-DD format
+  votesUsed: integer("votes_used").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Zod schemas for voting
+export const insertTokenVoteRequestSchema = createInsertSchema(tokenVoteRequests).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const selectTokenVoteRequestSchema = createSelectSchema(tokenVoteRequests);
+
+export type InsertTokenVoteRequest = z.infer<typeof insertTokenVoteRequestSchema>;
+export type TokenVoteRequest = typeof tokenVoteRequests.$inferSelect;
+
+export const insertTokenVoteSchema = createInsertSchema(tokenVotes).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertTokenVote = z.infer<typeof insertTokenVoteSchema>;
+export type TokenVote = typeof tokenVotes.$inferSelect;
+
+export const insertUserDailyVotesSchema = createInsertSchema(userDailyVotes).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertUserDailyVotes = z.infer<typeof insertUserDailyVotesSchema>;
+export type UserDailyVotes = typeof userDailyVotes.$inferSelect;
+
+// Voting API types
+export interface VoteStatus {
+  votesRemaining: number;
+  votesUsed: number;
+  maxVotes: number;
+  resetTime: string; // ISO date of next reset
+  votedTokenIds: string[];
+}
+
+export interface VoteRequest {
+  tokenId: string;
+  tokenSymbol: string;
+  tokenName: string;
+  tokenImage?: string;
+}
+
+// ==================== PERFORMANCE TRACKING ====================
+// Track historical prices and performance metrics for credibility
+
+// Daily price snapshots for all leaderboard tokens
+export const priceSnapshots = pgTable("price_snapshots", {
+  id: serial("id").primaryKey(),
+  tokenId: text("token_id").notNull(),
+  priceUsd: numeric("price_usd", { precision: 20, scale: 10 }).notNull(),
+  marketCap: numeric("market_cap", { precision: 20, scale: 2 }),
+  fdv: numeric("fdv", { precision: 20, scale: 2 }),
+  volume24h: numeric("volume_24h", { precision: 20, scale: 2 }),
+  snapshotDate: text("snapshot_date").notNull(), // YYYY-MM-DD format
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Cached aggregate performance metrics (calculated daily)
+export const performanceMetrics = pgTable("performance_metrics", {
+  id: serial("id").primaryKey(),
+  metricDate: text("metric_date").notNull(), // YYYY-MM-DD
+  top10Avg7dReturn: numeric("top10_avg_7d_return", { precision: 10, scale: 4 }),
+  top10Avg30dReturn: numeric("top10_avg_30d_return", { precision: 10, scale: 4 }),
+  hitRate7d: numeric("hit_rate_7d", { precision: 5, scale: 2 }), // % of BUY recs profitable
+  hitRate30d: numeric("hit_rate_30d", { precision: 5, scale: 2 }),
+  tierMetrics: jsonb("tier_metrics"), // { "S+": { avg7d, avg30d, count }, ... }
+  totalTokens: integer("total_tokens").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Zod schemas for performance tracking
+export const insertPriceSnapshotSchema = createInsertSchema(priceSnapshots).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const selectPriceSnapshotSchema = createSelectSchema(priceSnapshots);
+
+export type InsertPriceSnapshot = z.infer<typeof insertPriceSnapshotSchema>;
+export type PriceSnapshot = typeof priceSnapshots.$inferSelect;
+
+export const insertPerformanceMetricsSchema = createInsertSchema(performanceMetrics).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const selectPerformanceMetricsSchema = createSelectSchema(performanceMetrics);
+
+export type InsertPerformanceMetrics = z.infer<typeof insertPerformanceMetricsSchema>;
+export type PerformanceMetrics = typeof performanceMetrics.$inferSelect;
+
+// Tier metrics structure stored in JSONB
+export interface TierMetric {
+  avg7d: number | null;
+  avg30d: number | null;
+  count: number;
+}
+
+export interface TierMetrics {
+  "S+": TierMetric;
+  "S": TierMetric;
+  "A": TierMetric;
+  "B": TierMetric;
+  "C": TierMetric;
+}
+
+// API response types for performance endpoints
+export interface PerformanceSummary {
+  top10Avg7dReturn: number | null;
+  top10Avg30dReturn: number | null;
+  hitRate7d: number | null;
+  hitRate30d: number | null;
+  tierMetrics: TierMetrics | null;
+  totalTokens: number;
+  metricDate: string | null;
+}
+
+export interface TokenPerformance {
+  tokenId: string;
+  priceAtFirstAnalysis: number | null;
+  priceAtLatestAnalysis: number | null;
+  currentPrice: number | null;
+  returnSinceFirst: number | null;
+  returnSinceLatest: number | null;
+  firstAnalysisDate: string | null;
+  latestAnalysisDate: string | null;
 }

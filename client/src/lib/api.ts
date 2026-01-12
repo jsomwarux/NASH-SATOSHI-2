@@ -2,7 +2,6 @@ import type {
   TokenSearchResult,
   TokenDetails,
   TokenAnalysis,
-  AnalyzeTokenRequest,
   AnalysisStatus,
   LeaderboardFilters,
   TokenStats,
@@ -11,7 +10,7 @@ import type { AggregatedLeaderboardItem } from "@/types/leaderboard";
 
 const API_BASE = "";
 
-async function fetchApi<T>(
+export async function fetchApi<T>(
   path: string,
   options?: RequestInit & { authToken?: string }
 ): Promise<T> {
@@ -53,66 +52,19 @@ export async function getTokenDetails(tokenId: string): Promise<TokenDetails> {
   return fetchApi<TokenDetails>(`/api/token/${tokenId}`);
 }
 
-// Start Analysis (with optional auth token to associate with user)
-export async function analyzeToken(
-  request: AnalyzeTokenRequest,
-  authToken?: string
-): Promise<{ analysisId: number; status: string }> {
-  return fetchApi<{ analysisId: number; status: string }>("/api/analyze", {
-    method: "POST",
-    body: JSON.stringify(request),
-    authToken,
-  });
-}
-
 // Get Analysis Status (for polling)
 export async function getAnalysisStatus(analysisId: number): Promise<AnalysisStatus> {
   return fetchApi<AnalysisStatus>(`/api/analyze/${analysisId}/status`);
 }
 
 // Get Analysis by ID
-export async function getAnalysis(analysisId: number): Promise<TokenAnalysis> {
-  return fetchApi<TokenAnalysis>(`/api/analyze/${analysisId}`);
+export async function getAnalysis(analysisId: number, authToken?: string): Promise<TokenAnalysis> {
+  return fetchApi<TokenAnalysis>(`/api/analyze/${analysisId}`, { authToken });
 }
 
 // Get Analysis by Token ID
 export async function getAnalysisByToken(tokenId: string): Promise<TokenAnalysis> {
   return fetchApi<TokenAnalysis>(`/api/analyze/token/${tokenId}`);
-}
-
-// Retry a failed analysis
-export interface RetryAnalysisResponse {
-  analysisId: number;
-  status: string;
-  retryCount: number;
-  message: string;
-}
-
-export async function retryAnalysis(
-  analysisId: number,
-  authToken: string
-): Promise<RetryAnalysisResponse> {
-  return fetchApi<RetryAnalysisResponse>(`/api/analyze/${analysisId}/retry`, {
-    method: "POST",
-    authToken,
-  });
-}
-
-// Cancel an in-progress analysis
-export interface CancelAnalysisResponse {
-  analysisId: number;
-  status: string;
-  message: string;
-}
-
-export async function cancelAnalysis(
-  analysisId: number,
-  authToken: string
-): Promise<CancelAnalysisResponse> {
-  return fetchApi<CancelAnalysisResponse>(`/api/analyze/${analysisId}/cancel`, {
-    method: "POST",
-    authToken,
-  });
 }
 
 // Get Token Stats (aggregate data for tokens with multiple analyses)
@@ -124,14 +76,23 @@ export async function getTokenStats(tokenId: string): Promise<TokenStats> {
 export interface LeaderboardOptions {
   limit?: number;
   offset?: number;
-  sortBy?: "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "recommendation";
+  sortBy?: "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "upsideTier";
   order?: "asc" | "desc";
   filters?: LeaderboardFilters;
 }
 
+export interface LeaderboardResponse {
+  items: AggregatedLeaderboardItem[];
+  total: number;
+  accessLimit: number | null;
+  hasGatedItems: boolean;
+  isPremium: boolean;
+  userTier: string;
+}
+
 export async function getLeaderboard(
   options?: LeaderboardOptions
-): Promise<{ items: AggregatedLeaderboardItem[]; total: number }> {
+): Promise<LeaderboardResponse> {
   const params = new URLSearchParams();
 
   if (options?.limit) params.set("limit", options.limit.toString());
@@ -144,12 +105,15 @@ export async function getLeaderboard(
     if (options.filters.narrative) params.set("narrative", options.filters.narrative);
     if (options.filters.chain) params.set("chain", options.filters.chain);
     if (options.filters.search) params.set("search", options.filters.search);
+    if (options.filters.tokenType) params.set("tokenType", options.filters.tokenType);
+    if (options.filters.marketCapTier) params.set("marketCapTier", options.filters.marketCapTier);
+    if (options.filters.upsideTier) params.set("upsideTier", options.filters.upsideTier);
   }
 
   const queryString = params.toString();
   const url = queryString ? `/api/leaderboard?${queryString}` : "/api/leaderboard";
 
-  return fetchApi<{ items: AggregatedLeaderboardItem[]; total: number }>(url);
+  return fetchApi<LeaderboardResponse>(url);
 }
 
 // Get Filter Options
@@ -163,9 +127,9 @@ export async function getFilterOptions(): Promise<{
 
 // Leaderboard Stats
 export interface LeaderboardStats {
-  topToken: { symbol: string; name: string; score: number; daysOnLeaderboard: number } | null;
-  topNarrative: { narrative: string; avgScore: number; tokenCount: number } | null;
-  winner24h: { symbol: string; name: string; score: number } | null;
+  topTokens: { symbol: string; name: string; score: number; daysInTop3: number }[];
+  topNarratives: { narrative: string; avgScore: number; tokenCount: number }[];
+  winners7d: { symbol: string; name: string; score: number }[];
 }
 
 export async function getLeaderboardStats(): Promise<LeaderboardStats> {
@@ -244,6 +208,12 @@ export interface SubscriptionStatus {
   isSubscribed: boolean;
   isInTrial: boolean;
   trialDaysRemaining: number | null;
+  // Vote tracking
+  votesPerDay: number;
+  votesUsedToday: number;
+  votesRemaining: number;
+  priorityVotes: boolean;
+  // Legacy fields (deprecated but kept for backward compatibility)
   dailyLimit: number | null;
   dailyUsed: number;
   dailyRemaining: number | null;
@@ -370,6 +340,230 @@ export async function verifyCreditPurchase(
     {
       method: "POST",
       body: JSON.stringify({ sessionId }),
+      authToken,
+    }
+  );
+}
+
+// ==================== VOTING API ====================
+
+export interface VoteStatus {
+  votesRemaining: number;
+  votesUsed: number;
+  maxVotes: number;
+  hasPriorityVotes: boolean;
+  resetTime: string;
+  votedRequestIds: number[];
+  authenticated: boolean;
+}
+
+export interface VoteRequest {
+  id: number;
+  tokenId: string;
+  tokenSymbol: string;
+  tokenName: string;
+  tokenImage: string | null;
+  voteCount: number;
+  priorityVoteCount: number;
+  status: string;
+  createdAt: string;
+  analyzedAt: string | null;
+  analysisId: number | null;
+}
+
+// Get user's vote status
+export async function getVoteStatus(authToken?: string): Promise<VoteStatus> {
+  return fetchApi<VoteStatus>("/api/vote/status", { authToken });
+}
+
+// Get vote requests (pending tokens)
+export async function getVoteRequests(
+  options?: { limit?: number; offset?: number; status?: string }
+): Promise<{ items: VoteRequest[]; total: number }> {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set("limit", options.limit.toString());
+  if (options?.offset) params.set("offset", options.offset.toString());
+  if (options?.status) params.set("status", options.status);
+
+  const queryString = params.toString();
+  const url = queryString ? `/api/vote/requests?${queryString}` : "/api/vote/requests";
+  return fetchApi<{ items: VoteRequest[]; total: number }>(url);
+}
+
+// Get top pending vote requests
+export async function getTopVoteRequests(limit?: number): Promise<VoteRequest[]> {
+  const url = limit ? `/api/vote/top?limit=${limit}` : "/api/vote/top";
+  return fetchApi<VoteRequest[]>(url);
+}
+
+// Get recently analyzed vote requests
+export async function getRecentlyAnalyzedRequests(limit?: number): Promise<VoteRequest[]> {
+  const url = limit ? `/api/vote/recently-analyzed?limit=${limit}` : "/api/vote/recently-analyzed";
+  return fetchApi<VoteRequest[]>(url);
+}
+
+// Submit a vote for a token
+export interface SubmitVoteRequest {
+  tokenId: string;
+  tokenSymbol: string;
+  tokenName: string;
+  tokenImage?: string;
+}
+
+export interface SubmitVoteResponse {
+  message: string;
+  voteRequest: VoteRequest;
+  isPriorityVote: boolean;
+  votesRemaining: number;
+}
+
+export async function submitVote(
+  vote: SubmitVoteRequest,
+  authToken: string
+): Promise<SubmitVoteResponse> {
+  return fetchApi<SubmitVoteResponse>("/api/vote", {
+    method: "POST",
+    body: JSON.stringify(vote),
+    authToken,
+  });
+}
+
+// ==================== ADMIN API ====================
+
+export interface AdminStatus {
+  isAdmin: boolean;
+  email: string | null;
+}
+
+export async function getAdminStatus(authToken?: string): Promise<AdminStatus> {
+  return fetchApi<AdminStatus>("/api/admin/status", { authToken });
+}
+
+export interface AdminAnalyzeRequest {
+  tokenId: string;
+  tokenSymbol: string;
+  tokenName: string;
+  tokenImage?: string;
+  chain?: string;
+}
+
+export interface AdminAnalyzeResponse {
+  message: string;
+  analysisId: number;
+  runId: string;
+  status: string;
+}
+
+export async function adminStartAnalysis(
+  data: AdminAnalyzeRequest,
+  authToken: string
+): Promise<AdminAnalyzeResponse> {
+  return fetchApi<AdminAnalyzeResponse>("/api/admin/analyze", {
+    method: "POST",
+    body: JSON.stringify(data),
+    authToken,
+  });
+}
+
+export interface AdminLeaderboardResponse {
+  items: AggregatedLeaderboardItem[];
+  total: number;
+  isAdmin: boolean;
+  accessLimit: null;
+}
+
+export async function getAdminLeaderboard(
+  options: LeaderboardOptions,
+  authToken: string
+): Promise<AdminLeaderboardResponse> {
+  const params = new URLSearchParams();
+  if (options.limit) params.set("limit", String(options.limit));
+  if (options.offset) params.set("offset", String(options.offset));
+  if (options.sortBy) params.set("sortBy", options.sortBy);
+  if (options.order) params.set("order", options.order);
+
+  // Add filters
+  if (options.filters) {
+    if (options.filters.tier) params.set("tier", options.filters.tier);
+    if (options.filters.narrative) params.set("narrative", options.filters.narrative);
+    if (options.filters.chain) params.set("chain", options.filters.chain);
+    if (options.filters.search) params.set("search", options.filters.search);
+    if (options.filters.tokenType) params.set("tokenType", options.filters.tokenType);
+    if (options.filters.marketCapTier) params.set("marketCapTier", options.filters.marketCapTier);
+    if (options.filters.upsideTier) params.set("upsideTier", options.filters.upsideTier);
+  }
+
+  const queryString = params.toString();
+  const url = queryString ? `/api/admin/leaderboard?${queryString}` : "/api/admin/leaderboard";
+  return fetchApi<AdminLeaderboardResponse>(url, { authToken });
+}
+
+export interface AdminAnalysesResponse {
+  items: TokenAnalysis[];
+  total: number;
+}
+
+export async function getAdminAnalyses(
+  options: { limit?: number; offset?: number; status?: string },
+  authToken: string
+): Promise<AdminAnalysesResponse> {
+  const params = new URLSearchParams();
+  if (options.limit) params.set("limit", String(options.limit));
+  if (options.offset) params.set("offset", String(options.offset));
+  if (options.status) params.set("status", options.status);
+
+  const queryString = params.toString();
+  const url = queryString ? `/api/admin/analyses?${queryString}` : "/api/admin/analyses";
+  return fetchApi<AdminAnalysesResponse>(url, { authToken });
+}
+
+export async function adminSyncGumloop(authToken: string): Promise<{
+  message: string;
+  checked: number;
+  synced: number;
+}> {
+  return fetchApi<{ message: string; checked: number; synced: number }>(
+    "/api/admin/sync-gumloop",
+    {
+      method: "POST",
+      authToken,
+    }
+  );
+}
+
+export async function adminCollectPerformance(authToken: string): Promise<{
+  message: string;
+}> {
+  return fetchApi<{ message: string }>(
+    "/api/admin/performance/collect",
+    {
+      method: "POST",
+      authToken,
+    }
+  );
+}
+
+export async function adminReprocessAnalysis(
+  analysisId: number,
+  authToken: string
+): Promise<{ message: string; updates: string[] }> {
+  return fetchApi<{ message: string; updates: string[] }>(
+    `/api/admin/analyze/${analysisId}/reprocess`,
+    {
+      method: "POST",
+      authToken,
+    }
+  );
+}
+
+export async function adminRecoverAnalysis(
+  analysisId: number,
+  authToken: string
+): Promise<{ message: string; gumloopState: string; status: string }> {
+  return fetchApi<{ message: string; gumloopState: string; status: string }>(
+    `/api/admin/analyze/${analysisId}/recover`,
+    {
+      method: "POST",
       authToken,
     }
   );

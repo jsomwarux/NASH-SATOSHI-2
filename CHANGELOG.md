@@ -4,7 +4,901 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-09 Part 5 (Latest)
+## Session: 2026-01-12 - Score Calculation, X Research Fields, Model Divergence & Flexible Format Fields (Latest)
+
+### Summary
+1. Added `score_calculation` field parsing and storage to capture the LLM's arithmetic work for computing the final score average.
+2. Added three new qualitative X Research fields replacing old numeric versions: `engagementQuality`, `overallSentiment`, and `cultVsMercenary`.
+3. Added model divergence metrics: `scoreSpread`, `divergenceFlag`, and `divergenceNote` with visual display in 4-Model Consensus section.
+4. Added X Research flexible format fields that can contain either numeric OR qualitative values (sentiment ratios, engagement details, cult/mercenary ratio, sample size).
+
+### Changes Made
+
+#### 1. Score Calculation Field
+- **Parser**: Added `scoreCalculation?: string` to interface with field aliases
+- **Schema**: Added `scoreCalculation` column (text)
+- **Routes**: Added to `processGumloopCompletion` storage update
+- **ScoreCard**: Expandable "Score Calculation" section in Score Breakdown (collapsed by default)
+
+#### 2. New Qualitative X Research Fields (gumloop-parser.ts)
+- `engagementQuality` - "High", "Moderate", "Low", "Bot-Heavy"
+  - Aliases: `engagement_quality`, `attention_metrics_engagement_quality`
+- `overallSentiment` - "Strongly Bullish", "Bullish", "Mixed", "Bearish", "Strongly Bearish"
+  - Aliases: `overall_sentiment`, `sentiment_analysis_overall_sentiment`
+- `cultVsMercenary` - "Cult-Heavy", "Mercenary-Heavy", "Balanced Mix", "Unable to Assess"
+  - Aliases: `cult_vs_mercenary`, `community_coordination_cult_vs_mercenary`
+
+#### 3. Model Divergence Metrics (NEW)
+- `scoreSpread` - Decimal showing difference between highest and lowest model scores
+  - Aliases: `score_spread`, `model_score_spread`
+- `divergenceFlag` - "HIGH" (>15 pts), "MODERATE" (10-15 pts), "LOW" (<10 pts)
+  - Aliases: `divergence_flag`, `model_divergence`
+- `divergenceNote` - Explanation text when divergence is HIGH
+  - Aliases: `divergence_note`, `divergence_explanation`
+
+#### 4. X Research Flexible Format Fields (NEW)
+Fields that can contain either numeric values OR qualitative descriptions:
+- **Sentiment Ratios** (can be "72%" or "High (~70%+)"):
+  - `sentimentBullishRatio` - bullish sentiment percentage/description
+  - `sentimentBearishRatio` - bearish sentiment percentage/description
+  - `sentimentNeutralRatio` - neutral sentiment percentage/description
+- **Engagement Details** (can be "150" or "High (hundreds+)"):
+  - `likesPerPostAvg` - average likes per post
+  - `retweetsPerPostAvg` - average retweets per post
+  - `repliesPerPostAvg` - average replies per post
+- **Other Fields**:
+  - `cultMercenaryRatio` - "80% cult / 20% mercenary" or "Cult-Heavy"
+  - `sentimentSampleSize` - "25" or "~20 posts observed"
+
+#### 5. Database Schema (shared/schema.ts)
+- Added `scoreCalculation` column (text)
+- Added `engagementQuality` column (text)
+- Added `overallSentiment` column (text)
+- Added `cultVsMercenary` column (text)
+- Added `scoreSpread` column (numeric 6,2)
+- Added `divergenceFlag` column (text)
+- Added `divergenceNote` column (text)
+- Added 8 flexible format fields (all text): `sentimentBullishRatio`, `sentimentBearishRatio`, `sentimentNeutralRatio`, `likesPerPostAvg`, `retweetsPerPostAvg`, `repliesPerPostAvg`, `cultMercenaryRatio`, `sentimentSampleSize`
+
+#### 6. Routes Update (server/routes.ts)
+- Added all 15 new fields to `processGumloopCompletion` storage update
+
+#### 7. ScoreCard Social Signals Section (ScoreCard.tsx)
+- Expanded grid to `grid-cols-2 sm:grid-cols-3 md:grid-cols-4` for more cards
+- **Engagement card**: Shows qualitative summary + optional detail breakdown (Likes/RTs/Replies per post)
+- **Sentiment card**: Shows qualitative summary + optional ratio breakdown (Bullish/Bearish/Neutral + sample size)
+- **Holder Type card**: Shows qualitative summary + optional cult/mercenary ratio
+- All cards gracefully handle both numeric ("72%") and qualitative ("High (~70%+)") formats
+- All new cards only display when field is present (backward compatible)
+
+#### 8. 4-Model Consensus Section - Divergence Display (ScoreCard.tsx)
+- Added divergence display below model score cards
+- **LOW divergence**: Green "Strong Consensus" badge
+- **MODERATE divergence**: Yellow "Mixed Views" badge + score spread
+- **HIGH divergence**: Orange "Models Disagree" badge + score spread + divergence note with warning box
+- Backward compatible: Falls back to `consensus_level` for older analyses without `divergence_flag`
+- Maps old consensus_level: HIGH→low divergence, MIXED→moderate, LOW/CONFLICTED→high
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/gumloop-parser.ts` | Added 15 new fields to interface, field aliases, extraction in both parseText and outputs sections |
+| `shared/schema.ts` | Added 15 new columns to tokenAnalyses table |
+| `server/routes.ts` | Added 15 new fields to processGumloopCompletion update |
+| `client/src/components/scorecard/ScoreCard.tsx` | Added Calculator icon, expandable Score Calculation, enhanced Social Signals with flexible format display, divergence display |
+
+### Database Migration Required
+```sql
+-- Score calculation field
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS score_calculation TEXT;
+
+-- X Research qualitative fields
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS engagement_quality TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS overall_sentiment TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS cult_vs_mercenary TEXT;
+
+-- Model divergence metrics
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS score_spread NUMERIC(6,2);
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS divergence_flag TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS divergence_note TEXT;
+
+-- X Research flexible format fields
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS sentiment_bullish_ratio TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS sentiment_bearish_ratio TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS sentiment_neutral_ratio TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS likes_per_post_avg TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS retweets_per_post_avg TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS replies_per_post_avg TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS cult_mercenary_ratio TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS sentiment_sample_size TEXT;
+```
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- score_calculation field parsed and stored (displayed in expandable debug section)
+- New qualitative X Research fields parsed, stored, and displayed in Social Signals
+- Model divergence metrics parsed and displayed in 4-Model Consensus section
+- divergence_flag takes precedence over consensus_level when available
+- Flexible format fields handle both numeric and qualitative values gracefully
+- Backward compatible: older analyses without new fields display gracefully
+- Grid layout adapts to show available cards responsively
+
+---
+
+## Session: 2026-01-11 Part 12 - Parser Improvements & Category Extraction
+
+### Summary
+Improved field parsing with asterisk sanitization, category extraction for community_status and account_quality, removed distribution warning display, and added graceful handling for missing KOL data.
+
+### Changes Made
+
+#### 1. Asterisk Sanitization (gumloop-parser.ts)
+- Added `sanitizeFieldText()` function to strip asterisks from field names
+- Converts `**field_name:**` to `field_name:` before parsing
+- Applied to raw text in parseGumloopResponse() before all parsing operations
+
+#### 2. Community Status Category Extraction (gumloop-parser.ts)
+- Added `extractCommunityStatusCategory()` helper function
+- Valid categories: "Very Active", "Active", "Moderate", "Low", "Dead"
+- Extracts just the category from longer strings (e.g., "Active. The community shows..." → "Active")
+- Applied to both text-based and direct output parsing
+
+#### 3. Account Quality Category Extraction (gumloop-parser.ts)
+- Added `extractAccountQualityCategory()` helper function
+- Valid categories: "Builders/Researchers", "Traders/Degens", "Mixed Quality", "Promoters/Shills", "Bots/Spam"
+- Same extraction logic as community status
+- Applied to both text-based and direct output parsing
+
+#### 4. Removed Distribution Warning Display (ScoreCard.tsx)
+- Removed the distribution warning banner from the scorecard
+- Field still parsed and stored but not displayed on frontend
+
+#### 5. Graceful KOL Data Handling (ScoreCard.tsx)
+- Enhanced empty/missing check: handles "", "N/A", "None", "None identified", "None known"
+- Displays "None identified" for all empty/missing cases
+- Shows KOL mention recency only when valid KOL data exists
+- Format: "Mentions: Last 7 days" (or other recency value)
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/gumloop-parser.ts` | Added sanitizeFieldText(), extractCommunityStatusCategory(), extractAccountQualityCategory(); Applied sanitization to parseGumloopResponse |
+| `client/src/components/scorecard/ScoreCard.tsx` | Removed distribution warning banner; Enhanced KOL display with recency |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- Field names with asterisks are now properly parsed
+- Community status and account quality show clean category values
+- Distribution warning not displayed (still parsed and stored)
+- KOL section shows "None identified" gracefully for missing data
+- KOL mention recency displayed when available
+
+---
+
+## Session: 2026-01-11 Part 11 - New Stage 4 Fields & Distribution Warning
+
+### Summary
+Added parsing and display for three new Stage 4 output fields: narrative durability, KOL mention recency, and distribution warning. The distribution warning is displayed as a prominent red banner at the top of the scorecard when detected.
+
+### Changes Made
+
+#### 1. New Field Parsing (gumloop-parser.ts)
+- Added `narrativeDurability`, `kolMentionRecency`, and `distributionWarning` to ParsedGumloopResponse interface
+- Added field aliases for all three new fields with multiple variations
+- Added parsing logic with validation (distributionWarning normalizes to "DISTRIBUTION SIGNAL DETECTED" when signal is detected)
+- Backward compatible: missing fields return null/undefined
+
+#### 2. Database Schema (shared/schema.ts)
+- Added `narrativeDurability` column (text) - values: "High", "Medium", "Low"
+- Added `kolMentionRecency` column (text) - values: "Last 7 days", "Last 30 days", etc.
+- Added `distributionWarning` column (text) - "DISTRIBUTION SIGNAL DETECTED" or null
+
+#### 3. Routes Update (server/routes.ts)
+- Added new fields to processGumloopCompletion storage update
+
+#### 4. Narrative Durability Badge (ScoreCard.tsx)
+- Added color-coded durability badge next to the narrative name in the Narrative/Meta card
+- Color coding: High = green, Medium = amber, Low = red
+- Displays as "High Durability", "Medium Durability", or "Low Durability"
+
+#### 5. Distribution Warning Banner (ScoreCard.tsx)
+- Added prominent red warning banner at the top of completed analyses when distribution signal detected
+- Banner includes AlertTriangle icon, "DISTRIBUTION SIGNAL DETECTED" heading, "Late-Phase Risk" badge
+- Descriptive text warns users about distribution phase activity
+
+#### 6. Verified Existing Implementations
+- **CAUTIOUS BUY**: Confirmed handling in getRecommendationStyle() - amber/yellow color
+- **Position Card**: Confirmed terminology in getExitLiquidityDisplay() - USER→"Favorable", AT_RISK→"Caution", EXIT_LIQUIDITY→"Unfavorable"
+- **Upside Display**: Confirmed upsideMultiple and upsideTier display with color coding and FDV path detail
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/gumloop-parser.ts` | Added 3 new fields to interface, field aliases, and parsing logic |
+| `shared/schema.ts` | Added 3 new columns to tokenAnalyses table |
+| `server/routes.ts` | Added 3 new fields to processGumloopCompletion update |
+| `client/src/components/scorecard/ScoreCard.tsx` | Added narrative durability badge and distribution warning banner |
+
+### Database Migration Required
+```sql
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS narrative_durability TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS kol_mention_recency TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS distribution_warning TEXT;
+```
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- All 3 new fields parsed from Gumloop output
+- Narrative durability displayed as color-coded badge
+- Distribution warning displayed as prominent banner when detected
+- Backward compatible with older analyses (missing fields display nothing)
+- All TypeScript compiles successfully
+
+---
+
+## Session: 2026-01-11 Part 10 - Upside Column, Premium Filtering & Admin Enhancements
+
+### Summary
+Replaced SIGNAL column with UPSIDE on leaderboard, added upside tier filtering, restricted search/filter/sort to premium users only, added recover functionality for failed analyses, and added full filtering capabilities to admin panel.
+
+### Changes Made
+
+#### 1. Recover Failed Analyses Feature
+- New endpoint `POST /api/admin/analyze/:id/recover` to recover failed analyses that completed in Gumloop
+- Fetches run status from Gumloop API and processes completion if DONE
+- Added "Recover" button (amber) for failed analyses with gumloopRunId in Admin panel
+- `client/src/lib/api.ts` - Added `adminRecoverAnalysis()` function
+
+#### 2. Replaced SIGNAL Column with UPSIDE
+- Removed SIGNAL (BUY/HOLD/AVOID) column from leaderboard
+- Added UPSIDE column showing upside multiple (10x, 50x, 100x+)
+- Color-coded badges: green (50x+), emerald (25-50x), cyan (10-25x), yellow (5-10x), orange (<5x)
+- Added `upsideTier` and `upsideMultiple` to `AggregatedLeaderboardItem` type
+- Updated backend to include upside fields in leaderboard query
+
+#### 3. Improved Tooltips
+- **UPSIDE**: "Potential Price Multiple — Estimated upside based on current FDV vs realistic peak FDV. Higher = more room to grow."
+- **ASYM**: "Entry Timing Score (0-25) — Game-theoretic favorability of current entry. Considers your position vs other market participants."
+
+#### 4. Fixed Upside Sorting
+- Sorting now uses actual numeric value from `upsideMultiple` (e.g., "58x" → 58)
+- Previously sorted by tier buckets which caused incorrect ordering within same tier
+
+#### 5. Added Upside Tier Filter
+- New filter dropdown on leaderboard: 100x+, 50-100x, 25-50x, 10-25x, 5-10x, <5x
+- Filter applied post-aggregation to filter by latest analysis's upside tier
+- Added `upsideTier` to `LeaderboardFilters` type in schema
+- Backend extracts and applies upsideTier filter
+
+#### 6. Premium-Only Search/Filter/Sort
+- Free users see disabled search/filter controls with lock icons and "(PRO)" labels
+- Sorting disabled in LeaderboardTable for free users (grayed out sort icons)
+- Auto-resets filters/sort to defaults when free user detected
+- `canUseAdvancedFeatures` flag based on `data.isPremium`
+
+#### 7. Updated CTAs and Pricing
+- **Leaderboard CTA**: "Viewing top 10. Upgrade for all X tokens + search, filter & sort."
+- **Pricing page Free tier**: "1 vote per day • no search/filter/sort"
+- **Pricing page Pro tier**: "all rankings + search, filter & sort"
+- **Pricing page Premium tier**: "15 votes per day + search, filter & sort"
+- **FAQ updated**: Mentions search, filter, sort as upgrade benefits
+
+#### 8. Admin Panel Filtering
+- Added full search and filter UI to admin leaderboard tab
+- Filters: Tier, Type, FDV, Upside
+- Search by ticker or name
+- Updated `getAdminLeaderboard` API to accept and send filters
+- Backend admin endpoint now extracts and applies all filter params
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/routes.ts` | Added recover endpoint, admin leaderboard filters, upsideTier extraction for public leaderboard |
+| `server/storage.ts` | Added upsideTier to leaderboard query/aggregation, post-aggregation filtering, upside sorting by numeric value, upsideTiers in getFilterOptions |
+| `shared/schema.ts` | Added upsideTier to LeaderboardFilters |
+| `client/src/lib/api.ts` | Added adminRecoverAnalysis, upsideTier to LeaderboardOptions and getLeaderboard/getAdminLeaderboard params |
+| `client/src/types/leaderboard.ts` | Added upsideTier and upsideMultiple to AggregatedLeaderboardItem |
+| `client/src/components/leaderboard/LeaderboardTable.tsx` | Replaced SIGNAL with UPSIDE column, added canSort prop, updated CTA message, improved tooltips |
+| `client/src/pages/Leaderboard.tsx` | Added premium check, disabled search/filter/sort for free users, added upside filter dropdown |
+| `client/src/pages/Admin.tsx` | Added recover mutation/button, full filter UI for leaderboard tab |
+| `client/src/pages/Pricing.tsx` | Updated tier descriptions and FAQ to mention search/filter/sort |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- Leaderboard shows UPSIDE column instead of SIGNAL
+- Upside tier filter works correctly (post-aggregation filtering)
+- Upside sorting uses actual numeric values
+- Free users cannot search, filter, or sort the leaderboard
+- Premium users have full access to all leaderboard features
+- Admin panel has full filtering capabilities
+- Failed analyses can be recovered if they completed in Gumloop
+
+---
+
+## Session: 2026-01-10 Part 9 - Mobile UI Optimization & Leaderboard Enhancements
+
+### Summary
+Comprehensive mobile UI/UX review and optimization across all pages. Fixed LATEST column to show actual latest analysis score, updated admin leaderboard to match public version, enhanced stats sections to show all 3 items, and added financial disclaimer bar.
+
+### Changes Made
+
+#### 1. LATEST Column Fix (Leaderboard)
+- Added `latestScore` field to backend aggregation in `server/storage.ts`
+- Updated `AggregatedLeaderboardItem` interface in `client/src/types/leaderboard.ts`
+- LATEST column now shows actual score from most recent analysis (not average)
+
+#### 2. Admin Leaderboard Match Public
+- Admin leaderboard now uses the same `LeaderboardTable` component as public
+- Shares all columns: Token, Type, Score, Tier, Signal, Asym, Runs, Narrative, Latest
+- Full sorting capability on all columns
+
+#### 3. Top Ranked, Hot Narratives, 24H Winners - Show All 3 Items
+- Each stat section now displays info for all 3 items (not just first)
+- Visual hierarchy with decreasing size/opacity: #1 (full), #2 (85%), #3 (70%)
+- TOP_RANKED: Shows rank, symbol, days in top 3, and score
+- HOT_NARRATIVES: Shows rank, narrative name, token count, and avg score
+- 24H_WINNERS: Shows rank, symbol, and score
+
+#### 4. Financial Disclaimer Bar
+- Added "NOT FINANCIAL ADVICE" banner above cyber status bar
+- Uses AlertTriangle icon with amber color scheme
+- Mobile-responsive: full text on desktop, shortened on mobile
+
+#### 5. Mobile UI/UX Optimizations
+
+**Vote.tsx (lines 165-187)**
+- Vote status stacks vertically on mobile (`flex-col sm:flex-row`)
+- Shortened labels on mobile ("Votes:" instead of "Votes remaining:")
+- Compact priority badge and reduced icon sizes on mobile
+
+**Home.tsx**
+- Status badge (lines 133-146): Smaller text, shorter content on mobile
+- Scoring methodology (lines 352-382): Responsive widths, smaller text with truncation
+
+**Pricing.tsx (lines 195-231)**
+- Current plan banner stacks on mobile
+- Button takes full width on mobile
+
+**Leaderboard.tsx (lines 299-418)**
+- Filter panel uses 2-column grid on mobile
+- FDV filter spans full width
+- Smaller text in select triggers on mobile
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/storage.ts` | Added `latestScore` to tokenMap aggregation |
+| `client/src/types/leaderboard.ts` | Added `latestScore` to AggregatedLeaderboardItem |
+| `client/src/components/leaderboard/LeaderboardTable.tsx` | Updated LATEST column to use `item.latestScore` |
+| `client/src/pages/Admin.tsx` | Uses shared LeaderboardTable component |
+| `client/src/pages/Leaderboard.tsx` | Enhanced stats sections, responsive filter panel |
+| `client/src/components/common/Layout.tsx` | Added disclaimer bar, adjusted main padding |
+| `client/src/pages/Vote.tsx` | Mobile-responsive vote status layout |
+| `client/src/pages/Home.tsx` | Mobile-responsive status badge and scoring section |
+| `client/src/pages/Pricing.tsx` | Mobile-responsive current plan banner |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- All pages optimized for mobile viewing
+- Leaderboard shows correct latest scores
+- Stats sections display all 3 items with visual hierarchy
+- Financial disclaimer visible on all pages
+- Admin panel matches public leaderboard functionality
+
+### Mobile Breakpoint Reference
+- `sm:` = 640px+ (tablets and up)
+- `md:` = 768px+ (small laptops)
+- `lg:` = 1024px+ (laptops)
+- `xl:` = 1280px+ (large screens)
+
+---
+
+## Session: 2026-01-10 Part 8 - Admin Scorecard Access Fix
+
+### Summary
+Fixed critical bug where admins couldn't view scorecards for newly analyzed tokens. Two issues: 1) access gating was blocking new tokens, 2) auth token wasn't being sent with analysis requests.
+
+### Root Cause
+1. The `/api/analyze/:id` endpoint checks if a user has access based on their subscription tier's leaderboard limit. New tokens without high rankings were blocked.
+2. The `getAnalysis` API function didn't pass the auth token, so the server couldn't identify the user as an admin.
+
+### Fix
+1. **Server**: Added admin bypass using `req.isAdmin` (already set by `optionalAuth` middleware)
+2. **Client API**: Updated `getAnalysis()` to accept optional `authToken` parameter
+3. **Client Hook**: Updated `useAnalysis()` to get auth token via `useAuth()` and pass it to `getAnalysis()`
+
+Now logged-in admins have their token sent with analysis requests, and the server bypasses access checks for admins.
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/routes.ts` | Use `req.isAdmin` for admin bypass, added debug logging |
+| `client/src/lib/api.ts` | `getAnalysis()` now accepts optional `authToken` |
+| `client/src/hooks/useAnalysis.ts` | Import `useAuth`, get token and pass to API |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Note
+Both server restart AND client refresh required for this fix to take effect.
+
+---
+
+## Session: 2026-01-10 Part 7 - Top 3 Narratives & Winners UI
+
+### Summary
+Updated leaderboard stats to show top 3 hot narratives and top 3 24H winners instead of just 1 each. Added contextual back button for admin panel navigation.
+
+### Changes Made
+
+#### 1. Backend: Top 3 Leaderboard Stats
+- Updated `getLeaderboardStats()` to return arrays instead of single items
+- Changed `topNarrative` → `topNarratives[]` (up to 3)
+- Changed `winner24h` → `winners24h[]` (up to 3)
+- Updated IStorage interface, DatabaseStorage, and MemStorage implementations
+
+#### 2. Frontend: Top 3 Display with Descending Prominence
+- **Hot Narratives**: Shows #1, #2, #3 with decreasing size and opacity
+  - #1: Large text (text-lg), full opacity, shows avg score and token count
+  - #2: Medium text (text-sm), 80% opacity
+  - #3: Small text (text-xs), 60% opacity
+  - Expand/collapse for long #1 narrative name
+- **24H Winners**: Shows #1, #2, #3 with decreasing size and opacity
+  - Same prominence hierarchy as narratives
+  - #1 shows score, #2/#3 just show symbol
+
+#### 3. Admin Panel Back Button
+- Scorecard pages now detect `?from=admin` query parameter
+- Shows "Back to Admin Panel" with Shield icon when from admin
+- Links to `/admin` instead of `/leaderboard`
+- Updated Admin page links to include `?from=admin`
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/storage.ts` | Updated getLeaderboardStats to return top 3 arrays |
+| `client/src/lib/api.ts` | Updated LeaderboardStats interface |
+| `client/src/pages/Leaderboard.tsx` | New UI for top 3 narratives and winners with prominence |
+| `client/src/pages/Analyze.tsx` | Added fromAdmin detection and conditional back button |
+| `client/src/pages/Admin.tsx` | Added ?from=admin to analysis links |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Note
+Server restart required for backend changes to take effect.
+
+---
+
+## Session: 2026-01-10 Part 6 - Narrative Normalization & Hot Narrative Fixes
+
+### Summary
+Fixed narrative normalization issues for proper capitalization of acronyms (AI, NFT, DeFi, etc.), added minimum token requirement for Hot Narrative, and added expand/collapse functionality for long narrative names.
+
+### Changes Made
+
+#### 1. Improved Narrative Normalization
+- Added `UPPERCASE_ACRONYMS` list for proper casing: AI, NFT, DeFi, RWA, DePIN, DeSci, DAO, DEX, CEX, APY, TVL, ZK
+- Updated `normalizeNarrative()` to preserve acronym casing (e.g., "Ai" → "AI")
+- Added DeSci to narrative mappings
+- Added generic "AI" keyword match with word boundaries
+
+#### 2. Minimum Token Requirement for Hot Narrative
+- Added `MIN_TOKENS_FOR_HOT_NARRATIVE = 3` constant
+- Hot Narrative now requires at least 3 unique tokens to qualify
+- Prevents single high-scoring tokens from dominating the Hot Narrative section
+
+#### 3. Expand/Collapse for Long Narrative Names
+- Added `narrativeExpanded` state to Leaderboard page
+- Narrative names longer than 12 characters show expand/collapse chevron icon
+- Clicking the icon toggles between truncated and full text display
+
+#### 4. Fixed Admin Page Link Issues
+- Fixed nested `<a>` tags in Leaderboard and All Analyses tables
+- Fixed leaderboard token links to use correct `/analyze/${item.latestAnalysisId}` path
+- Added explicit click handling on Reprocess button
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/storage.ts` | Added UPPERCASE_ACRONYMS, updated normalizeNarrative(), added MIN_TOKENS_FOR_HOT_NARRATIVE |
+| `client/src/pages/Leaderboard.tsx` | Added narrativeExpanded state, expand/collapse UI for long narratives |
+| `client/src/pages/Admin.tsx` | Fixed nested `<a>` tags, fixed link paths, improved button click handling |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- Narrative normalization properly capitalizes acronyms
+- Hot Narrative requires 3+ tokens to qualify
+- Long narrative names can be expanded/collapsed
+- Admin page links work correctly
+
+### Note
+Server restart required for narrative normalization changes to take effect.
+
+---
+
+## Session: 2026-01-10 Part 5 - Reprocess & Data Fixes
+
+### Summary
+Fixed issues where upside assessment and market data weren't being saved to analyses. Added reprocess functionality to fix existing analyses without re-running the Gumloop pipeline.
+
+### Changes Made
+
+#### 1. Fixed Missing Upside Assessment Data
+- Added upside fields (`currentFdv`, `realisticPeakFdv`, `upsideMultiple`, `upsideTier`) to `processGumloopCompletion` update
+- Fields were being parsed but not saved to database
+
+#### 2. Added CoinGecko Market Data Fetch
+- Admin analyze endpoint now fetches market data from CoinGecko API
+- Saves price, FDV, 24h change, and 7d change to analysis record
+
+#### 3. Added Reprocess Endpoint
+- `POST /api/admin/analyze/:id/reprocess`
+- Re-parses existing Gumloop output to extract missing fields
+- Fetches fresh market data from CoinGecko
+- Updates analysis record without re-running the full pipeline
+
+#### 4. Admin Page Reprocess Button
+- Added Actions column to All Analyses table
+- Reprocess button appears for completed analyses
+- Shows loading spinner while processing
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/routes.ts` | Added upside fields to processGumloopCompletion, market data fetch in admin analyze, reprocess endpoint |
+| `client/src/lib/api.ts` | Added `adminReprocessAnalysis` function |
+| `client/src/pages/Admin.tsx` | Added reprocess mutation and button to table |
+
+### Commands Run
+- `npx drizzle-kit push` - Synced database schema with new columns
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- Upside assessment and market data now properly saved for new analyses
+- Existing analyses can be reprocessed via Admin panel to fix missing data
+- Admin page fully functional with all features
+
+### Still Needs Work
+- Test reprocess functionality on existing analyses
+- Run database migrations for voting tables in production if needed
+
+---
+
+## Session: 2026-01-10 Part 4 - Admin Panel & Analysis Triggering
+
+### Summary
+Added a full admin system for running analyses and viewing all data. Admin users (identified by email via environment variable) can now trigger analyses via the UI, view the full leaderboard without access limits, and see all analyses history.
+
+### Changes Made
+
+#### 1. Admin Authentication
+- Added `isAdmin` flag to Express Request interface
+- Added `requireAdmin` middleware that checks user email against `ADMIN_EMAILS` env var
+- Updated `requireAuth` and `optionalAuth` to also set `isAdmin` flag
+- Added `isAdminEmail()` utility function
+
+#### 2. Admin API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/status` | GET | Check if current user is admin |
+| `/api/admin/analyze` | POST | Trigger analysis for a token (CoinGecko ID) |
+| `/api/admin/leaderboard` | GET | Full leaderboard (no access limits) |
+| `/api/admin/analyses` | GET | All analyses history with status filter |
+| `/api/admin/sync-gumloop` | POST | Now protected with `requireAdmin` |
+
+#### 3. Admin Analyze Workflow
+1. Admin searches for token using existing TokenSearch component
+2. Clicks "Start Analysis" button
+3. Backend creates analysis record with `status: "processing"`
+4. Calls Gumloop API to start pipeline
+5. Saves `gumloopRunId` for webhook matching
+6. Results flow back via existing webhook → leaderboard
+
+#### 4. Admin Page (`/admin`)
+- Three tabs: Run Analysis, Leaderboard, All Analyses
+- **Run Analysis**: Token search + start analysis button + sync stuck analyses
+- **Leaderboard**: Full table with all tokens (no access limit)
+- **All Analyses**: History table showing all analyses with status, score, tier
+
+#### 5. New Storage Methods
+- `getLatestAnalysisByTokenId()` - Get most recent analysis for a token
+- `getAllAnalyses()` - Get all analyses with optional status filter
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/auth.ts` | Added `isAdmin` to Request, `requireAdmin` middleware, `isAdminEmail()` function |
+| `server/routes.ts` | Added admin endpoints, protected sync-gumloop with requireAdmin |
+| `server/storage.ts` | Added `getLatestAnalysisByTokenId()` and `getAllAnalyses()` methods |
+| `client/src/lib/api.ts` | Added admin API functions |
+| `client/src/pages/Admin.tsx` | New admin page component |
+| `client/src/App.tsx` | Added `/admin` route |
+
+### Environment Variable Required
+```bash
+# Comma-separated list of admin email addresses
+ADMIN_EMAILS=admin@example.com,owner@example.com
+```
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- Admin panel fully functional at `/admin`
+- Admins can trigger analyses that flow through Gumloop pipeline
+- Results appear on leaderboard when webhook completes
+- Full leaderboard and analysis history accessible to admins
+
+### Still Needs Work
+- Run database migrations for voting tables and upside assessment in production
+- Configure Stripe price IDs for new tiers
+- Test voting flow and upside assessment end-to-end
+
+---
+
+## Session: 2026-01-10 Part 3 - Scoring System Updates
+
+### Summary
+Added new upside assessment fields parsing and display, CAUTIOUS BUY recommendation support, and updated Position card terminology for consistency with winning_side values.
+
+### Changes Made
+
+#### 1. New Upside Assessment Fields
+- **Parser**: Added `currentFdv`, `realisticPeakFdv`, `upsideMultiple`, `upsideTier` to ParsedGumloopResponse
+- **Schema**: Added 4 new columns to tokenAnalyses table
+- **Field Aliases**: Added parsing variations (e.g., `current_fdv`, `peak_fdv`, `upside_multiple`)
+- **Values**:
+  - `currentFdv`: Current FDV as string like "$5M", "$44.33M"
+  - `realisticPeakFdv`: Estimated peak FDV like "$500M"
+  - `upsideMultiple`: Potential multiple like "10x", "50x", "100x"
+  - `upsideTier`: "<5x", "5-10x", "10-25x", "25-50x", "50-100x", "100x+"
+
+#### 2. Upside Assessment Display (ScoreCard)
+- New section in Game Theory Context area
+- **Upside Multiple**: Prominently displayed (3xl-4xl font) with color coding based on tier
+- **Upside Tier Badge**: Color-coded pill (green for high, yellow for moderate, red for low)
+- **FDV Path**: Shows current → peak FDV range as supporting detail
+- **Color Coding**:
+  - 100x+, 50-100x → Green
+  - 25-50x → Emerald
+  - 10-25x → Yellow
+  - 5-10x → Orange
+  - <5x → Red
+
+#### 3. CAUTIOUS BUY Recommendation
+- **Parser**: Updated to recognize "CAUTIOUS BUY" as valid recommendation (checked before "BUY")
+- **Display**: Amber/yellow color (distinct from green BUY, gray HOLD, red AVOID)
+- **Badge**: Shows "CAUTIOUS BUY" text with `bg-amber-500/20 text-amber-400`
+
+#### 4. Position Card Terminology Update
+- Aligned with winning_side values:
+  - `USER` → "Favorable" (green)
+  - `AT_RISK` → "Caution" (yellow)
+  - `EXIT_LIQUIDITY` → "Unfavorable" (red)
+- Updated both Key Metrics card and Game Theory Context section
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/gumloop-parser.ts` | Added upside assessment fields to interface, added field aliases, updated recommendation parsing for CAUTIOUS BUY |
+| `shared/schema.ts` | Added 4 new columns (currentFdv, realisticPeakFdv, upsideMultiple, upsideTier), updated recommendation comment |
+| `client/src/components/scorecard/ScoreCard.tsx` | Updated getRecommendationStyle for CAUTIOUS BUY, added Upside Assessment section, fixed Position card terminology |
+
+### Database Migration Required
+```sql
+-- Add upside assessment columns
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS current_fdv TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS realistic_peak_fdv TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS upside_multiple TEXT;
+ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS upside_tier TEXT;
+```
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- Upside assessment fields parsed from Gumloop output
+- Upside assessment section displays in ScoreCard when fields present
+- CAUTIOUS BUY recommendation displays with amber color
+- Position card shows consistent terminology
+- Backward compatible: older analyses without new fields render correctly
+
+### Still Needs Work
+- Add authentication to admin endpoint (from previous session)
+- Run database migration for voting tables and upside assessment in production
+- Configure Stripe price IDs for new tiers
+- Test voting flow and upside assessment end-to-end
+
+---
+
+## Session: 2026-01-10 Part 2 - Gumloop Sync Fallback
+
+### Summary
+Added background polling and admin endpoint to sync stuck analyses with Gumloop. This provides a fallback when webhooks fail to be received, preventing analyses from getting stuck in "processing" state indefinitely.
+
+### Changes Made
+
+#### 1. Gumloop Sync Functions
+- **`fetchGumloopRunStatus()`** - Fetches run status from Gumloop API
+- **`syncAnalysisWithGumloop()`** - Syncs a single analysis with Gumloop
+- **`syncStuckAnalysesWithGumloop()`** - Syncs all stuck analyses (>5 min old with runId)
+
+#### 2. Admin Sync Endpoint
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/sync-gumloop` | POST | Manually trigger sync of stuck analyses |
+
+#### 3. Background Polling
+- Runs every **2 minutes** automatically
+- Checks all stuck analyses against Gumloop API
+- If Gumloop shows DONE → processes completion and updates database
+- If Gumloop shows FAILED/TERMINATED → marks analysis as failed
+- Starts on server startup (after 5-second delay)
+- Stops gracefully on shutdown
+
+#### 4. New Storage Method
+- **`getStuckAnalysesWithRunId()`** - Gets pending/processing analyses older than X minutes that have a `gumloopRunId`
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/storage.ts` | Added `getStuckAnalysesWithRunId()` to IStorage interface, PostgresStorage, and MemStorage |
+| `server/routes.ts` | Added Gumloop sync functions, admin endpoint, background polling start/stop |
+| `server/index.ts` | Import and call `startGumloopSyncPolling()` on startup, `stopGumloopSyncPolling()` on shutdown |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- Background polling provides fallback for webhook failures
+- Admin can manually trigger sync via POST to `/api/admin/sync-gumloop`
+- Stuck analyses will be automatically recovered within 2 minutes
+
+### Still Needs Work
+- Add authentication to admin endpoint (currently unprotected)
+- Run database migration for voting tables in production
+- Configure Stripe price IDs for new tiers
+- Test voting flow end-to-end
+
+---
+
+## Session: 2026-01-10 - View-Only Pivot
+
+### Summary
+Converted app from user-triggered analysis to view-only model. Free users can view top 10 tokens, paid users get full access. Added voting system for users to request token analyses.
+
+### Changes Made
+
+#### 1. New Subscription Model (Access-Based)
+| Tier | Price | Leaderboard Access | Scorecards | Votes/Day | Priority |
+|------|-------|-------------------|------------|-----------|----------|
+| Free | $0 | Top 10 only | Top 10 only | 1 | No |
+| Pro | $19/mo | Unlimited | Unlimited | 5 | No |
+| Premium | $49/mo | Unlimited | Unlimited | 15 | Yes (2x weight) |
+
+#### 2. Voting System
+- **New tables**: `token_vote_requests`, `token_votes`, `user_daily_votes`
+- **Vote flow**: Users search for tokens and vote for analysis
+- **Priority votes**: Premium users' votes count 2x
+- **Daily limits**: Votes reset at midnight UTC
+- **Top voted tokens**: Displayed on Vote page, highest votes get analyzed first
+
+#### 3. Access Gating
+- **Leaderboard**: Free users see only top 10 tokens
+- **Scorecards**: Free users can only view scorecards for top 10 tokens
+- **Backend enforcement**: Both leaderboard and analysis endpoints check subscription tier
+
+#### 4. API Endpoints Added
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/vote/status` | GET | User's vote status (remaining, used, limit) |
+| `/api/vote/requests` | GET | List of pending vote requests |
+| `/api/vote/top` | GET | Top voted pending tokens |
+| `/api/vote/recently-analyzed` | GET | Recently analyzed from votes |
+| `/api/vote` | POST | Submit vote for a token |
+
+#### 5. Frontend Changes
+- **New Vote page** (`/vote`) - Search tokens, view top voted, vote for analysis
+- **Updated Pricing page** - Shows new tier structure, removed credit packs
+- **Home page** - Already updated to show "View Leaderboard" and "Vote for Tokens" CTAs
+
+#### 6. Removed Features (Discontinued)
+- User-triggered token analysis (`POST /api/analyze`)
+- Analysis retry (`POST /api/analyze/:id/retry`)
+- Analysis cancel (`POST /api/analyze/:id/cancel`)
+- Credit pack purchases
+- These endpoints now return 410 Gone with helpful message
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/routes.ts` | Added voting endpoints, access gating for leaderboard/scorecards |
+| `server/storage.ts` | Added voting methods to PostgresStorage and MemStorage |
+| `server/stripe.ts` | Updated tier-to-price mappings for new tiers |
+| `shared/schema.ts` | New subscription tiers, voting tables and types |
+| `client/src/App.tsx` | Added `/vote` route |
+| `client/src/lib/api.ts` | Added voting API functions |
+| `client/src/pages/Vote.tsx` | New voting page component |
+| `client/src/pages/Pricing.tsx` | Updated for access-based tiers, removed credit packs |
+| `client/src/pages/Home.tsx` | (Previously updated) Landing page CTAs |
+| `client/src/components/scorecard/ScoreCard.tsx` | (Previously updated) Removed retry/cancel/reanalyze |
+| `client/src/hooks/useAnalysis.ts` | (Previously updated) Removed analysis hooks |
+
+### Database Migration Required
+Run the migration file: `migrations/0003_add_voting_tables.sql`
+```sql
+CREATE TABLE "token_vote_requests" (
+  "id" serial PRIMARY KEY,
+  "token_id" text NOT NULL,
+  "token_symbol" text NOT NULL,
+  "token_name" text NOT NULL,
+  "token_image" text,
+  "vote_count" integer DEFAULT 0,
+  "priority_vote_count" integer DEFAULT 0,
+  "status" text DEFAULT 'pending',
+  "created_at" timestamp DEFAULT now(),
+  "analyzed_at" timestamp,
+  "analysis_id" integer
+);
+
+CREATE TABLE "token_votes" (
+  "id" serial PRIMARY KEY,
+  "user_id" text NOT NULL,
+  "token_vote_request_id" integer NOT NULL,
+  "is_priority_vote" boolean DEFAULT false,
+  "created_at" timestamp DEFAULT now()
+);
+
+CREATE TABLE "user_daily_votes" (
+  "id" serial PRIMARY KEY,
+  "user_id" text NOT NULL,
+  "date" text NOT NULL,
+  "votes_used" integer DEFAULT 0,
+  "created_at" timestamp DEFAULT now()
+);
+-- Plus indexes (see migration file)
+```
+
+### Stripe Configuration Required
+Update environment variables:
+- `STRIPE_PRO_PRICE_ID` - Price ID for Pro tier ($19/mo)
+- `STRIPE_PREMIUM_PRICE_ID` - Price ID for Premium tier ($49/mo)
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+- `npm run build` - Production build successful
+
+### Current State
+- View-only model fully implemented
+- Free users: Top 10 leaderboard + scorecards, 1 vote/day
+- Pro users ($19): Full access, 5 votes/day
+- Premium users ($49): Full access, 15 priority votes/day
+- Voting page functional with token search
+- All TypeScript compiles successfully
+- Build passes
+
+### Still Needs Work
+- Run database migration in production
+- Configure Stripe price IDs for new tiers
+- Test voting flow end-to-end
+- Add upgrade prompts when users hit access limits
+
+---
+
+## Session: 2026-01-09 Part 5
 
 ### Summary
 Updated FDV category thresholds to 8 tiers with new ranges. Added Giga Cap tier and Upper Mid Cap tier.

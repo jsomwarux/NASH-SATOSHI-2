@@ -12,19 +12,15 @@ export const stripe = STRIPE_SECRET_KEY
 
 // Map Stripe price IDs to tier IDs
 const PRICE_TO_TIER: Record<string, SubscriptionTierId> = {
-  [process.env.STRIPE_STARTER_PRICE_ID || 'price_starter']: 'starter',
-  [process.env.STRIPE_TRADER_PRICE_ID || 'price_trader']: 'trader',
   [process.env.STRIPE_PRO_PRICE_ID || 'price_pro']: 'pro',
-  [process.env.STRIPE_DESK_PRICE_ID || 'price_desk']: 'desk',
+  [process.env.STRIPE_PREMIUM_PRICE_ID || 'price_premium']: 'premium',
 };
 
 // Map tier IDs to Stripe price IDs
 const TIER_TO_PRICE: Record<SubscriptionTierId, string | null> = {
   free: null,
-  starter: process.env.STRIPE_STARTER_PRICE_ID || null,
-  trader: process.env.STRIPE_TRADER_PRICE_ID || null,
   pro: process.env.STRIPE_PRO_PRICE_ID || null,
-  desk: process.env.STRIPE_DESK_PRICE_ID || null,
+  premium: process.env.STRIPE_PREMIUM_PRICE_ID || null,
 };
 
 export function isStripeConfigured(): boolean {
@@ -638,13 +634,6 @@ export async function verifyAndCompleteCreditPurchase(sessionId: string, userId:
  */
 export function getSubscriptionTiers() {
   return Object.entries(SUBSCRIPTION_TIERS).map(([id, tier]) => {
-    // Handle free tier's special properties
-    const freeTierProps = id === 'free' ? {
-      trialDays: (tier as typeof SUBSCRIPTION_TIERS.free).trialDays,
-      trialAnalysesPerDay: (tier as typeof SUBSCRIPTION_TIERS.free).trialAnalysesPerDay,
-      postTrialAnalysesPerWeek: (tier as typeof SUBSCRIPTION_TIERS.free).postTrialAnalysesPerWeek,
-    } : {};
-
     // Get price ID from server-side mapping
     const priceId = TIER_TO_PRICE[id as SubscriptionTierId] || null;
 
@@ -654,10 +643,11 @@ export function getSubscriptionTiers() {
       price: tier.price,
       priceId,
       features: tier.features,
-      analysesPerMonth: tier.analysesPerMonth,
-      leaderboardLimit: tier.leaderboardLimit,
+      leaderboardAccess: tier.leaderboardAccess,
+      votesPerDay: tier.votesPerDay,
+      priorityVotes: tier.priorityVotes,
+      tagline: tier.tagline,
       popular: tier.popular,
-      ...freeTierProps,
     };
   });
 }

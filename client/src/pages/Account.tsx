@@ -107,15 +107,23 @@ export default function Account() {
     window.location.href = "/";
   };
 
-  // Calculate usage percentage
-  const getUsagePercentage = () => {
-    if (status?.monthlyLimit && status.monthlyLimit > 0) {
-      return Math.min((status.monthlyUsed / status.monthlyLimit) * 100, 100);
+  // Calculate votes remaining (fallback calculation if field is missing)
+  const getVotesRemaining = () => {
+    if (typeof status?.votesRemaining === 'number') {
+      return status.votesRemaining;
     }
-    if (status?.dailyLimit && status.dailyLimit > 0) {
-      return Math.min((status.dailyUsed / status.dailyLimit) * 100, 100);
-    }
-    return 0;
+    // Fallback: calculate from votesPerDay - votesUsedToday
+    const perDay = status?.votesPerDay ?? 0;
+    const used = status?.votesUsedToday ?? 0;
+    return Math.max(0, perDay - used);
+  };
+
+  // Calculate vote remaining percentage (for progress bar)
+  const getVoteRemainingPercentage = () => {
+    const perDay = status?.votesPerDay ?? 0;
+    if (perDay <= 0) return 0;
+    const remaining = getVotesRemaining();
+    return Math.min((remaining / perDay) * 100, 100);
   };
 
   // Get tier color
@@ -254,61 +262,58 @@ export default function Account() {
                 )}
               </div>
 
-              {/* Usage Stats */}
+              {/* Votes Remaining */}
               <div className="p-4 rounded bg-black/30 border border-white/5">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-mono text-muted-foreground">
-                    {status.monthlyLimit ? "MONTHLY USAGE" : "DAILY USAGE"}
+                    VOTES REMAINING
                   </span>
                   <span className="text-sm font-mono font-bold">
-                    {status.monthlyLimit ? (
-                      <>{status.monthlyUsed} / {status.monthlyLimit}</>
-                    ) : status.dailyLimit ? (
-                      <>{status.dailyUsed} / {status.dailyLimit}</>
-                    ) : (
-                      "Unlimited"
-                    )}
+                    {getVotesRemaining()} / {status.votesPerDay ?? 0}
                   </span>
                 </div>
                 <Progress
-                  value={getUsagePercentage()}
+                  value={getVoteRemainingPercentage()}
                   className="h-2"
                 />
-                {status.monthlyRemaining !== null && status.monthlyRemaining <= 3 && (
-                  <p className="text-xs text-amber-400 font-mono mt-2 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {status.monthlyRemaining} analyses remaining this month
-                  </p>
-                )}
+                <p className="text-xs text-muted-foreground font-mono mt-2">
+                  {(status.votesUsedToday ?? 0) > 0 && (
+                    <span>{status.votesUsedToday} vote{status.votesUsedToday !== 1 ? 's' : ''} used today • </span>
+                  )}
+                  Resets at midnight EST
+                  {status.priorityVotes && (
+                    <span className="text-purple-400 ml-2">• Priority (2x weight)</span>
+                  )}
+                </p>
               </div>
 
-              {/* Trial Info */}
-              {status.tier === "free" && status.isInTrial && (
-                <div className="p-3 rounded border border-green-500/30 bg-green-500/10">
-                  <div className="flex items-center gap-2 text-green-400">
-                    <CheckCircle className="w-4 h-4" />
-                    <span className="font-mono text-sm">
-                      Trial active: {status.trialDaysRemaining} days remaining
+              {/* Plan Benefits - Only show for paid users */}
+              {status.tier !== 'free' && (
+                <div className="p-4 rounded bg-black/30 border border-white/5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CheckCircle className="w-4 h-4 text-green-400" />
+                    <span className="text-xs font-mono text-muted-foreground">
+                      PLAN BENEFITS
                     </span>
                   </div>
+                  <ul className="text-sm font-mono space-y-1 text-muted-foreground">
+                    <li className="flex items-center gap-2">
+                      <span className="text-green-400">✓</span> Unlimited leaderboard access
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="text-green-400">✓</span> Unlimited scorecard views
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="text-green-400">✓</span> Full search, filter & sort
+                    </li>
+                    {status.priorityVotes && (
+                      <li className="flex items-center gap-2">
+                        <span className="text-purple-400">★</span> <span className="text-purple-400">Priority votes (2x weight)</span>
+                      </li>
+                    )}
+                  </ul>
                 </div>
               )}
-
-              {/* Credit Balance */}
-              <div className="flex items-center justify-between p-3 rounded border border-primary/30 bg-primary/10">
-                <div>
-                  <span className="font-mono text-sm">Credit Balance</span>
-                  <p className="text-xs text-muted-foreground font-mono">Never expire</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="font-mono font-bold text-primary">{status.creditBalance} credits</span>
-                  <Link href="/pricing">
-                    <Button variant="outline" size="sm" className="font-mono text-xs">
-                      BUY MORE
-                    </Button>
-                  </Link>
-                </div>
-              </div>
 
               {/* Subscription Status Details */}
               {status.subscription?.cancelAtPeriodEnd && (

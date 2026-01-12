@@ -2,13 +2,19 @@
 
 ## What This App Is
 
-A web application that analyzes cryptocurrency tokens using a **4-LLM consensus engine** (ChatGPT, Claude, Gemini, Grok). The app applies game theory principles to evaluate tokens and provide trusted consensus scores, helping users avoid being "exit liquidity" in crypto markets.
+A **view-only** web application that displays cryptocurrency token analyses using a **4-LLM consensus engine** (ChatGPT, Claude, Gemini, Grok). The app applies game theory principles to evaluate tokens and provide trusted consensus scores, helping users avoid being "exit liquidity" in crypto markets.
 
 ### Core Value Proposition
 - 4 AI models analyze tokens independently
 - Models cross-validate each other's findings to eliminate bias
 - Final score (0-100) represents game-theoretic viability
 - Tiered scoring: S+ (85+), S (70-84), A (55-69), B (40-54), C (<40)
+
+### Business Model (View-Only + Voting)
+- **Users cannot run analyses directly** - analyses are curated by the platform
+- **Free users**: View top 10 ranked tokens + their scorecards
+- **Paid users**: Full leaderboard access + all scorecards
+- **Voting system**: Users vote for tokens they want analyzed; top voted get priority
 
 ---
 
@@ -107,26 +113,32 @@ To test without real payments, swap ALL Stripe credentials to test mode:
 ## Key Features & Current State
 
 ### Working Features
+- **View-only leaderboard** - Browse curated token analyses
+- **Access gating** - Free users see top 10, paid users see all
+- **Voting system** - Vote for tokens you want analyzed
 - Token search via CoinGecko proxy (supports name, symbol, contract address)
-- Gumloop pipeline integration (4-LLM analysis)
-- Analysis loading screen with 4 phases and time estimates
 - Scorecard display with full analysis results
 - **Clickable model cards** - Opens modal with verdict, reasoning, risks
 - Leaderboard with 7D/30D aggregated scores
-- Stripe subscription tiers (Free, Trader, Pro, Whale)
-- Credit pack purchases
+- Stripe subscription tiers (Free, Pro, Premium)
 - User authentication via Supabase
 - **Database retry logic** - Handles transient connection errors
 
-### Subscription Tiers
-| Tier | Monthly Analyses | Price |
-|------|------------------|-------|
-| Free | 1/week (post-trial) | $0 |
-| Trader | 25/month | $29 |
-| Pro | 100/month | $79 |
-| Whale | Unlimited | $199 |
+### Subscription Tiers (Access-Based)
+| Tier | Price | Leaderboard | Scorecards | Votes/Day | Priority |
+|------|-------|-------------|------------|-----------|----------|
+| Free | $0 | Top 10 only | Top 10 only | 1 | No |
+| Pro | $19/mo | Unlimited | Unlimited | 5 | No |
+| Premium | $49/mo | Unlimited | Unlimited | 15 | Yes (2x) |
 
-### Analysis Pipeline Phases
+### Voting System
+- Users search for any token and vote for it to be analyzed
+- Votes reset daily at midnight UTC
+- Premium users get **priority votes** that count 2x
+- Top voted tokens are analyzed by the platform periodically
+- Vote page shows: pending requests ranked by votes, recently analyzed
+
+### Analysis Pipeline Phases (Internal/Admin Only)
 1. **Collecting Data** (0-15%, ~7 min) - Market data & social signals
 2. **LLM Analysis** (15-55%, ~7 min) - 4 AI models in parallel
 3. **Cross-Validation** (55-80%, ~7 min) - Models check each other
@@ -134,9 +146,51 @@ To test without real payments, swap ALL Stripe credentials to test mode:
 
 ---
 
+## API Endpoints
+
+### Public Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/token/search` | GET | Search tokens via CoinGecko |
+| `/api/token/:id` | GET | Get token details |
+| `/api/leaderboard` | GET | Get leaderboard (gated by tier) |
+| `/api/leaderboard/stats` | GET | Leaderboard statistics |
+| `/api/filters` | GET | Filter options |
+
+### Analysis Endpoints (Access-Gated)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/analyze/:id` | GET | Get analysis by ID (checks tier access) |
+| `/api/analyze/token/:tokenId` | GET | Get analysis by token (checks tier access) |
+| `/api/analyze/:id/status` | GET | Get analysis status |
+
+### Voting Endpoints
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/api/vote/status` | GET | Optional | User's vote status (remaining, limits) |
+| `/api/vote/requests` | GET | No | List pending vote requests |
+| `/api/vote/top` | GET | No | Top voted pending tokens |
+| `/api/vote/recently-analyzed` | GET | No | Recently analyzed from votes |
+| `/api/vote` | POST | Required | Submit vote for a token |
+
+### Subscription Endpoints
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/api/subscription/status` | GET | Optional | User's subscription status |
+| `/api/subscription/tiers` | GET | No | Available tiers |
+| `/api/subscription/checkout` | POST | Required | Create Stripe checkout |
+| `/api/subscription/portal` | POST | Required | Open billing portal |
+
+### Discontinued Endpoints (Return 410)
+- `POST /api/analyze` - User-triggered analysis removed
+- `POST /api/analyze/:id/retry` - Retry removed
+- `POST /api/analyze/:id/cancel` - Cancel removed
+
+---
+
 ## Critical Implementation Details
 
-### Gumloop Integration (server/routes.ts)
+### Gumloop Integration (server/routes.ts - Internal Use Only)
 
 ```typescript
 // API URL format - user_id and saved_item_id are URL params, NOT body
@@ -431,9 +485,42 @@ When user clicks a model card:
 
 ### Key Tables (shared/schema.ts)
 - `token_analyses` - Token analysis results
-- `user_subscriptions` - User subscription data
-- `daily_usage` - Free tier usage tracking
-- `credit_purchases` - Credit pack purchases
+- `user_subscriptions` - User subscription data (tier, Stripe IDs)
+- `token_vote_requests` - Tokens users want analyzed
+- `token_votes` - Individual user votes
+- `user_daily_votes` - Daily vote tracking per user
+
+### Voting Tables
+
+#### token_vote_requests
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | serial | Primary key |
+| `token_id` | text | CoinGecko token ID |
+| `token_symbol` | text | Token symbol |
+| `token_name` | text | Token name |
+| `token_image` | text | Token image URL |
+| `vote_count` | integer | Regular votes |
+| `priority_vote_count` | integer | Premium votes (count 2x) |
+| `status` | text | pending, analyzed |
+| `analyzed_at` | timestamp | When analysis completed |
+| `analysis_id` | integer | FK to token_analyses |
+
+#### token_votes
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | serial | Primary key |
+| `user_id` | text | Supabase user ID |
+| `token_vote_request_id` | integer | FK to vote request |
+| `is_priority_vote` | boolean | Premium user vote |
+
+#### user_daily_votes
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | serial | Primary key |
+| `user_id` | text | Supabase user ID |
+| `date` | text | YYYY-MM-DD format |
+| `votes_used` | integer | Votes used today |
 
 ### Analysis Fields
 | Field | Type | Purpose |
@@ -475,16 +562,21 @@ All TanStack Query hooks have retry configuration:
 
 | File | Purpose |
 |------|---------|
-| `server/routes.ts` | All API endpoints, Gumloop integration, polling |
+| `server/routes.ts` | All API endpoints, Gumloop integration, voting, access gating |
 | `server/gumloop-parser.ts` | **Parses Gumloop text output** - OUTPUT SUMMARY, field normalization |
-| `server/storage.ts` | Database operations with retry wrapper |
+| `server/storage.ts` | Database operations with retry wrapper, voting methods |
 | `server/db.ts` | Connection pool, `withRetry()` utility |
-| `server/stripe.ts` | Subscription & credit billing logic |
-| `shared/schema.ts` | Drizzle schema, TypeScript interfaces |
-| `client/src/components/scorecard/ScoreCard.tsx` | Main analysis display + loading |
+| `server/stripe.ts` | Subscription billing (Pro/Premium tiers) |
+| `shared/schema.ts` | Drizzle schema, TypeScript interfaces, subscription tiers |
+| `client/src/pages/Vote.tsx` | **Voting page** - search, vote, view top requests |
+| `client/src/pages/Leaderboard.tsx` | Leaderboard with access gating |
+| `client/src/pages/Pricing.tsx` | Subscription tiers (Free/Pro/Premium) |
+| `client/src/components/scorecard/ScoreCard.tsx` | Main analysis display |
 | `client/src/components/scorecard/ModelAnalysisModal.tsx` | Per-model details modal |
-| `client/src/hooks/useAnalysis.ts` | Analysis fetching with polling |
+| `client/src/lib/api.ts` | API client including voting functions |
+| `client/src/hooks/useAnalysis.ts` | Analysis fetching |
 | `client/src/hooks/useLeaderboard.ts` | Leaderboard data hooks |
+| `migrations/0003_add_voting_tables.sql` | Voting tables migration |
 | `scripts/apply-indexes.sql` | Database performance indexes |
 
 ---
@@ -519,6 +611,270 @@ If deploying fresh or updating production, run:
 -- Add model analyses column (added 2026-01-09)
 ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS model_analyses JSONB;
 
+-- Voting tables (added 2026-01-10) - Run migrations/0003_add_voting_tables.sql
+CREATE TABLE IF NOT EXISTS "token_vote_requests" (
+  "id" serial PRIMARY KEY,
+  "token_id" text NOT NULL,
+  "token_symbol" text NOT NULL,
+  "token_name" text NOT NULL,
+  "token_image" text,
+  "vote_count" integer DEFAULT 0,
+  "priority_vote_count" integer DEFAULT 0,
+  "status" text DEFAULT 'pending',
+  "created_at" timestamp DEFAULT now(),
+  "analyzed_at" timestamp,
+  "analysis_id" integer
+);
+
+CREATE TABLE IF NOT EXISTS "token_votes" (
+  "id" serial PRIMARY KEY,
+  "user_id" text NOT NULL,
+  "token_vote_request_id" integer NOT NULL,
+  "is_priority_vote" boolean DEFAULT false,
+  "created_at" timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS "user_daily_votes" (
+  "id" serial PRIMARY KEY,
+  "user_id" text NOT NULL,
+  "date" text NOT NULL,
+  "votes_used" integer DEFAULT 0,
+  "created_at" timestamp DEFAULT now()
+);
+
+-- Voting indexes
+CREATE INDEX IF NOT EXISTS "idx_vote_requests_token_id" ON "token_vote_requests" ("token_id");
+CREATE INDEX IF NOT EXISTS "idx_vote_requests_status" ON "token_vote_requests" ("status");
+CREATE INDEX IF NOT EXISTS "idx_token_votes_user_id" ON "token_votes" ("user_id");
+CREATE INDEX IF NOT EXISTS "idx_user_daily_votes_user_date" ON "user_daily_votes" ("user_id", "date");
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_vote_requests_unique_token" ON "token_vote_requests" ("token_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_token_votes_unique_user_request" ON "token_votes" ("user_id", "token_vote_request_id");
+
 -- Apply performance indexes (scripts/apply-indexes.sql)
 -- Run the full script for optimal query performance
 ```
+
+## Stripe Configuration
+
+For the new subscription tiers, ensure these environment variables are set:
+```
+STRIPE_PRO_PRICE_ID=price_xxx      # $19/month Pro tier
+STRIPE_PREMIUM_PRICE_ID=price_xxx  # $49/month Premium tier
+```
+
+---
+
+## Recent Architecture Decisions (2026-01-10)
+
+### Leaderboard Data Aggregation
+
+The leaderboard aggregates multiple analyses per token into a single row:
+
+```typescript
+// From server/storage.ts getLeaderboard()
+interface AggregatedLeaderboardItem {
+  tokenId: string;
+  tokenSymbol: string;
+  tokenName: string;
+  tokenImage: string | null;
+  chain: string | null;
+  score7d: number;        // Average score over 7 days
+  score30d: number;       // Average score over 30 days
+  latestScore: number;    // Score from most recent analysis (NOT average)
+  latestTier: string;     // Tier from most recent analysis
+  latestNarrative: string | null;
+  latestRecommendation: string | null;
+  latestAnalysisId: number;
+  latestAnalysisDate: Date;
+  runs7d: number;         // Number of analyses in last 7 days
+  runs30d: number;        // Number of analyses in last 30 days
+  confidence: 'high' | 'medium' | 'low';  // Based on run count
+  tokenType: string;
+  asymmetryScore: number | null;
+}
+```
+
+### Admin System
+
+**Admin Detection:**
+- `ADMIN_EMAILS` environment variable contains comma-separated admin emails
+- `isAdminEmail()` in `server/auth.ts` checks against this list
+- `requireAdmin` middleware protects admin-only endpoints
+- `optionalAuth` sets `req.isAdmin` for conditional access
+
+**Admin Capabilities:**
+- Run analyses for any token (bypasses subscription limits)
+- View full leaderboard without access limits
+- View all analyses history
+- Reprocess existing analyses to fix missing fields
+- Sync stuck analyses with Gumloop
+
+**Admin Page (`/admin`):**
+- Three tabs: Run Analysis, Leaderboard, All Analyses
+- Uses same `LeaderboardTable` component as public leaderboard
+- Links include `?from=admin` for contextual navigation
+
+### Mobile Responsiveness Patterns
+
+**Tailwind Breakpoints Used:**
+- `sm:` = 640px+ (most common for mobile→tablet transition)
+- `md:` = 768px+ (for column layouts)
+- `lg:` = 1024px+ (for sidebar visibility)
+- `xl:` = 1280px+ (for extra decorations)
+
+**Common Mobile Patterns:**
+```tsx
+// Stacking layout
+className="flex flex-col sm:flex-row"
+
+// Hide on mobile
+className="hidden sm:inline"
+
+// Full width on mobile
+className="w-full sm:w-auto"
+
+// Responsive grid
+className="grid grid-cols-2 sm:flex sm:flex-wrap"
+
+// Responsive text
+className="text-xs sm:text-sm"
+
+// Responsive spacing
+className="gap-2 sm:gap-4 px-3 sm:px-4"
+```
+
+**LeaderboardTable Column Visibility:**
+- Always visible: Rank, Token, Score, Tier
+- `hidden sm:table-cell`: Type, Signal, Latest
+- `hidden md:table-cell`: Runs
+- `hidden lg:table-cell`: Asymmetry
+- `hidden xl:table-cell`: Narrative
+
+### Fixed UI Elements (Bottom of Screen)
+
+Two fixed bars at bottom:
+1. **Disclaimer Bar** (bottom-10): "NOT FINANCIAL ADVICE" warning
+2. **Cyber Status Bar** (bottom-0): System status, LLM indicators, usage
+
+Main content has `pb-24` padding to account for these.
+
+---
+
+## Component Architecture
+
+### Key Components & Their Responsibilities
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `Layout` | `client/src/components/common/Layout.tsx` | Global nav, status bars, auth modal |
+| `LeaderboardTable` | `client/src/components/leaderboard/LeaderboardTable.tsx` | Sortable token table with access gating |
+| `ScoreCard` | `client/src/components/scorecard/ScoreCard.tsx` | Full analysis display |
+| `ModelAnalysisModal` | `client/src/components/scorecard/ModelAnalysisModal.tsx` | Per-model verdict/reasoning popup |
+| `TokenSearch` | `client/src/components/search/TokenSearch.tsx` | CoinGecko-powered token search |
+| `AuthModal` | `client/src/components/auth/AuthModal.tsx` | Sign in/sign up modal |
+
+### Context Providers
+
+| Context | Location | Purpose |
+|---------|----------|---------|
+| `AuthContext` | `client/src/contexts/AuthContext.tsx` | Supabase auth state |
+| `AnalysisTrackerContext` | `client/src/contexts/AnalysisTrackerContext.tsx` | Track running analyses |
+
+### Custom Hooks
+
+| Hook | Location | Purpose |
+|------|----------|---------|
+| `useAnalysis` | `client/src/hooks/useAnalysis.ts` | Fetch single analysis with polling |
+| `useTokenStats` | `client/src/hooks/useAnalysis.ts` | Aggregate stats for a token |
+| `useLeaderboard` | `client/src/hooks/useLeaderboard.ts` | Leaderboard data with filters |
+| `useSubscriptionStatus` | `client/src/hooks/useSubscription.ts` | User's current tier and limits |
+
+---
+
+## Common Tasks for New Agent
+
+### Adding a New Field to Analysis
+
+1. **Parser** (`server/gumloop-parser.ts`):
+   - Add field to `ParsedGumloopResponse` interface
+   - Add field aliases to `FIELD_ALIASES` map
+   - Field will be auto-extracted from OUTPUT SUMMARY
+
+2. **Schema** (`shared/schema.ts`):
+   - Add column to `tokenAnalyses` table definition
+   - Add field to `TokenAnalysis` type if needed
+
+3. **Routes** (`server/routes.ts`):
+   - Add field to `processGumloopCompletion()` update object
+
+4. **ScoreCard** (`client/src/components/scorecard/ScoreCard.tsx`):
+   - Add display logic for the new field
+
+5. **Migration**:
+   - Run `ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS field_name TYPE;`
+
+### Adding a New Page
+
+1. Create page component in `client/src/pages/`
+2. Add route in `client/src/App.tsx`
+3. Add navigation link in `Layout.tsx` if needed
+
+### Modifying Leaderboard Display
+
+- Columns: Edit `LeaderboardTable.tsx`
+- Filters: Edit `Leaderboard.tsx` filter section
+- Aggregation: Edit `storage.ts` `getLeaderboard()` method
+- Stats: Edit `storage.ts` `getLeaderboardStats()` method
+
+### Testing Changes
+
+```bash
+# TypeScript check
+npx tsc --noEmit
+
+# Development server
+npm run dev
+
+# Production build
+npm run build
+```
+
+---
+
+## Known Issues & Workarounds
+
+### Gumloop OUTPUT SUMMARY Variations
+The LLM sometimes formats the OUTPUT SUMMARY differently. The parser handles:
+- `#OUTPUT SUMMARY`
+- `**OUTPUT SUMMARY**`
+- `---OUTPUT SUMMARY---`
+- Block of consecutive `field: value` lines at end of text
+
+### Database Connection Drops
+Neon/Postgres occasionally drops connections. The `withRetry()` wrapper in `db.ts` handles this with exponential backoff.
+
+### CoinGecko Rate Limits
+Token search and details endpoints proxy through our server to avoid CORS and manage rate limits. Heavy usage may hit CoinGecko limits.
+
+### Stripe Webhook Reliability
+Webhooks occasionally fail. The Gumloop sync polling (`syncStuckAnalysesWithGumloop`) runs every 2 minutes as a fallback.
+
+---
+
+## Environment Variable Reference
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `DATABASE_URL` | Yes | Neon PostgreSQL connection |
+| `SUPABASE_URL` | Yes | Supabase project URL |
+| `SUPABASE_ANON_KEY` | Yes | Supabase anonymous key |
+| `GUMLOOP_API_KEY` | Yes | Gumloop authentication |
+| `GUMLOOP_PIPELINE_ID` | Yes | Saved pipeline ID |
+| `GUMLOOP_USER_ID` | Yes | Gumloop user ID |
+| `STRIPE_SECRET_KEY` | Yes | Stripe secret key |
+| `STRIPE_WEBHOOK_SECRET` | Yes | Webhook signature verification |
+| `VITE_STRIPE_PUBLIC_KEY` | Yes | Stripe publishable key (frontend) |
+| `STRIPE_PRO_PRICE_ID` | Yes | Pro tier price ID |
+| `STRIPE_PREMIUM_PRICE_ID` | Yes | Premium tier price ID |
+| `ADMIN_EMAILS` | No | Comma-separated admin emails |
+| `REDIS_URL` | No | Redis for rate limiting (optional) |

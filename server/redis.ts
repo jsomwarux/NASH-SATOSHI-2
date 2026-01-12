@@ -150,72 +150,105 @@ export async function checkRateLimit(
 }
 
 // Distributed Gumloop request throttling
-// Uses a queue-based approach to serialize requests and prevent rate limiting
+// Uses atomic Redis INCRBY to assign unique execution slots
 
-// In-memory queue for when Redis isn't available
-// Uses a simple counter-based approach to avoid race conditions
-let gumloopSlotCounter = 0;
-let gumloopBaseTime = Date.now();
-const GUMLOOP_INTERVAL_MS = 2500; // 2.5 seconds between requests
+// Gumloop rate limit: 1 request per 3 seconds to be safe
+const GUMLOOP_INTERVAL_MS = 3000;
+
+// In-memory mutex for when Redis isn't available
+let inMemoryNextTime = 0;
+let inMemoryMutex = Promise.resolve();
 
 export async function waitForGumloopSlot(): Promise<void> {
   const client = getRedis();
 
-  // Get my slot number atomically (works for both Redis and non-Redis)
-  const mySlot = ++gumloopSlotCounter;
-
-  // Reset counter periodically to prevent overflow
-  if (mySlot > 1000) {
-    gumloopSlotCounter = 1;
-    gumloopBaseTime = Date.now();
-  }
-
   if (!client) {
-    // Calculate when my slot should execute
-    const myScheduledTime = gumloopBaseTime + (mySlot - 1) * GUMLOOP_INTERVAL_MS;
-    const now = Date.now();
+    // In-memory approach: use a mutex to serialize access
+    const myTurn = inMemoryMutex.then(async () => {
+      const now = Date.now();
+      const waitUntil = Math.max(now, inMemoryNextTime);
+      inMemoryNextTime = waitUntil + GUMLOOP_INTERVAL_MS;
 
-    if (myScheduledTime > now) {
-      const waitTime = myScheduledTime - now;
-      console.log(`Gumloop queue: slot ${mySlot}, waiting ${waitTime}ms`);
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
-    } else {
-      // We're behind schedule, update base time
-      gumloopBaseTime = now - (mySlot - 1) * GUMLOOP_INTERVAL_MS;
-    }
-    return;
+      if (waitUntil > now) {
+        const waitTime = waitUntil - now;
+        console.log(`Gumloop queue: in-memory wait ${waitTime}ms`);
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+      } else {
+        console.log(`Gumloop queue: in-memory executing immediately`);
+      }
+    });
+
+    // Chain subsequent requests
+    inMemoryMutex = myTurn.catch(() => {});
+    return myTurn;
   }
 
-  const key = CACHE_KEYS.GUMLOOP_LAST_REQUEST;
-  const slotKey = `${key}:slot`;
+  // Redis-based distributed queue
+  const nextTimeKey = CACHE_KEYS.GUMLOOP_LAST_REQUEST + ":nextslot";
 
   try {
-    // Use atomic increment to get a unique slot number across all instances
-    const redisSlot = await client.incr(slotKey);
-    await client.expire(slotKey, 300); // Reset after 5 minutes of inactivity
-
-    // Get or set the base time
-    let baseTime = await client.get<number>(key);
-    if (!baseTime) {
-      baseTime = Date.now();
-      await client.set(key, baseTime, { ex: 300 });
-    }
-
-    // Calculate when this slot should execute
-    const myScheduledTime = baseTime + (redisSlot - 1) * GUMLOOP_INTERVAL_MS;
     const now = Date.now();
+    const initialValue = now + GUMLOOP_INTERVAL_MS;
 
-    if (myScheduledTime > now) {
-      const waitTime = myScheduledTime - now;
-      console.log(`Gumloop queue: Redis slot ${redisSlot}, waiting ${waitTime}ms`);
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    // Step 1: Try to initialize the key atomically with SETNX
+    // This only succeeds if the key doesn't exist
+    const wasSet = await client.setnx(nextTimeKey, initialValue);
+
+    if (wasSet) {
+      // We successfully initialized the queue - we're first, execute immediately
+      await client.expire(nextTimeKey, 600);
+      console.log(`Gumloop queue: first in queue, executing immediately`);
+      return;
     }
+
+    // Step 2: Key exists - check if it's stale and needs reset
+    const currentValue = await client.get<number>(nextTimeKey);
+
+    if (!currentValue || currentValue < now - 30000) {
+      // Queue is stale (more than 30 seconds old) - delete and re-initialize
+      await client.del(nextTimeKey);
+
+      // Try SETNX again - this ensures only one request gets the first slot
+      const wasSetAfterDelete = await client.setnx(nextTimeKey, initialValue);
+      if (wasSetAfterDelete) {
+        await client.expire(nextTimeKey, 600);
+        console.log(`Gumloop queue: reset stale queue, executing immediately`);
+        return;
+      }
+      // Someone else reset it - fall through to claim a slot via INCRBY
+      console.log(`Gumloop queue: another request reset queue, claiming slot`);
+    }
+
+    // Step 3: Queue is active - claim our slot using atomic INCRBY
+    const afterIncr = await client.incrby(nextTimeKey, GUMLOOP_INTERVAL_MS);
+    await client.expire(nextTimeKey, 600);
+
+    // Our execution time is the value BEFORE we added
+    const myExecutionTime = afterIncr - GUMLOOP_INTERVAL_MS;
+
+    // Step 4: Wait for our assigned slot
+    if (myExecutionTime > now) {
+      const waitTime = myExecutionTime - now;
+
+      // Cap the wait time at 2 minutes
+      if (waitTime > 120000) {
+        console.log(`Gumloop queue: queue too long (${Math.round(waitTime/1000)}s), capping at 2min`);
+        await new Promise((resolve) => setTimeout(resolve, 120000));
+        return;
+      }
+
+      console.log(`Gumloop queue: waiting ${Math.round(waitTime/1000)}s for slot`);
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    } else {
+      console.log(`Gumloop queue: slot ready, executing`);
+    }
+
   } catch (error) {
     console.error("Gumloop rate limit error:", error);
-    // Fallback to slot-based delay
-    const waitTime = mySlot * GUMLOOP_INTERVAL_MS;
-    console.log(`Gumloop queue: fallback slot ${mySlot}, waiting ${waitTime}ms`);
-    await new Promise((resolve) => setTimeout(resolve, waitTime));
+    // Fallback: wait a random interval to spread out retries
+    const randomWait = GUMLOOP_INTERVAL_MS + Math.random() * GUMLOOP_INTERVAL_MS;
+    console.log(`Gumloop queue: error fallback, waiting ${Math.round(randomWait)}ms`);
+    await new Promise((resolve) => setTimeout(resolve, randomWait));
   }
 }
 

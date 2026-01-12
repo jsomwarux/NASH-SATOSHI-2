@@ -1,7 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database, Crown, Flame, Award } from "lucide-react";
+import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database, Crown, Flame, Award, Sparkles, Lock, TrendingUp } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { LeaderboardTable } from "@/components/leaderboard/LeaderboardTable";
 import { Button } from "@/components/ui/button";
@@ -15,10 +15,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useLeaderboard, useFilterOptions, useLeaderboardStats } from "@/hooks/useLeaderboard";
+import { usePerformanceMetrics } from "@/hooks/usePerformance";
 import type { LeaderboardFilters } from "@shared/schema";
 import { formatScore } from "@/lib/utils";
 
-type SortField = "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "recommendation";
+type SortField = "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "upsideTier";
 type SortOrder = "asc" | "desc";
 
 export default function Leaderboard() {
@@ -43,6 +44,7 @@ export default function Leaderboard() {
 
   const { data: filterOptions } = useFilterOptions();
   const { data: leaderboardStats } = useLeaderboardStats();
+  const { data: performanceMetrics } = usePerformanceMetrics();
 
   const handleSort = (field: SortField) => {
     if (field === sortBy) {
@@ -59,6 +61,29 @@ export default function Leaderboard() {
   };
 
   const hasActiveFilters = Object.values(filters).some(v => v) || searchQuery;
+
+  // Check if user can use advanced features (sorting/filtering)
+  const canUseAdvancedFeatures = data?.isPremium ?? false;
+
+  // Reset filters/sorting if user is not premium
+  useEffect(() => {
+    if (data && !data.isPremium) {
+      // Reset to default sort for free users
+      if (sortBy !== "score7d" || order !== "desc") {
+        setSortBy("score7d");
+        setOrder("desc");
+      }
+      // Clear any filters
+      if (hasActiveFilters) {
+        setFilters({});
+        setSearchQuery("");
+      }
+      // Close filter panel
+      if (showFilters) {
+        setShowFilters(false);
+      }
+    }
+  }, [data?.isPremium]);
 
   // Stats calculations
   const stats = useMemo(() => {
@@ -101,88 +126,177 @@ export default function Leaderboard() {
               </p>
             </div>
 
-            <Link href="/">
+            <Link href="/vote">
               <Button className="neon-button font-mono tracking-wider">
-                <Search className="w-4 h-4 mr-2" />
-                ANALYZE_NEW
+                <Sparkles className="w-4 h-4 mr-2" />
+                VOTE_FOR_TOKENS
               </Button>
             </Link>
           </div>
         </motion.div>
 
-        {/* Stats Summary */}
+        {/* Stats Summary - 4 cards across */}
         {(stats || leaderboardStats) && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8"
+            className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-2"
           >
-            {/* Total Tokens */}
-            <div className="cyber-card p-4 rounded border border-primary/20">
-              <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider flex items-center gap-1">
-                <Database className="w-3 h-3" />
-                UNIQUE_TOKENS
+            {/* Performance Summary - Combined metrics in one card */}
+            <div className="cyber-card p-4 rounded border border-cyan-500/20">
+              <div className="text-[10px] font-mono text-muted-foreground mb-2 tracking-wider flex items-center gap-1">
+                <TrendingUp className="w-3 h-3" />
+                PERFORMANCE
               </div>
-              <div className="text-2xl font-bold font-mono text-primary">{stats?.totalTokens || 0}</div>
+              <div className="space-y-2">
+                {/* Top 10 Avg 7D */}
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-muted-foreground font-mono">7D Avg</span>
+                  {performanceMetrics?.top10Avg7dReturn !== null && performanceMetrics?.top10Avg7dReturn !== undefined ? (
+                    <span className={`text-sm font-bold font-mono ${performanceMetrics.top10Avg7dReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {performanceMetrics.top10Avg7dReturn >= 0 ? '+' : ''}{performanceMetrics.top10Avg7dReturn.toFixed(1)}%
+                    </span>
+                  ) : (
+                    <span className="text-sm font-bold font-mono text-muted-foreground">—</span>
+                  )}
+                </div>
+                {/* Top 10 Avg 30D */}
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-muted-foreground font-mono">30D Avg</span>
+                  {performanceMetrics?.top10Avg30dReturn !== null && performanceMetrics?.top10Avg30dReturn !== undefined ? (
+                    <span className={`text-sm font-bold font-mono ${performanceMetrics.top10Avg30dReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {performanceMetrics.top10Avg30dReturn >= 0 ? '+' : ''}{performanceMetrics.top10Avg30dReturn.toFixed(1)}%
+                    </span>
+                  ) : (
+                    <span className="text-sm font-bold font-mono text-muted-foreground">—</span>
+                  )}
+                </div>
+                {/* Hit Rate */}
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-muted-foreground font-mono">Hit Rate</span>
+                  {performanceMetrics?.hitRate30d !== null && performanceMetrics?.hitRate30d !== undefined ? (
+                    <span className="text-sm font-bold font-mono text-primary">
+                      {performanceMetrics.hitRate30d.toFixed(0)}%
+                    </span>
+                  ) : (
+                    <span className="text-sm font-bold font-mono text-muted-foreground">—</span>
+                  )}
+                </div>
+              </div>
             </div>
 
-            {/* #1 Token Dominance */}
+            {/* Top 3 Ranked Tokens */}
             <div className="cyber-card p-4 rounded border border-purple-500/20">
-              <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider flex items-center gap-1">
+              <div className="text-[10px] font-mono text-muted-foreground mb-2 tracking-wider flex items-center gap-1">
                 <Crown className="w-3 h-3" />
                 TOP_RANKED
               </div>
-              {leaderboardStats?.topToken ? (
-                <div>
-                  <div className="text-lg font-bold font-mono text-purple-400 truncate">
-                    ${leaderboardStats.topToken.symbol}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground font-mono">
-                    {leaderboardStats.topToken.daysOnLeaderboard}d on board
-                  </div>
+              {leaderboardStats?.topTokens && leaderboardStats.topTokens.length > 0 ? (
+                <div className="space-y-1">
+                  {leaderboardStats.topTokens.map((token, index) => {
+                    const isFirst = index === 0;
+                    const isSecond = index === 1;
+                    const textSize = isFirst ? 'text-base' : isSecond ? 'text-sm' : 'text-xs';
+                    const opacity = isFirst ? '' : isSecond ? 'opacity-85' : 'opacity-70';
+
+                    return (
+                      <div key={token.symbol} className={`flex items-center justify-between gap-2 ${opacity}`}>
+                        <div className="flex items-center gap-1 min-w-0">
+                          <span className={`font-mono text-purple-400/50 ${textSize} flex-shrink-0`}>#{index + 1}</span>
+                          <span className={`font-bold font-mono text-purple-400 ${textSize} truncate`}>
+                            ${token.symbol}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className={`${isFirst ? 'text-xs' : 'text-[10px]'} text-muted-foreground font-mono`}>
+                            {token.daysInTop3}d
+                          </span>
+                          <span className={`${isFirst ? 'text-xs' : 'text-[10px]'} text-purple-400/70 font-mono font-bold`}>
+                            {formatScore(token.score)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-lg font-bold font-mono text-muted-foreground">—</div>
               )}
             </div>
 
-            {/* Top Narrative */}
+            {/* Hot Narratives - Top 3 */}
             <div className="cyber-card p-4 rounded border border-orange-500/20">
-              <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider flex items-center gap-1">
+              <div className="text-[10px] font-mono text-muted-foreground mb-2 tracking-wider flex items-center gap-1">
                 <Flame className="w-3 h-3" />
-                HOT_NARRATIVE
+                HOT_NARRATIVES
               </div>
-              {leaderboardStats?.topNarrative ? (
-                <div>
-                  <div className="text-lg font-bold font-mono text-orange-400 truncate" title={leaderboardStats.topNarrative.narrative}>
-                    {leaderboardStats.topNarrative.narrative.length > 12
-                      ? leaderboardStats.topNarrative.narrative.slice(0, 12) + "…"
-                      : leaderboardStats.topNarrative.narrative}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground font-mono">
-                    avg {formatScore(leaderboardStats.topNarrative.avgScore)} • {leaderboardStats.topNarrative.tokenCount} tokens
-                  </div>
+              {leaderboardStats?.topNarratives && leaderboardStats.topNarratives.length > 0 ? (
+                <div className="space-y-1">
+                  {leaderboardStats.topNarratives.map((narrative, index) => {
+                    const isFirst = index === 0;
+                    const isSecond = index === 1;
+                    const textSize = isFirst ? 'text-base' : isSecond ? 'text-sm' : 'text-xs';
+                    const opacity = isFirst ? '' : isSecond ? 'opacity-85' : 'opacity-70';
+
+                    return (
+                      <div key={narrative.narrative} className={`flex items-center justify-between gap-2 ${opacity}`}>
+                        <div className="flex items-center gap-1 min-w-0">
+                          <span className={`font-mono text-orange-400/50 ${textSize} flex-shrink-0`}>#{index + 1}</span>
+                          <span
+                            className={`font-bold font-mono text-orange-400 ${textSize} truncate`}
+                            title={narrative.narrative}
+                          >
+                            {narrative.narrative.length > 8
+                              ? narrative.narrative.slice(0, 8) + "…"
+                              : narrative.narrative}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className={`${isFirst ? 'text-xs' : 'text-[10px]'} text-muted-foreground font-mono`}>
+                            {narrative.tokenCount}
+                          </span>
+                          <span className={`${isFirst ? 'text-xs' : 'text-[10px]'} text-orange-400/70 font-mono font-bold`}>
+                            {formatScore(narrative.avgScore)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-lg font-bold font-mono text-muted-foreground">—</div>
               )}
             </div>
 
-            {/* 24H Winner */}
+            {/* 7D Winners - Top 3 */}
             <div className="cyber-card p-4 rounded border border-green-500/20">
-              <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-wider flex items-center gap-1">
+              <div className="text-[10px] font-mono text-muted-foreground mb-2 tracking-wider flex items-center gap-1">
                 <Award className="w-3 h-3" />
-                24H_WINNER
+                7D_WINNERS
               </div>
-              {leaderboardStats?.winner24h ? (
-                <div>
-                  <div className="text-lg font-bold font-mono text-green-400 truncate">
-                    ${leaderboardStats.winner24h.symbol}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground font-mono">
-                    score {formatScore(leaderboardStats.winner24h.score)}
-                  </div>
+              {leaderboardStats?.winners7d && leaderboardStats.winners7d.length > 0 ? (
+                <div className="space-y-1">
+                  {leaderboardStats.winners7d.map((winner, index) => {
+                    const isFirst = index === 0;
+                    const isSecond = index === 1;
+                    const textSize = isFirst ? 'text-base' : isSecond ? 'text-sm' : 'text-xs';
+                    const opacity = isFirst ? '' : isSecond ? 'opacity-85' : 'opacity-70';
+
+                    return (
+                      <div key={`${winner.symbol}-${index}`} className={`flex items-center justify-between gap-2 ${opacity}`}>
+                        <div className="flex items-center gap-1 min-w-0">
+                          <span className={`font-mono text-green-400/50 ${textSize} flex-shrink-0`}>#{index + 1}</span>
+                          <span className={`font-bold font-mono text-green-400 ${textSize} truncate`}>
+                            ${winner.symbol}
+                          </span>
+                        </div>
+                        <span className={`${isFirst ? 'text-xs' : 'text-[10px]'} text-green-400/70 font-mono font-bold flex-shrink-0`}>
+                          {formatScore(winner.score)}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-lg font-bold font-mono text-muted-foreground">—</div>
@@ -190,6 +304,11 @@ export default function Leaderboard() {
             </div>
           </motion.div>
         )}
+
+        {/* Disclaimer */}
+        <p className="text-[10px] text-muted-foreground text-center mb-8 font-mono">
+          Past performance does not guarantee future results. Returns require 7+ days of price history.
+        </p>
 
         {/* Search and Filters */}
         <motion.div
@@ -200,19 +319,26 @@ export default function Leaderboard() {
         >
           <div className="flex flex-col sm:flex-row gap-4">
             {/* Search Input */}
-            <div className="relative flex-1 cyber-card rounded border border-primary/20 overflow-hidden">
+            <div className={`relative flex-1 cyber-card rounded border overflow-hidden ${canUseAdvancedFeatures ? 'border-primary/20' : 'border-muted/30 opacity-60'}`}>
               <div className="flex items-center gap-2 px-3 py-1.5 border-b border-primary/10 bg-primary/5">
-                <Scan className="w-3 h-3 text-primary" />
-                <span className="text-[10px] font-mono text-primary tracking-wider">SEARCH</span>
+                {canUseAdvancedFeatures ? (
+                  <Scan className="w-3 h-3 text-primary" />
+                ) : (
+                  <Lock className="w-3 h-3 text-muted-foreground" />
+                )}
+                <span className={`text-[10px] font-mono tracking-wider ${canUseAdvancedFeatures ? 'text-primary' : 'text-muted-foreground'}`}>
+                  {canUseAdvancedFeatures ? 'SEARCH' : 'SEARCH (PRO)'}
+                </span>
               </div>
               <div className="flex items-center">
-                <span className="pl-3 text-primary font-mono">&gt;</span>
+                <span className={`pl-3 font-mono ${canUseAdvancedFeatures ? 'text-primary' : 'text-muted-foreground'}`}>&gt;</span>
                 <Input
                   type="text"
-                  placeholder="Enter ticker or name..."
+                  placeholder={canUseAdvancedFeatures ? "Enter ticker or name..." : "Upgrade to search..."}
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="border-0 bg-transparent font-mono focus-visible:ring-0"
+                  onChange={(e) => canUseAdvancedFeatures && setSearchQuery(e.target.value)}
+                  disabled={!canUseAdvancedFeatures}
+                  className="border-0 bg-transparent font-mono focus-visible:ring-0 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
@@ -220,12 +346,17 @@ export default function Leaderboard() {
             {/* Filter Toggle */}
             <Button
               variant={showFilters ? "default" : "outline"}
-              onClick={() => setShowFilters(!showFilters)}
-              className="gap-2 font-mono tracking-wider"
+              onClick={() => canUseAdvancedFeatures && setShowFilters(!showFilters)}
+              disabled={!canUseAdvancedFeatures}
+              className={`gap-2 font-mono tracking-wider ${!canUseAdvancedFeatures ? 'opacity-60' : ''}`}
             >
-              <Filter className="w-4 h-4" />
-              FILTERS
-              {hasActiveFilters && (
+              {canUseAdvancedFeatures ? (
+                <Filter className="w-4 h-4" />
+              ) : (
+                <Lock className="w-4 h-4" />
+              )}
+              {canUseAdvancedFeatures ? 'FILTERS' : 'FILTERS (PRO)'}
+              {hasActiveFilters && canUseAdvancedFeatures && (
                 <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs font-mono">
                   {Object.values(filters).filter(v => v).length + (searchQuery ? 1 : 0)}
                 </Badge>
@@ -233,7 +364,7 @@ export default function Leaderboard() {
             </Button>
 
             {/* Clear Filters */}
-            {hasActiveFilters && (
+            {hasActiveFilters && canUseAdvancedFeatures && (
               <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-1 font-mono text-xs">
                 <X className="w-4 h-4" />
                 CLEAR
@@ -247,16 +378,16 @@ export default function Leaderboard() {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
-              className="flex flex-wrap gap-4 p-4 rounded cyber-card border border-primary/20"
+              className="grid grid-cols-2 sm:flex sm:flex-wrap gap-3 sm:gap-4 p-4 rounded cyber-card border border-primary/20"
             >
               {/* Tier Filter */}
-              <div className="w-40">
+              <div className="min-w-0 sm:w-40">
                 <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">TIER</label>
                 <Select
                   value={filters.tier || "all"}
                   onValueChange={(value) => setFilters(f => ({ ...f, tier: value === "all" ? undefined : value }))}
                 >
-                  <SelectTrigger className="bg-background/50 border-primary/20 font-mono">
+                  <SelectTrigger className="bg-background/50 border-primary/20 font-mono text-xs sm:text-sm">
                     <SelectValue placeholder="All tiers" />
                   </SelectTrigger>
                   <SelectContent>
@@ -278,13 +409,13 @@ export default function Leaderboard() {
 
               {/* Narrative Filter */}
               {filterOptions?.narratives && filterOptions.narratives.length > 0 && (
-                <div className="w-48">
+                <div className="min-w-0 sm:w-48">
                   <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">NARRATIVE</label>
                   <Select
                     value={filters.narrative || "all"}
                     onValueChange={(value) => setFilters(f => ({ ...f, narrative: value === "all" ? undefined : value }))}
                   >
-                    <SelectTrigger className="bg-background/50 border-primary/20 font-mono">
+                    <SelectTrigger className="bg-background/50 border-primary/20 font-mono text-xs sm:text-sm">
                       <SelectValue placeholder="All narratives" />
                     </SelectTrigger>
                     <SelectContent>
@@ -299,13 +430,13 @@ export default function Leaderboard() {
 
               {/* Chain Filter */}
               {filterOptions?.chains && filterOptions.chains.length > 0 && (
-                <div className="w-40">
+                <div className="min-w-0 sm:w-40">
                   <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">CHAIN</label>
                   <Select
                     value={filters.chain || "all"}
                     onValueChange={(value) => setFilters(f => ({ ...f, chain: value === "all" ? undefined : value }))}
                   >
-                    <SelectTrigger className="bg-background/50 border-primary/20 font-mono">
+                    <SelectTrigger className="bg-background/50 border-primary/20 font-mono text-xs sm:text-sm">
                       <SelectValue placeholder="All chains" />
                     </SelectTrigger>
                     <SelectContent>
@@ -319,13 +450,13 @@ export default function Leaderboard() {
               )}
 
               {/* Token Type Filter */}
-              <div className="w-40">
+              <div className="min-w-0 sm:w-40">
                 <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">TYPE</label>
                 <Select
                   value={filters.tokenType || "all"}
                   onValueChange={(value) => setFilters(f => ({ ...f, tokenType: value === "all" ? undefined : value }))}
                 >
-                  <SelectTrigger className="bg-background/50 border-primary/20 font-mono">
+                  <SelectTrigger className="bg-background/50 border-primary/20 font-mono text-xs sm:text-sm">
                     <SelectValue placeholder="All types" />
                   </SelectTrigger>
                   <SelectContent>
@@ -337,13 +468,13 @@ export default function Leaderboard() {
               </div>
 
               {/* FDV Tier Filter */}
-              <div className="w-48">
+              <div className="col-span-2 sm:col-span-1 min-w-0 sm:w-48">
                 <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">FDV</label>
                 <Select
                   value={filters.marketCapTier || "all"}
                   onValueChange={(value) => setFilters(f => ({ ...f, marketCapTier: value === "all" ? undefined : value }))}
                 >
-                  <SelectTrigger className="bg-background/50 border-primary/20 font-mono">
+                  <SelectTrigger className="bg-background/50 border-primary/20 font-mono text-xs sm:text-sm">
                     <SelectValue placeholder="All FDVs" />
                   </SelectTrigger>
                   <SelectContent>
@@ -356,6 +487,28 @@ export default function Leaderboard() {
                     <SelectItem value="small">Small ($15M-$50M)</SelectItem>
                     <SelectItem value="micro">Micro ($5M-$15M)</SelectItem>
                     <SelectItem value="nano">Nano (&lt;$5M)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Upside Tier Filter */}
+              <div className="min-w-0">
+                <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">UPSIDE</label>
+                <Select
+                  value={filters.upsideTier || "all"}
+                  onValueChange={(value) => setFilters(f => ({ ...f, upsideTier: value === "all" ? undefined : value }))}
+                >
+                  <SelectTrigger className="bg-background/50 border-primary/20 font-mono text-xs sm:text-sm">
+                    <SelectValue placeholder="All" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Upside</SelectItem>
+                    <SelectItem value="100x+">100x+</SelectItem>
+                    <SelectItem value="50-100x">50-100x</SelectItem>
+                    <SelectItem value="25-50x">25-50x</SelectItem>
+                    <SelectItem value="10-25x">10-25x</SelectItem>
+                    <SelectItem value="5-10x">5-10x</SelectItem>
+                    <SelectItem value="<5x">&lt;5x</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -446,6 +599,9 @@ export default function Leaderboard() {
               sortBy={sortBy}
               order={order}
               onSort={handleSort}
+              accessLimit={data.accessLimit}
+              totalTokens={data.total}
+              canSort={canUseAdvancedFeatures}
             />
 
             {/* Pagination info */}

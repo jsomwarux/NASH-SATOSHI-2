@@ -19,8 +19,12 @@ export interface AggregatedLeaderboardItem {
   latestRecommendation: string | null; // BUY, HOLD, AVOID
   latestAnalysisId: number;
   latestAnalysisDate: string; // ISO date string from API
+  latestScore: number; // Score from the most recent analysis
   // Token type and asymmetry
   tokenType: 'UTILITY' | 'MEMECOIN' | null;
   asymmetryScore: number | null;
   marketCapTier: 'mega' | 'large' | 'mid' | 'small' | null;
+  // Upside potential
+  upsideTier: '<5x' | '5-10x' | '10-25x' | '25-50x' | '50-100x' | '100x+' | null;
+  upsideMultiple: string | null; // e.g., "10x", "50x", "100x"
 }

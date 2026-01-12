@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { BarChart3, Home, History, Terminal, Cpu, Wifi, Shield, Loader2, Crown, User, LogOut, CreditCard, ChevronDown } from "lucide-react";
+import { BarChart3, Home, Vote, Terminal, Cpu, Wifi, Shield, Loader2, Crown, User, LogOut, CreditCard, ChevronDown, AlertTriangle } from "lucide-react";
 import { CyberBackground } from "../CyberBackground";
 import { useAnalysisTracker } from "@/contexts/AnalysisTrackerContext";
 import { useSubscriptionStatus, useCreateBillingPortal } from "@/hooks/useSubscription";
@@ -58,7 +58,7 @@ export function Layout({ children }: LayoutProps) {
   const navLinks = [
     { href: "/", label: "HOME", icon: Home },
     { href: "/leaderboard", label: "LEADERBOARD", icon: BarChart3 },
-    { href: "/analyses", label: "HISTORY", icon: History },
+    { href: "/vote", label: "VOTE", icon: Vote },
     { href: "/pricing", label: "PRICING", icon: Crown },
   ];
 
@@ -262,7 +262,7 @@ export function Layout({ children }: LayoutProps) {
       </div>
 
       {/* Main Content */}
-      <main className="relative z-10 pb-20">
+      <main className="relative z-10 pb-24">
         <AnimatePresence mode="wait">
           <motion.div
             key={location}
@@ -275,6 +275,16 @@ export function Layout({ children }: LayoutProps) {
           </motion.div>
         </AnimatePresence>
       </main>
+
+      {/* Disclaimer Bar */}
+      <div className="fixed bottom-10 left-0 right-0 bg-background/80 border-t border-amber-500/10 backdrop-blur-sm flex items-center justify-center px-4 py-1 text-[9px] font-mono z-50">
+        <span className="flex items-center gap-1.5 text-amber-500/60">
+          <AlertTriangle className="w-3 h-3" />
+          <span className="hidden sm:inline">NOT FINANCIAL ADVICE</span>
+          <span className="hidden sm:inline text-muted-foreground/50">•</span>
+          <span className="text-muted-foreground/50">For research purposes only. Always DYOR.</span>
+        </span>
+      </div>
 
       {/* Cyber Status Bar */}
       <div className="fixed bottom-0 left-0 right-0 h-10 bg-background/95 border-t border-primary/20 backdrop-blur-sm flex items-center justify-between px-4 text-[10px] font-mono z-50">

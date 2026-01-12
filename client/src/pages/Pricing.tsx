@@ -11,9 +11,6 @@ import {
   Loader2,
   ExternalLink,
   AlertCircle,
-  TrendingUp,
-  Building2,
-  Coins,
   BarChart3,
   Search,
   FileText,
@@ -31,42 +28,33 @@ import {
   useCreateCheckout,
   useCreateBillingPortal,
   useVerifyCheckout,
-  useCreateCreditCheckout,
-  useVerifyCreditPurchase,
 } from "@/hooks/useSubscription";
-import { CREDIT_PACKS } from "@shared/schema";
 
 const TIER_ICONS: Record<string, typeof Zap> = {
   free: Zap,
-  starter: TrendingUp,
-  trader: Rocket,
   pro: Crown,
-  desk: Building2,
+  premium: Rocket,
 };
 
 const TIER_COLORS: Record<string, { border: string; bg: string; icon: string }> = {
   free: { border: "border-primary/30", bg: "bg-primary/5", icon: "text-primary" },
-  starter: { border: "border-blue-500/30", bg: "bg-blue-500/5", icon: "text-blue-400" },
-  trader: { border: "border-accent/50", bg: "bg-accent/10", icon: "text-accent" },
-  pro: { border: "border-purple-500/30", bg: "bg-purple-500/10", icon: "text-purple-400" },
-  desk: { border: "border-amber-500/50", bg: "bg-amber-500/10", icon: "text-amber-400" },
+  pro: { border: "border-accent/50", bg: "bg-accent/10", icon: "text-accent" },
+  premium: { border: "border-purple-500/30", bg: "bg-purple-500/10", icon: "text-purple-400" },
 };
 
-// Tier order for comparison (0 = lowest, 4 = highest)
+// Tier order for comparison (0 = lowest, 2 = highest)
 const TIER_ORDER: Record<string, number> = {
   free: 0,
-  starter: 1,
-  trader: 2,
-  pro: 3,
-  desk: 4,
+  pro: 1,
+  premium: 2,
 };
 
 // Shared features for all plans
 const SHARED_FEATURES = [
-  { icon: BarChart3, text: "Full community leaderboard access" },
   { icon: Search, text: "Unlimited token search" },
-  { icon: FileText, text: "Full game-theory report with sources" },
-  { icon: Globe, text: "7D/30D rolling averages on leaderboard" },
+  { icon: FileText, text: "Full game-theory scorecards" },
+  { icon: Globe, text: "7D/30D rolling averages" },
+  { icon: BarChart3, text: "Vote for token analysis" },
 ];
 
 export default function Pricing() {
@@ -79,16 +67,13 @@ export default function Pricing() {
   const createCheckout = useCreateCheckout();
   const createPortal = useCreateBillingPortal();
   const verifyCheckout = useVerifyCheckout();
-  const createCreditCheckout = useCreateCreditCheckout();
-  const verifyCreditPurchase = useVerifyCreditPurchase();
   const [processingTier, setProcessingTier] = useState<string | null>(null);
-  const [processingCreditPack, setProcessingCreditPack] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   // Track if we've already processed the checkout to prevent double-processing
   const [checkoutProcessed, setCheckoutProcessed] = useState(false);
 
-  // Verify and sync subscription/credits when returning from Stripe checkout
+  // Verify and sync subscription when returning from Stripe checkout
   useEffect(() => {
     // Only run once and only when we have the necessary conditions
     if (checkoutProcessed) return;
@@ -96,42 +81,16 @@ export default function Pricing() {
     const urlParams = new URLSearchParams(window.location.search);
     const sessionId = urlParams.get("session_id");
     const subscriptionCanceled = urlParams.get("subscription") === "canceled";
-    const creditsCanceled = urlParams.get("credits") === "canceled";
-    const isCreditsSuccess = urlParams.get("credits") === "success";
 
     // Handle canceled checkouts
-    if (subscriptionCanceled || creditsCanceled) {
+    if (subscriptionCanceled) {
       setCheckoutProcessed(true);
       toast({
         title: "Checkout canceled",
-        description: creditsCanceled
-          ? "Credit purchase was canceled."
-          : "No changes were made to your subscription.",
+        description: "No changes were made to your subscription.",
         variant: "destructive",
       });
       navigate("/pricing", { replace: true });
-      return;
-    }
-
-    // Handle successful credit purchase
-    if (sessionId && user && isCreditsSuccess) {
-      setCheckoutProcessed(true);
-
-      verifyCreditPurchase.mutateAsync(sessionId)
-        .then((result) => {
-          if (result.success) {
-            toast({
-              title: "Credits added!",
-              description: `${result.credits} analysis credits have been added to your account.`,
-            });
-          }
-        })
-        .catch((error) => {
-          console.error("Failed to verify credit purchase:", error);
-        })
-        .finally(() => {
-          navigate("/pricing", { replace: true });
-        });
       return;
     }
 
@@ -196,30 +155,6 @@ export default function Pricing() {
     }
   };
 
-  const handleBuyCredits = async (packId: string) => {
-    if (!user) {
-      setShowAuthModal(true);
-      return;
-    }
-
-    setProcessingCreditPack(packId);
-    try {
-      const { url } = await createCreditCheckout.mutateAsync(packId);
-      if (url) {
-        window.location.href = url;
-      }
-    } catch (error) {
-      console.error("Credit checkout error:", error);
-      toast({
-        title: "Error",
-        description: "Failed to start checkout. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setProcessingCreditPack(null);
-    }
-  };
-
   const isLoading = tiersLoading || statusLoading;
   const tiers = tiersData?.tiers || [];
   const stripeConfigured = tiersData?.stripeConfigured ?? false;
@@ -251,8 +186,8 @@ export default function Pricing() {
               <span className="text-accent">YOUR PLAN</span>
             </h1>
             <p className="text-muted-foreground font-mono text-sm max-w-2xl mx-auto">
-              Run game-theory token analyses powered by our 4-LLM consensus engine.
-              Leaderboard access is free for everyone.
+              Access 4-LLM consensus scorecards and vote for token analysis.
+              Free users can view top 10 rankings.
             </p>
           </div>
         </motion.div>
@@ -263,18 +198,18 @@ export default function Pricing() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="mb-8 p-4 rounded border border-green-500/30 bg-green-500/10 flex items-center justify-between"
+            className="mb-8 p-4 rounded border border-green-500/30 bg-green-500/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded bg-green-500/20 flex items-center justify-center">
+              <div className="w-10 h-10 rounded bg-green-500/20 flex items-center justify-center flex-shrink-0">
                 <Check className="w-5 h-5 text-green-400" />
               </div>
               <div>
-                <p className="font-mono font-bold text-green-400">
+                <p className="font-mono font-bold text-green-400 text-sm sm:text-base">
                   ACTIVE: {status.tierName.toUpperCase()} PLAN
                 </p>
-                <p className="text-xs text-muted-foreground font-mono">
-                  {status.monthlyUsed} / {status.monthlyLimit} analyses used this month
+                <p className="text-[10px] sm:text-xs text-muted-foreground font-mono">
+                  Full leaderboard access + unlimited scorecards
                 </p>
               </div>
             </div>
@@ -282,7 +217,7 @@ export default function Pricing() {
               variant="outline"
               onClick={handleManageSubscription}
               disabled={createPortal.isPending}
-              className="font-mono"
+              className="font-mono w-full sm:w-auto"
             >
               {createPortal.isPending ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -315,7 +250,7 @@ export default function Pricing() {
             <Loader2 className="w-12 h-12 text-primary animate-spin" />
           </div>
         ) : (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
             {tiers.map((tier, index) => {
               const Icon = TIER_ICONS[tier.id] || Zap;
               const isCurrentPlan = tier.id === currentTier;
@@ -367,25 +302,36 @@ export default function Pricing() {
                     </div>
                   </div>
 
-                  {/* Analysis Count - Big & Prominent */}
+                  {/* Access Info - Big & Prominent */}
                   <div className="text-center py-4 mb-3 rounded bg-black/30 border border-white/5">
                     {tier.id === "free" ? (
                       <>
-                        <p className="text-lg font-bold font-mono text-primary">FREE TRIAL</p>
+                        <p className="text-lg font-bold font-mono text-primary">TOP 10</p>
                         <p className="text-[11px] text-muted-foreground font-mono">
-                          1/day for 7 days, then 1/week
+                          leaderboard + scorecards
+                        </p>
+                        <p className="text-[10px] text-muted-foreground/60 font-mono mt-1">
+                          1 vote per day • no search/filter/sort
+                        </p>
+                      </>
+                    ) : tier.id === "pro" ? (
+                      <>
+                        <p className="text-lg font-bold font-mono text-primary">FULL ACCESS</p>
+                        <p className="text-[11px] text-muted-foreground font-mono">
+                          all rankings + search, filter & sort
+                        </p>
+                        <p className="text-[10px] text-muted-foreground/60 font-mono mt-1">
+                          5 votes per day
                         </p>
                       </>
                     ) : (
                       <>
-                        <p className="text-3xl font-bold font-mono text-primary">
-                          {tier.analysesPerMonth}
-                        </p>
+                        <p className="text-lg font-bold font-mono text-primary">FULL ACCESS</p>
                         <p className="text-[11px] text-muted-foreground font-mono">
-                          analyses / month
+                          + priority votes (2x weight)
                         </p>
                         <p className="text-[10px] text-muted-foreground/60 font-mono mt-1">
-                          Resets monthly
+                          15 votes per day + search, filter & sort
                         </p>
                       </>
                     )}
@@ -500,76 +446,6 @@ export default function Pricing() {
           </div>
         </motion.div>
 
-        {/* Credit Packs Section */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
-          className="mt-16"
-        >
-          <div className="text-center mb-8">
-            <h2 className="text-2xl font-display font-bold mb-2">
-              <span className="text-primary">CREDIT</span>{" "}
-              <span className="text-accent">TOP-UPS</span>
-            </h2>
-            <p className="text-muted-foreground font-mono text-sm">
-              Need more analyses? Buy credit packs that never expire.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-6 max-w-3xl mx-auto">
-            {Object.values(CREDIT_PACKS).map((pack, index) => (
-              <motion.div
-                key={pack.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.7 + index * 0.1 }}
-                className={`relative rounded-lg border p-6 cyber-card ${
-                  pack.popular
-                    ? "border-accent/50 bg-accent/10 ring-2 ring-accent/20"
-                    : "border-primary/30 bg-primary/5"
-                }`}
-              >
-                {pack.popular && (
-                  <div className="mb-3">
-                    <Badge className="bg-accent text-accent-foreground font-mono tracking-wider text-[10px]">
-                      BEST VALUE
-                    </Badge>
-                  </div>
-                )}
-                <div className="text-center">
-                  <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto mb-3">
-                    <Coins className="w-6 h-6 text-primary" />
-                  </div>
-                  <h3 className="text-xl font-display font-bold mb-1">
-                    {pack.credits} Credits
-                  </h3>
-                  <p className="text-2xl font-bold font-mono text-accent mb-1">
-                    ${pack.price}
-                  </p>
-                  <p className="text-xs text-muted-foreground font-mono mb-4">
-                    ${(pack.price / pack.credits).toFixed(2)} per analysis
-                  </p>
-                  <Button
-                    variant={pack.popular ? "default" : "outline"}
-                    className="w-full font-mono"
-                    disabled={!stripeConfigured || processingCreditPack === pack.id}
-                    onClick={() => handleBuyCredits(pack.id)}
-                  >
-                    {processingCreditPack === pack.id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : stripeConfigured ? (
-                      "BUY NOW"
-                    ) : (
-                      "COMING SOON"
-                    )}
-                  </Button>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </motion.div>
-
         {/* FAQ Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -583,28 +459,28 @@ export default function Pricing() {
           <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
             {[
               {
-                q: "When does my free trial start?",
-                a: "Your 7-day trial starts when you run your first analysis, not when you sign up. Browse the leaderboard as long as you want before committing.",
+                q: "How does the scoring system work?",
+                a: "Each token is analyzed by 4 independent LLMs (GPT, Claude, Gemini, Grok) using game theory principles. The final score (0-100) is a weighted consensus. 70+ = BUY, 40-69 = HOLD, <40 = SELL.",
               },
               {
-                q: "How does the analysis work?",
-                a: "Each analysis runs through our 4-LLM consensus engine (GPT, Claude, Gemini, Grok) to provide game-theory based token ratings.",
+                q: "What data sources are used?",
+                a: "We pull real-time data from CoinGecko (price, volume, market cap), on-chain metrics, tokenomics, and social signals. Each analysis reflects current market conditions.",
               },
               {
-                q: "Can I upgrade or downgrade anytime?",
-                a: "Yes! You can change your plan at any time. Upgrades take effect immediately, downgrades at period end.",
+                q: "How accurate are the scores?",
+                a: "We track 7-day and 30-day returns for all analyzed tokens. Performance metrics are displayed on the leaderboard so you can verify our track record yourself.",
               },
               {
-                q: "Do unused analyses roll over?",
-                a: "No, monthly analyses reset each billing cycle. Buy credit packs if you need analyses that never expire.",
+                q: "What do free users get?",
+                a: "Access to top 10 ranked tokens with full scorecards. Upgrade to unlock the complete leaderboard with search, filter, and sort by score, tier, or volume.",
               },
               {
-                q: "Is the leaderboard really free?",
-                a: "Yes! All users get full leaderboard access including 7D/30D averages. It's our way of helping everyone discover promising tokens.",
+                q: "How does voting work?",
+                a: "Vote for tokens you want analyzed. Top-voted tokens get processed by our 4-LLM engine. Premium votes count 2x, helping your picks get analyzed faster.",
               },
               {
-                q: "How long does an analysis take?",
-                a: "Most analyses complete in 15-30 minutes. Our 4-LLM ensemble runs comprehensive game-theory scoring for maximum accuracy.",
+                q: "When do votes reset?",
+                a: "Daily vote limits reset at midnight EST. Free users get 1 vote/day, Pro gets 5, and Premium gets 15 with 2x weight.",
               },
             ].map((faq, i) => (
               <div

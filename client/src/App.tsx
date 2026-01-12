@@ -8,10 +8,11 @@ import { AnalysisTrackerProvider } from "@/contexts/AnalysisTrackerContext";
 import { useReferralCapture } from "@/hooks/useReferral";
 import Home from "@/pages/Home";
 import Analyze from "@/pages/Analyze";
-import Analyses from "@/pages/Analyses";
 import Leaderboard from "@/pages/Leaderboard";
+import Vote from "@/pages/Vote";
 import Pricing from "@/pages/Pricing";
 import Account from "@/pages/Account";
+import Admin from "@/pages/Admin";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -21,10 +22,11 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/analyze/:id" component={Analyze} />
-      <Route path="/analyses" component={Analyses} />
       <Route path="/leaderboard" component={Leaderboard} />
+      <Route path="/vote" component={Vote} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/account" component={Account} />
+      <Route path="/admin" component={Admin} />
       <Route path="/subscription/success" component={Pricing} />
       <Route component={NotFound} />
     </Switch>

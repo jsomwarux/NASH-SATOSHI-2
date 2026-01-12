@@ -33,6 +33,7 @@ import {
   Maximize2,
   Minimize2,
   RefreshCw,
+  Calculator,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,6 +44,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Button } from "@/components/ui/button";
 import { ShareModal } from "./ShareModal";
 import { ModelAnalysisModal } from "./ModelAnalysisModal";
+import { ScoringMethodologyModal } from "@/components/common/ScoringMethodologyModal";
+import { useTokenPerformance } from "@/hooks/usePerformance";
 import type { TokenAnalysis, ModelScores, ModelAnalyses, TokenStats } from "@shared/schema";
 import { formatScore, formatComponentScore, formatModifier } from "@/lib/utils";
 
@@ -53,15 +56,6 @@ interface ScoreCardProps {
   elapsedSeconds?: number;
   nodesCompleted?: number;
   currentNode?: string;
-  // Retry functionality for failed analyses
-  onRetry?: () => void;
-  isRetrying?: boolean;
-  // Cancel functionality for in-progress analyses
-  onCancel?: () => void;
-  isCancelling?: boolean;
-  // Reanalyze functionality
-  onReanalyze?: () => void;
-  isReanalyzing?: boolean;
   // Token stats for showing average score
   tokenStats?: TokenStats;
 }
@@ -108,13 +102,17 @@ function getTierBadgeStyle(tier: string): { bg: string; text: string } {
 
 function getRecommendationStyle(rec: string | null): { bg: string; text: string; label: string } {
   const recommendation = rec?.toUpperCase() || "HOLD";
+  // Check CAUTIOUS BUY first (before plain BUY)
+  if (recommendation.includes("CAUTIOUS") && recommendation.includes("BUY")) {
+    return { bg: "bg-amber-500/20", text: "text-amber-400", label: "CAUTIOUS BUY" };
+  }
   if (recommendation.includes("BUY")) {
     return { bg: "bg-green-500/20", text: "text-green-400", label: "BUY" };
   }
   if (recommendation.includes("AVOID") || recommendation.includes("SELL")) {
     return { bg: "bg-red-500/20", text: "text-red-400", label: "AVOID" };
   }
-  return { bg: "bg-yellow-500/20", text: "text-yellow-400", label: "HOLD" };
+  return { bg: "bg-gray-500/20", text: "text-gray-400", label: "HOLD" };
 }
 
 // Position card display based on winning_side
@@ -178,7 +176,8 @@ function formatDate(date: Date | string): string {
 }
 
 // Expandable text component for fields that may be truncated
-function ExpandableText({ text, className = "" }: { text: string; className?: string }) {
+// Supports both single-line truncation and multi-line clamping
+function ExpandableText({ text, className = "", maxLines = 2 }: { text: string; className?: string; maxLines?: number }) {
   const textRef = useRef<HTMLDivElement>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isTruncated, setIsTruncated] = useState(false);
@@ -186,7 +185,10 @@ function ExpandableText({ text, className = "" }: { text: string; className?: st
   useEffect(() => {
     const checkTruncation = () => {
       if (textRef.current) {
-        setIsTruncated(textRef.current.scrollWidth > textRef.current.clientWidth);
+        // Check both horizontal overflow (single line) and vertical overflow (multi-line)
+        const isHorizontallyTruncated = textRef.current.scrollWidth > textRef.current.clientWidth;
+        const isVerticallyTruncated = textRef.current.scrollHeight > textRef.current.clientHeight;
+        setIsTruncated(isHorizontallyTruncated || isVerticallyTruncated);
       }
     };
 
@@ -198,8 +200,8 @@ function ExpandableText({ text, className = "" }: { text: string; className?: st
 
   if (isExpanded) {
     return (
-      <div className="relative">
-        <div className={`${className} break-words`}>
+      <div className="relative w-full">
+        <div className={`${className} break-words whitespace-pre-wrap`}>
           {text}
         </div>
         <button
@@ -214,10 +216,16 @@ function ExpandableText({ text, className = "" }: { text: string; className?: st
   }
 
   return (
-    <div className="relative">
+    <div className="relative w-full">
       <div
         ref={textRef}
-        className={`${className} truncate`}
+        className={`${className} overflow-hidden`}
+        style={{
+          display: '-webkit-box',
+          WebkitLineClamp: maxLines,
+          WebkitBoxOrient: 'vertical',
+          wordBreak: 'break-word',
+        }}
         title={text}
       >
         {text}
@@ -429,11 +437,9 @@ interface LoadingScreenProps {
   elapsedSeconds?: number;
   nodesCompleted?: number;
   currentNode?: string;
-  onCancel?: () => void;
-  isCancelling?: boolean;
 }
 
-function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElapsed, nodesCompleted, onCancel, isCancelling }: LoadingScreenProps) {
+function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElapsed, nodesCompleted }: LoadingScreenProps) {
   // Calculate elapsed time from analysis creation time (persists across refresh)
   const analysisStartTime = new Date(analysis.createdAt).getTime();
   const initialElapsed = Math.floor((Date.now() - analysisStartTime) / 1000);
@@ -452,9 +458,6 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
 
   // Use server elapsed time if available, otherwise use local tracking from createdAt
   const elapsedTime = serverElapsed ?? localElapsed;
-
-  // Debug cancel button visibility
-  console.log(`[LoadingScreen] elapsedTime: ${elapsedTime}, onCancel defined: ${!!onCancel}, showCancelButton: ${!!onCancel && elapsedTime < 60}`);
 
   // Initialize progress based on elapsed time with 25-minute assumption (linear)
   const initialProgress = Math.min(98, (initialElapsed / DEFAULT_TOTAL_TIME) * 100);
@@ -763,33 +766,6 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
         </CardContent>
       </Card>
 
-      {/* Cancel Button - only show for first 60 seconds */}
-      {onCancel && elapsedTime < 60 && (
-        <div className="flex justify-center mt-6 mb-4">
-          <Button
-            variant="outline"
-            onClick={() => {
-              console.log("[ScoreCard] Cancel button clicked");
-              onCancel();
-            }}
-            disabled={isCancelling}
-            className="gap-2 border-red-500/30 text-red-400 hover:bg-red-500/10"
-          >
-            {isCancelling ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Cancelling...
-              </>
-            ) : (
-              <>
-                <XCircle className="w-4 h-4" />
-                Cancel Analysis ({60 - elapsedTime}s)
-              </>
-            )}
-          </Button>
-        </div>
-      )}
-
       {/* Info text */}
       <p className="text-center text-sm text-muted-foreground mt-6">
         Our 4-LLM ensemble cross-validates findings to eliminate bias and provide trusted consensus scores.
@@ -800,11 +776,15 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
   );
 }
 
-export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted, currentNode, onRetry, isRetrying, onCancel, isCancelling, onReanalyze, isReanalyzing, tokenStats }: ScoreCardProps) {
+export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted, currentNode, tokenStats }: ScoreCardProps) {
   const [showReasoning, setShowReasoning] = useState(false);
   const [loadingStartTime] = useState(Date.now());
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showMethodologyModal, setShowMethodologyModal] = useState(false);
   const [selectedModel, setSelectedModel] = useState<'gpt' | 'claude' | 'gemini' | 'grok' | null>(null);
+
+  // Fetch token performance data
+  const { data: tokenPerformance } = useTokenPerformance(analysis.tokenId);
 
   const finalScore = parseFloat(analysis.finalScore as string) || 0;
   const priceChange24h = analysis.priceChange24h ? parseFloat(analysis.priceChange24h as string) : null;
@@ -840,7 +820,8 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
   const maxComponentScore = scoreComponents.reduce((sum, c) => sum + c.max, 0);
 
   // All modifiers for the detailed display
-  const allModifiers = [
+  // Show all modifiers for consistency, even if value is 0
+  const modifiers = [
     { label: "Phase", value: parseFloat(analysis.phaseModifier as string) || 0 },
     { label: isMemecoin ? "Meta" : "Narrative", value: parseFloat(analysis.narrativeModifier as string) || 0 },
     { label: "Exit Liquidity", value: parseFloat(analysis.exitLiquidityModifier as string) || 0 },
@@ -848,9 +829,6 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
     { label: "Data Quality", value: parseFloat(analysis.dataQualityModifier as string) || 0 },
     { label: "FDV", value: parseFloat((analysis.fdvModifier || analysis.marketCapModifier) as string) || 0 },
   ];
-
-  // Only show modifiers that have non-zero values
-  const modifiers = allModifiers.filter(m => m.value !== 0);
 
   // Calculate total modifiers
   const totalModifiersValue = modifiers.reduce((sum, m) => sum + m.value, 0);
@@ -869,8 +847,6 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         elapsedSeconds={elapsedSeconds}
         nodesCompleted={nodesCompleted}
         currentNode={currentNode}
-        onCancel={onCancel}
-        isCancelling={isCancelling}
       />
     );
   }
@@ -921,31 +897,9 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                 Analysis Cancelled
               </h3>
 
-              <p className="text-muted-foreground mb-6 max-w-md">
-                This analysis was cancelled before completion. No credits were charged.
+              <p className="text-muted-foreground max-w-md">
+                This analysis was cancelled before completion.
               </p>
-
-              {/* Reanalyze Button */}
-              {onReanalyze && (
-                <Button
-                  onClick={onReanalyze}
-                  disabled={isReanalyzing}
-                  className="gap-2"
-                  size="lg"
-                >
-                  {isReanalyzing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Starting...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="w-4 h-4" />
-                      Analyze Again
-                    </>
-                  )}
-                </Button>
-              )}
             </div>
           </CardContent>
         </Card>
@@ -1055,42 +1009,8 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
               </h3>
 
               {errorMessage && (
-                <p className="text-muted-foreground mb-4 max-w-md">
+                <p className="text-muted-foreground max-w-md">
                   {errorMessage}
-                </p>
-              )}
-
-              {retryCount > 0 && (
-                <p className="text-xs text-muted-foreground mb-4">
-                  Retry attempt {retryCount} of {maxRetries}
-                </p>
-              )}
-
-              {/* Retry Button */}
-              {onRetry && canRetry && (
-                <Button
-                  onClick={onRetry}
-                  disabled={isRetrying}
-                  className="gap-2"
-                  size="lg"
-                >
-                  {isRetrying ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Retrying...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="w-4 h-4" />
-                      Retry Analysis
-                    </>
-                  )}
-                </Button>
-              )}
-
-              {!canRetry && (
-                <p className="text-sm text-muted-foreground">
-                  Maximum retry attempts reached. Please start a new analysis.
                 </p>
               )}
             </div>
@@ -1160,22 +1080,6 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                       <Share2 className="w-3.5 h-3.5 mr-1.5" />
                       Share
                     </Button>
-                    {onReanalyze && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={onReanalyze}
-                        disabled={isReanalyzing}
-                        className="h-8 px-3 bg-accent/10 border-accent/30 hover:bg-accent/20 hover:border-accent/50 text-accent text-xs"
-                      >
-                        {isReanalyzing ? (
-                          <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                        ) : (
-                          <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-                        )}
-                        {isReanalyzing ? 'Starting...' : 'Reanalyze'}
-                      </Button>
-                    )}
                   </div>
                 </div>
               </div>
@@ -1221,6 +1125,13 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   {formatScore(finalScore)}
                 </div>
                 <div className="text-sm text-muted-foreground mt-1">out of 100</div>
+                <button
+                  onClick={() => setShowMethodologyModal(true)}
+                  className="text-xs text-primary/70 hover:text-primary transition-colors mt-1 flex items-center gap-1"
+                >
+                  <HelpCircle className="w-3 h-3" />
+                  How scoring works
+                </button>
                 {/* Average Score Display */}
                 {tokenStats && tokenStats.analysisCount > 1 && (
                   <div className="text-xs text-muted-foreground mt-2 flex items-center gap-1.5">
@@ -1377,16 +1288,33 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         </Card>
 
         {/* Narrative / Meta */}
-        <Card className="glass-card">
+        <Card className="glass-card overflow-hidden">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground mb-2">
               <Flame className="w-4 h-4" />
               <span className="text-xs uppercase tracking-wide">{isMemecoin ? 'Meta' : 'Narrative'}</span>
             </div>
-            <ExpandableText
-              text={analysis.narrative || (isMemecoin ? "Meme/Social Token" : "Utility/Infrastructure")}
-              className="text-sm font-medium"
-            />
+            {/* Narrative text with proper containment */}
+            <div className="w-full overflow-hidden">
+              <ExpandableText
+                text={analysis.narrative || (isMemecoin ? "Meme/Social Token" : "Utility/Infrastructure")}
+                className="text-sm font-medium"
+              />
+            </div>
+            {/* Narrative Durability Badge - separate row */}
+            {analysis.narrativeDurability && (
+              <div className="mt-2">
+                <Badge className={`text-[10px] px-1.5 py-0.5 ${
+                  (analysis.narrativeDurability as string).toLowerCase() === 'high'
+                    ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                    : (analysis.narrativeDurability as string).toLowerCase() === 'medium'
+                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                      : 'bg-red-500/20 text-red-400 border-red-500/30'
+                }`}>
+                  {(analysis.narrativeDurability as string).charAt(0).toUpperCase() + (analysis.narrativeDurability as string).slice(1).toLowerCase()} Durability
+                </Badge>
+              </div>
+            )}
             {narrativeHeat !== null && (
               <div className="flex items-center gap-2 mt-1">
                 <div className={`flex items-center gap-1 text-sm ${
@@ -1412,15 +1340,18 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
             {peakProximity !== null ? (
               <>
                 <div className={`text-2xl font-bold font-mono ${
-                  peakProximity > 80 ? "text-red-400" :
-                  peakProximity > 50 ? "text-yellow-400" :
+                  peakProximity > 85 ? "text-red-400" :
+                  peakProximity > 60 ? "text-orange-400" :
+                  peakProximity > 30 ? "text-yellow-400" :
                   "text-green-400"
                 }`}>
                   {peakProximity.toFixed(0)}%
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {peakProximity > 80 ? "Near all-time high" :
-                   peakProximity > 50 ? "Mid-range" :
+                  {peakProximity > 85 ? "Near peak" :
+                   peakProximity > 60 ? "Late stage" :
+                   peakProximity > 30 ? "Mid-range" :
+                   peakProximity >= 10 ? "Early" :
                    "Far from peak"}
                 </div>
               </>
@@ -1447,6 +1378,102 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* Performance Since Analysis */}
+      {tokenPerformance && (tokenPerformance.returnSinceFirst !== null || tokenPerformance.returnSinceLatest !== null) && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.105 }}
+        >
+          <Card className="glass-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <TrendingUp className="w-5 h-5 text-primary" />
+                Performance Since Analysis
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {/* Price at First Analysis */}
+                <div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                    Price at First Analysis
+                  </div>
+                  {tokenPerformance.priceAtFirstAnalysis ? (
+                    <>
+                      <div className="text-lg font-mono font-bold">
+                        ${tokenPerformance.priceAtFirstAnalysis < 0.01
+                          ? tokenPerformance.priceAtFirstAnalysis.toExponential(2)
+                          : tokenPerformance.priceAtFirstAnalysis < 1
+                            ? tokenPerformance.priceAtFirstAnalysis.toFixed(4)
+                            : tokenPerformance.priceAtFirstAnalysis.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      </div>
+                      {tokenPerformance.firstAnalysisDate && (
+                        <div className="text-[10px] text-muted-foreground">
+                          {new Date(tokenPerformance.firstAnalysisDate).toLocaleDateString()}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-lg font-mono text-muted-foreground">—</div>
+                  )}
+                </div>
+
+                {/* Current Price */}
+                <div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                    Current Price
+                  </div>
+                  {tokenPerformance.currentPrice ? (
+                    <div className="text-lg font-mono font-bold">
+                      ${tokenPerformance.currentPrice < 0.01
+                        ? tokenPerformance.currentPrice.toExponential(2)
+                        : tokenPerformance.currentPrice < 1
+                          ? tokenPerformance.currentPrice.toFixed(4)
+                          : tokenPerformance.currentPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </div>
+                  ) : (
+                    <div className="text-lg font-mono text-muted-foreground">—</div>
+                  )}
+                </div>
+
+                {/* Return Since First Analysis */}
+                <div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                    Return (Since First)
+                  </div>
+                  {tokenPerformance.returnSinceFirst !== null ? (
+                    <div className={`text-xl font-bold font-mono ${tokenPerformance.returnSinceFirst >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {tokenPerformance.returnSinceFirst >= 0 ? '+' : ''}{tokenPerformance.returnSinceFirst.toFixed(1)}%
+                    </div>
+                  ) : (
+                    <div className="text-lg font-mono text-muted-foreground">—</div>
+                  )}
+                </div>
+
+                {/* Return Since Latest Analysis */}
+                <div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                    Return (Since Latest)
+                  </div>
+                  {tokenPerformance.returnSinceLatest !== null ? (
+                    <div className={`text-xl font-bold font-mono ${tokenPerformance.returnSinceLatest >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {tokenPerformance.returnSinceLatest >= 0 ? '+' : ''}{tokenPerformance.returnSinceLatest.toFixed(1)}%
+                    </div>
+                  ) : (
+                    <div className="text-lg font-mono text-muted-foreground">—</div>
+                  )}
+                </div>
+              </div>
+
+              <p className="text-[10px] text-muted-foreground mt-4">
+                Past performance does not guarantee future results.
+              </p>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
 
       {/* Model Consensus - 4-LLM scores displayed prominently */}
       {modelScores && Object.keys(modelScores).length > 0 && (
@@ -1513,6 +1540,88 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   </button>
                 )}
               </div>
+
+              {/* Model Divergence Display */}
+              {(() => {
+                const consensusLevel = analysis.consensusLevel as string;
+                const scoreSpread = analysis.scoreSpread ? parseFloat(analysis.scoreSpread as string) : null;
+                const divergenceNote = analysis.divergenceNote as string;
+
+                // Calculate divergence level from scoreSpread using current thresholds
+                // Thresholds: HIGH > 20pts, MODERATE 15-20pts, LOW < 15pts
+                let displayMode: 'high' | 'moderate' | 'low' | null = null;
+
+                if (scoreSpread !== null) {
+                  // Use scoreSpread to calculate divergence level with current thresholds
+                  if (scoreSpread > 20) displayMode = 'high';
+                  else if (scoreSpread >= 15) displayMode = 'moderate';
+                  else displayMode = 'low';
+                } else if (consensusLevel) {
+                  // Fallback to consensus_level for older analyses without scoreSpread
+                  const level = consensusLevel.toUpperCase();
+                  if (level === 'HIGH') displayMode = 'low'; // HIGH consensus = LOW divergence
+                  else if (level === 'MIXED') displayMode = 'moderate';
+                  else if (level === 'LOW' || level === 'CONFLICTED') displayMode = 'high';
+                }
+
+                if (!displayMode) return null;
+
+                const badgeConfig = {
+                  high: {
+                    bg: 'bg-orange-500/20 border-orange-500/40',
+                    text: 'text-orange-400',
+                    label: 'Models Disagree',
+                    icon: '⚠️ ',
+                    showNote: true,
+                  },
+                  moderate: {
+                    bg: 'bg-yellow-500/20 border-yellow-500/40',
+                    text: 'text-yellow-400',
+                    label: 'Views Vary',
+                    icon: '',
+                    showNote: false,
+                  },
+                  low: {
+                    bg: 'bg-green-500/20 border-green-500/40',
+                    text: 'text-green-400',
+                    label: 'Strong Consensus',
+                    icon: '',
+                    showNote: false,
+                  },
+                };
+
+                const config = badgeConfig[displayMode];
+
+                return (
+                  <div className="mt-4 pt-4 border-t border-white/10">
+                    <div className="flex flex-wrap items-center gap-3">
+                      {/* Divergence Badge */}
+                      <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border ${config.bg}`}>
+                        <span className={`text-sm font-medium ${config.text}`}>
+                          {config.icon}{config.label}
+                        </span>
+                      </div>
+
+                      {/* Score Spread */}
+                      {scoreSpread !== null && (
+                        <div className="text-sm text-muted-foreground">
+                          Score spread: <span className="font-mono font-medium">{scoreSpread.toFixed(2)}</span> points
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Divergence Note - only show for HIGH divergence */}
+                    {config.showNote && divergenceNote && (
+                      <div className="mt-3 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-orange-400 mt-0.5 flex-shrink-0" />
+                          <p className="text-sm text-orange-200">{divergenceNote}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         </motion.div>
@@ -1606,6 +1715,27 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                 </div>
               </div>
             )}
+
+            {/* Score Calculation (expandable debug section) */}
+            {analysis.scoreCalculation && (
+              <Collapsible className="mt-6 pt-4 border-t border-white/10">
+                <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors w-full group">
+                  <Calculator className="w-4 h-4" />
+                  <span>Score Calculation</span>
+                  <ChevronDown className="w-4 h-4 ml-auto transition-transform group-data-[state=open]:rotate-180" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-3">
+                  <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                    <code className="text-xs font-mono text-muted-foreground break-all">
+                      {analysis.scoreCalculation}
+                    </code>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-2">
+                    LLM arithmetic verification for final score average
+                  </p>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </CardContent>
         </Card>
       </motion.div>
@@ -1658,7 +1788,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
 
                   {/* Winning Side / Exit Liquidity */}
                   <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
-                    <div className="text-xs text-muted-foreground mb-1">Exit Liquidity</div>
+                    <div className="text-xs text-muted-foreground mb-1">Position</div>
                     <div className={`text-sm font-medium ${
                       analysis.winningSide?.toUpperCase().includes('USER') ? 'text-green-400' :
                       analysis.winningSide?.toUpperCase().includes('EXIT') || analysis.winningSide?.toUpperCase().includes('LIQ') ? 'text-red-400' :
@@ -1666,8 +1796,8 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                     }`}>
                       {analysis.winningSide ? (
                         analysis.winningSide.toUpperCase().includes('USER') ? 'Favorable' :
-                        analysis.winningSide.toUpperCase().includes('EXIT') || analysis.winningSide.toUpperCase().includes('LIQ') ? 'At Risk' :
-                        'Neutral'
+                        analysis.winningSide.toUpperCase().includes('EXIT') || analysis.winningSide.toUpperCase().includes('LIQ') ? 'Unfavorable' :
+                        'Caution'
                       ) : '—'}
                     </div>
                   </div>
@@ -1733,6 +1863,67 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   </div>
                 </div>
               </div>
+
+              {/* Upside Assessment - from Stage 4 */}
+              {(analysis.upsideMultiple || analysis.upsideTier) && (
+                <div className="pt-4 border-t border-white/10">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
+                    <TrendingUp className="w-3 h-3" />
+                    Upside Assessment
+                  </div>
+                  <div className="p-4 rounded-lg bg-gradient-to-r from-primary/5 to-accent/5 border border-primary/20">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                      {/* Upside Multiple - Prominent Display */}
+                      {analysis.upsideMultiple && (
+                        <div className="flex items-center gap-3">
+                          <div className={`text-3xl md:text-4xl font-bold font-mono ${
+                            analysis.upsideTier?.includes('100') ? 'text-green-400' :
+                            analysis.upsideTier?.includes('50-100') ? 'text-green-400' :
+                            analysis.upsideTier?.includes('25-50') ? 'text-emerald-400' :
+                            analysis.upsideTier?.includes('10-25') ? 'text-yellow-400' :
+                            analysis.upsideTier?.includes('5-10') ? 'text-orange-400' :
+                            'text-red-400'
+                          }`}>
+                            {analysis.upsideMultiple}
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            potential upside
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Upside Tier Badge */}
+                      {analysis.upsideTier && (
+                        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
+                          analysis.upsideTier.includes('100') ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                          analysis.upsideTier.includes('50-100') ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                          analysis.upsideTier.includes('25-50') ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                          analysis.upsideTier.includes('10-25') ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                          analysis.upsideTier.includes('5-10') ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                          'bg-red-500/20 text-red-400 border border-red-500/30'
+                        }`}>
+                          <TrendingUp className="w-4 h-4" />
+                          {analysis.upsideTier} tier
+                        </div>
+                      )}
+                    </div>
+
+                    {/* FDV Range - Supporting Detail */}
+                    {(analysis.currentFdv || analysis.realisticPeakFdv) && (
+                      <div className="mt-3 pt-3 border-t border-white/10 flex items-center gap-2 text-sm">
+                        <span className="text-muted-foreground">FDV Path:</span>
+                        <span className="font-mono text-muted-foreground">
+                          {analysis.currentFdv || '?'}
+                        </span>
+                        <ArrowUp className="w-4 h-4 text-primary" />
+                        <span className="font-mono text-primary font-medium">
+                          {analysis.realisticPeakFdv || '?'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Team/Project Info Row */}
               {(analysis.teamStatus || analysis.notableBackers) && (
@@ -1882,7 +2073,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {/* Narrative/Meta Heat */}
               <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
                 <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">{isMemecoin ? 'Meta Heat' : 'Narrative Heat'}</div>
@@ -1961,12 +2152,160 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                 <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Notable KOLs</div>
                 {(() => {
                   const kols = analysis.xTopKols as string;
-                  if (!kols || kols.toLowerCase().includes('n/a') || kols.toLowerCase() === 'none') {
+                  const kolRecency = analysis.kolMentionRecency as string;
+                  // Handle missing or empty KOL data gracefully
+                  const isEmpty = !kols
+                    || kols.trim() === ''
+                    || kols.toLowerCase().includes('n/a')
+                    || kols.toLowerCase() === 'none'
+                    || kols.toLowerCase() === 'none identified'
+                    || kols.toLowerCase() === 'none known';
+                  if (isEmpty) {
                     return <div className="text-sm text-muted-foreground">None identified</div>;
                   }
-                  return <div className="text-sm text-sky-400">{kols}</div>;
+                  return (
+                    <div>
+                      <div className="text-sm text-sky-400">{kols}</div>
+                      {/* Only show recency if KOL data exists and recency is available */}
+                      {kolRecency && kolRecency.trim() !== '' && !kolRecency.toLowerCase().includes('n/a') && (
+                        <div className="text-xs text-muted-foreground mt-1">
+                          Mentions: {kolRecency}
+                        </div>
+                      )}
+                    </div>
+                  );
                 })()}
               </div>
+
+              {/* Engagement Quality - with optional detail breakdown */}
+              {analysis.engagementQuality && (
+                <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Engagement</div>
+                  {(() => {
+                    const quality = (analysis.engagementQuality as string)?.toLowerCase() || '';
+                    const displayQuality = analysis.engagementQuality as string;
+                    const hasDetails = analysis.likesPerPostAvg || analysis.retweetsPerPostAvg || analysis.repliesPerPostAvg;
+
+                    if (!displayQuality || displayQuality.toLowerCase().includes('n/a')) {
+                      return <div className="text-sm text-muted-foreground">—</div>;
+                    }
+                    const colorClass =
+                      quality.includes('high') ? 'text-green-400' :
+                      quality.includes('moderate') ? 'text-yellow-400' :
+                      quality.includes('low') ? 'text-orange-400' :
+                      quality.includes('bot') ? 'text-red-400' :
+                      'text-muted-foreground';
+                    return (
+                      <div>
+                        <div className={`text-sm font-medium ${colorClass}`}>{displayQuality}</div>
+                        {hasDetails && (
+                          <div className="mt-2 pt-2 border-t border-white/5 space-y-1">
+                            {analysis.likesPerPostAvg && (
+                              <div className="text-xs text-muted-foreground">
+                                Likes: <span className="text-foreground/80">{analysis.likesPerPostAvg as string}</span>
+                              </div>
+                            )}
+                            {analysis.retweetsPerPostAvg && (
+                              <div className="text-xs text-muted-foreground">
+                                RTs: <span className="text-foreground/80">{analysis.retweetsPerPostAvg as string}</span>
+                              </div>
+                            )}
+                            {analysis.repliesPerPostAvg && (
+                              <div className="text-xs text-muted-foreground">
+                                Replies: <span className="text-foreground/80">{analysis.repliesPerPostAvg as string}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Overall Sentiment - with optional ratio breakdown */}
+              {analysis.overallSentiment && (
+                <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Sentiment</div>
+                  {(() => {
+                    const sentiment = (analysis.overallSentiment as string)?.toLowerCase() || '';
+                    const displaySentiment = analysis.overallSentiment as string;
+                    const hasRatios = analysis.sentimentBullishRatio || analysis.sentimentBearishRatio || analysis.sentimentNeutralRatio;
+                    const sampleSize = analysis.sentimentSampleSize as string;
+
+                    if (!displaySentiment || displaySentiment.toLowerCase().includes('n/a')) {
+                      return <div className="text-sm text-muted-foreground">—</div>;
+                    }
+                    const colorClass =
+                      sentiment.includes('strongly bullish') ? 'text-green-400' :
+                      sentiment.includes('bullish') ? 'text-emerald-400' :
+                      sentiment.includes('mixed') ? 'text-yellow-400' :
+                      sentiment.includes('strongly bearish') ? 'text-red-400' :
+                      sentiment.includes('bearish') ? 'text-orange-400' :
+                      'text-muted-foreground';
+                    return (
+                      <div>
+                        <div className={`text-sm font-medium ${colorClass}`}>{displaySentiment}</div>
+                        {hasRatios && (
+                          <div className="mt-2 pt-2 border-t border-white/5 space-y-1">
+                            {analysis.sentimentBullishRatio && (
+                              <div className="text-xs text-muted-foreground">
+                                Bullish: <span className="text-green-400/80">{analysis.sentimentBullishRatio as string}</span>
+                              </div>
+                            )}
+                            {analysis.sentimentBearishRatio && (
+                              <div className="text-xs text-muted-foreground">
+                                Bearish: <span className="text-red-400/80">{analysis.sentimentBearishRatio as string}</span>
+                              </div>
+                            )}
+                            {analysis.sentimentNeutralRatio && (
+                              <div className="text-xs text-muted-foreground">
+                                Neutral: <span className="text-foreground/60">{analysis.sentimentNeutralRatio as string}</span>
+                              </div>
+                            )}
+                            {sampleSize && !sampleSize.toLowerCase().includes('n/a') && (
+                              <div className="text-[10px] text-muted-foreground/70 mt-1">
+                                Sample: {sampleSize}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Cult vs Mercenary - with optional ratio */}
+              {analysis.cultVsMercenary && (
+                <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Holder Type</div>
+                  {(() => {
+                    const type = (analysis.cultVsMercenary as string)?.toLowerCase() || '';
+                    const displayType = analysis.cultVsMercenary as string;
+                    const ratioDetail = analysis.cultMercenaryRatio as string;
+
+                    if (!displayType || displayType.toLowerCase().includes('n/a') || displayType.toLowerCase().includes('unable')) {
+                      return <div className="text-sm text-muted-foreground">—</div>;
+                    }
+                    const colorClass =
+                      type.includes('cult') ? 'text-purple-400' :
+                      type.includes('mercenary') ? 'text-orange-400' :
+                      type.includes('balanced') ? 'text-cyan-400' :
+                      'text-muted-foreground';
+                    return (
+                      <div>
+                        <div className={`text-sm font-medium ${colorClass}`}>{displayType}</div>
+                        {ratioDetail && ratioDetail !== displayType && !ratioDetail.toLowerCase().includes('n/a') && (
+                          <div className="text-[10px] text-muted-foreground/70 mt-1">
+                            {ratioDetail}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -2057,6 +2396,12 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
               ? { score: modelScores[selectedModel]! }
               : undefined
         }
+      />
+
+      {/* Scoring Methodology Modal */}
+      <ScoringMethodologyModal
+        isOpen={showMethodologyModal}
+        onClose={() => setShowMethodologyModal(false)}
       />
     </div>
   );

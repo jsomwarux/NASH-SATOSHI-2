@@ -30,6 +30,21 @@ export interface ParsedGumloopResponse {
   communityStatus?: string; // Very Active/Active/Moderate/Low/Dead
   accountQuality?: string; // Builders/Researchers, Traders/Degens, Mixed Quality, Promoters/Shills
 
+  // X Research qualitative fields (NEW - replacing numeric versions)
+  engagementQuality?: string; // "High", "Moderate", "Low", "Bot-Heavy"
+  overallSentiment?: string; // "Strongly Bullish", "Bullish", "Mixed", "Bearish", "Strongly Bearish"
+  cultVsMercenary?: string; // "Cult-Heavy", "Mercenary-Heavy", "Balanced Mix", "Unable to Assess"
+
+  // X Research flexible format fields (can be numeric OR qualitative)
+  sentimentBullishRatio?: string; // "72%" or "High (~70%+)"
+  sentimentBearishRatio?: string; // "8%" or "Low (<10%)"
+  sentimentNeutralRatio?: string; // "20%" or "Moderate (~40-70%)"
+  likesPerPostAvg?: string; // "150" or "High (hundreds+)"
+  retweetsPerPostAvg?: string; // "45" or "Moderate (tens)"
+  repliesPerPostAvg?: string; // "12" or "Low (minimal)"
+  cultMercenaryRatio?: string; // "80% cult / 20% mercenary" or "Cult-Heavy"
+  sentimentSampleSize?: string; // "25" or "~20 posts observed"
+
   // Team/Project info (NEW)
   unlockWarning?: string;
   teamStatus?: string;
@@ -69,6 +84,18 @@ export interface ParsedGumloopResponse {
   scoreCapped?: boolean;
   uncappedScore?: number;
 
+  // Upside Assessment (from Stage 4)
+  currentFdv?: string; // e.g., "$5M", "$44.33M"
+  realisticPeakFdv?: string; // e.g., "$500M"
+  upsideMultiple?: string; // e.g., "10x", "50x", "100x"
+  upsideTier?: string; // "<5x", "5-10x", "10-25x", "25-50x", "50-100x", "100x+"
+
+  // New Stage 4 fields
+  narrativeDurability?: string; // "High", "Medium", "Low" - from NARRATIVE section
+  kolMentionRecency?: string; // "Last 7 days", "Last 30 days", "1-3 months ago", "Older than 3 months"
+  distributionWarning?: string; // "DISTRIBUTION SIGNAL DETECTED" or null - from X Research divergence check
+  scoreCalculation?: string; // LLM arithmetic work showing final score average calculation (for verification)
+
   // Game theory
   equilibriumType?: string;
   equilibriumEvolution?: string;
@@ -87,6 +114,11 @@ export interface ParsedGumloopResponse {
   modelScores: ModelScores;
   modelAnalyses: ModelAnalyses;
   modelAgreement?: string;
+
+  // Model divergence metrics (NEW)
+  scoreSpread?: number; // Difference between highest and lowest model scores
+  divergenceFlag?: string; // "HIGH" (>15 pts), "MODERATE" (10-15 pts), "LOW" (<10 pts)
+  divergenceNote?: string; // Explanation when divergence is HIGH
 }
 
 // Clean text - remove markdown formatting
@@ -101,6 +133,65 @@ function cleanText(text: string | undefined | null): string {
     .replace(/\n+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// Sanitize field names by stripping asterisks (e.g., **final_score:** -> final_score:)
+// This handles Stage 4 outputs that may have asterisks around field names
+function sanitizeFieldText(text: string): string {
+  if (!text) return "";
+  // Replace **field_name:** with field_name: (preserve the colon)
+  // Also handles **field_name**: and ** field_name **:
+  return text.replace(/\*\*\s*([a-zA-Z_][a-zA-Z0-9_\s]*[a-zA-Z0-9_])\s*\*\*\s*:/gi, '$1:');
+}
+
+// Valid categories for community status parsing
+const COMMUNITY_STATUS_CATEGORIES = ["Very Active", "Active", "Moderate", "Low", "Dead"];
+
+// Valid categories for account quality parsing
+const ACCOUNT_QUALITY_CATEGORIES = ["Builders/Researchers", "Traders/Degens", "Mixed Quality", "Promoters/Shills", "Bots/Spam"];
+
+// Extract valid category from a longer string (e.g., "Active. The community shows..." -> "Active")
+function extractCommunityStatusCategory(value: string): string {
+  if (!value) return value;
+  const cleanValue = cleanText(value);
+
+  // Check if the value starts with any valid category
+  for (const category of COMMUNITY_STATUS_CATEGORIES) {
+    if (cleanValue.toLowerCase().startsWith(category.toLowerCase())) {
+      return category;
+    }
+  }
+
+  // Check if any category is contained in the value (fallback)
+  for (const category of COMMUNITY_STATUS_CATEGORIES) {
+    if (cleanValue.toLowerCase().includes(category.toLowerCase())) {
+      return category;
+    }
+  }
+
+  return cleanValue;
+}
+
+// Extract valid category from account quality string
+function extractAccountQualityCategory(value: string): string {
+  if (!value) return value;
+  const cleanValue = cleanText(value);
+
+  // Check if the value starts with any valid category
+  for (const category of ACCOUNT_QUALITY_CATEGORIES) {
+    if (cleanValue.toLowerCase().startsWith(category.toLowerCase())) {
+      return category;
+    }
+  }
+
+  // Check if any category is contained in the value (fallback)
+  for (const category of ACCOUNT_QUALITY_CATEGORIES) {
+    if (cleanValue.toLowerCase().includes(category.toLowerCase())) {
+      return category;
+    }
+  }
+
+  return cleanValue;
 }
 
 // Clean text but preserve paragraph structure
@@ -453,6 +544,138 @@ const FIELD_ALIASES: Record<string, string> = {
   'x top kols': 'top_kols',
   'notable_kols': 'top_kols',
   'notable kols': 'top_kols',
+
+  // Upside Assessment fields
+  'current_fdv': 'current_fdv',
+  'current fdv': 'current_fdv',
+  'currentfdv': 'current_fdv',
+  'realistic_peak_fdv': 'realistic_peak_fdv',
+  'realistic peak fdv': 'realistic_peak_fdv',
+  'peak_fdv': 'realistic_peak_fdv',
+  'peak fdv': 'realistic_peak_fdv',
+  'upside_multiple': 'upside_multiple',
+  'upside multiple': 'upside_multiple',
+  'upsidemultiple': 'upside_multiple',
+  'multiple': 'upside_multiple',
+  'upside_tier': 'upside_tier',
+  'upside tier': 'upside_tier',
+  'upsidetier': 'upside_tier',
+
+  // New Stage 4 fields
+  'narrative_durability': 'narrative_durability',
+  'narrative durability': 'narrative_durability',
+  'narrativedurability': 'narrative_durability',
+  'durability': 'narrative_durability',
+
+  'kol_mention_recency': 'kol_mention_recency',
+  'kol mention recency': 'kol_mention_recency',
+  'kolmentionrecency': 'kol_mention_recency',
+  'mention_recency': 'kol_mention_recency',
+  'mention recency': 'kol_mention_recency',
+
+  'divergence_check_distribution_warning': 'distribution_warning',
+  'divergence check distribution warning': 'distribution_warning',
+  'distribution_warning': 'distribution_warning',
+  'distribution warning': 'distribution_warning',
+  'distributionwarning': 'distribution_warning',
+
+  // Score calculation field (LLM arithmetic verification)
+  'score_calculation': 'score_calculation',
+  'score calculation': 'score_calculation',
+  'scorecalculation': 'score_calculation',
+  'final_score_calculation': 'score_calculation',
+  'final score calculation': 'score_calculation',
+  'calculation': 'score_calculation',
+
+  // X Research qualitative fields
+  'engagement_quality': 'engagement_quality',
+  'engagement quality': 'engagement_quality',
+  'engagementquality': 'engagement_quality',
+  'attention_metrics_engagement_quality': 'engagement_quality',
+  'attention metrics engagement quality': 'engagement_quality',
+
+  'overall_sentiment': 'overall_sentiment',
+  'overall sentiment': 'overall_sentiment',
+  'overallsentiment': 'overall_sentiment',
+  'sentiment_analysis_overall_sentiment': 'overall_sentiment',
+  'sentiment analysis overall sentiment': 'overall_sentiment',
+
+  'cult_vs_mercenary': 'cult_vs_mercenary',
+  'cult vs mercenary': 'cult_vs_mercenary',
+  'cultvsmercenary': 'cult_vs_mercenary',
+  'community_coordination_cult_vs_mercenary': 'cult_vs_mercenary',
+  'community coordination cult vs mercenary': 'cult_vs_mercenary',
+
+  // Model divergence fields
+  'score_spread': 'score_spread',
+  'score spread': 'score_spread',
+  'scorespread': 'score_spread',
+  'model_score_spread': 'score_spread',
+  'model score spread': 'score_spread',
+
+  'divergence_flag': 'divergence_flag',
+  'divergence flag': 'divergence_flag',
+  'divergenceflag': 'divergence_flag',
+  'model_divergence': 'divergence_flag',
+  'model divergence': 'divergence_flag',
+
+  'divergence_note': 'divergence_note',
+  'divergence note': 'divergence_note',
+  'divergencenote': 'divergence_note',
+  'divergence_explanation': 'divergence_note',
+  'divergence explanation': 'divergence_note',
+
+  // X Research flexible format fields (sentiment ratios)
+  'sentiment_analysis_overall_sentiment_ratio_bullish': 'sentiment_bullish_ratio',
+  'sentiment analysis overall sentiment ratio bullish': 'sentiment_bullish_ratio',
+  'sentiment_ratio_bullish': 'sentiment_bullish_ratio',
+  'bullish_ratio': 'sentiment_bullish_ratio',
+  'bullish ratio': 'sentiment_bullish_ratio',
+
+  'sentiment_analysis_overall_sentiment_ratio_bearish': 'sentiment_bearish_ratio',
+  'sentiment analysis overall sentiment ratio bearish': 'sentiment_bearish_ratio',
+  'sentiment_ratio_bearish': 'sentiment_bearish_ratio',
+  'bearish_ratio': 'sentiment_bearish_ratio',
+  'bearish ratio': 'sentiment_bearish_ratio',
+
+  'sentiment_analysis_overall_sentiment_ratio_neutral': 'sentiment_neutral_ratio',
+  'sentiment analysis overall sentiment ratio neutral': 'sentiment_neutral_ratio',
+  'sentiment_ratio_neutral': 'sentiment_neutral_ratio',
+  'neutral_ratio': 'sentiment_neutral_ratio',
+  'neutral ratio': 'sentiment_neutral_ratio',
+
+  // X Research flexible format fields (engagement quality details)
+  'attention_metrics_engagement_quality_likes_per_post_average': 'likes_per_post_avg',
+  'attention metrics engagement quality likes per post average': 'likes_per_post_avg',
+  'likes_per_post_average': 'likes_per_post_avg',
+  'likes_per_post': 'likes_per_post_avg',
+  'likes per post': 'likes_per_post_avg',
+
+  'attention_metrics_engagement_quality_retweets_per_post_average': 'retweets_per_post_avg',
+  'attention metrics engagement quality retweets per post average': 'retweets_per_post_avg',
+  'retweets_per_post_average': 'retweets_per_post_avg',
+  'retweets_per_post': 'retweets_per_post_avg',
+  'retweets per post': 'retweets_per_post_avg',
+
+  'attention_metrics_engagement_quality_replies_per_post_average': 'replies_per_post_avg',
+  'attention metrics engagement quality replies per post average': 'replies_per_post_avg',
+  'replies_per_post_average': 'replies_per_post_avg',
+  'replies_per_post': 'replies_per_post_avg',
+  'replies per post': 'replies_per_post_avg',
+
+  // X Research flexible format fields (cult/mercenary ratio)
+  'community_coordination_cult_vs_mercenary_ratio': 'cult_mercenary_ratio',
+  'community coordination cult vs mercenary ratio': 'cult_mercenary_ratio',
+  'cult_mercenary_ratio': 'cult_mercenary_ratio',
+  'cult mercenary ratio': 'cult_mercenary_ratio',
+
+  // X Research flexible format fields (sample size)
+  'sentiment_analysis_sample_size_of_posts_analyzed': 'sentiment_sample_size',
+  'sentiment analysis sample size of posts analyzed': 'sentiment_sample_size',
+  'sample_size_of_posts_analyzed': 'sentiment_sample_size',
+  'sample_size': 'sentiment_sample_size',
+  'sample size': 'sentiment_sample_size',
+  'posts_analyzed': 'sentiment_sample_size',
 };
 
 // Normalize a field name to its canonical form
@@ -868,7 +1091,9 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   const recommendation = extractField(parseText, 'recommendation');
   if (recommendation) {
     const rec = recommendation.toUpperCase();
-    if (rec.includes('BUY')) result.recommendation = 'BUY';
+    // Check for CAUTIOUS BUY first (before plain BUY, since it contains "BUY")
+    if (rec.includes('CAUTIOUS') && rec.includes('BUY')) result.recommendation = 'CAUTIOUS BUY';
+    else if (rec.includes('BUY')) result.recommendation = 'BUY';
     else if (rec.includes('AVOID') || rec.includes('SELL')) result.recommendation = 'AVOID';
     else result.recommendation = 'HOLD';
   }
@@ -1049,21 +1274,173 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   }
 
   // Community Status - new reliable field with fallback to old long field name
+  // Extract just the category if value contains additional text
   const communityStatus = extractField(parseText, 'community_status')
     || extractField(parseText, 'community_coordination_active_community_status')
     || extractField(parseText, 'active_community_status');
   if (communityStatus) {
-    result.communityStatus = stripFieldLabelPrefix(cleanText(communityStatus));
+    result.communityStatus = extractCommunityStatusCategory(stripFieldLabelPrefix(communityStatus));
     console.log(`Parser: Extracted communityStatus: "${result.communityStatus}"`);
   }
 
   // Account Quality - new reliable field with fallback to old long field name
+  // Extract just the category if value contains additional text
   const accountQuality = extractField(parseText, 'account_quality')
     || extractField(parseText, 'account_analysis_account_quality_assessment')
     || extractField(parseText, 'account_quality_assessment');
   if (accountQuality) {
-    result.accountQuality = stripFieldLabelPrefix(cleanText(accountQuality));
+    result.accountQuality = extractAccountQualityCategory(stripFieldLabelPrefix(accountQuality));
     console.log(`Parser: Extracted accountQuality: "${result.accountQuality}"`);
+  }
+
+  // X Research qualitative fields (NEW - replacing numeric versions)
+  const engagementQuality = extractField(parseText, 'engagement_quality')
+    || extractField(parseText, 'attention_metrics_engagement_quality');
+  if (engagementQuality) {
+    result.engagementQuality = cleanText(engagementQuality);
+    console.log(`Parser: Extracted engagementQuality: "${result.engagementQuality}"`);
+  }
+
+  const overallSentiment = extractField(parseText, 'overall_sentiment')
+    || extractField(parseText, 'sentiment_analysis_overall_sentiment');
+  if (overallSentiment) {
+    result.overallSentiment = cleanText(overallSentiment);
+    console.log(`Parser: Extracted overallSentiment: "${result.overallSentiment}"`);
+  }
+
+  const cultVsMercenary = extractField(parseText, 'cult_vs_mercenary')
+    || extractField(parseText, 'community_coordination_cult_vs_mercenary');
+  if (cultVsMercenary) {
+    result.cultVsMercenary = cleanText(cultVsMercenary);
+    console.log(`Parser: Extracted cultVsMercenary: "${result.cultVsMercenary}"`);
+  }
+
+  // X Research flexible format fields (can be numeric OR qualitative)
+  // Sentiment ratios
+  const sentimentBullishRatio = extractField(parseText, 'sentiment_analysis_overall_sentiment_ratio_bullish')
+    || extractField(parseText, 'sentiment_ratio_bullish')
+    || extractField(parseText, 'bullish_ratio');
+  if (sentimentBullishRatio) {
+    result.sentimentBullishRatio = cleanText(sentimentBullishRatio);
+    console.log(`Parser: Extracted sentimentBullishRatio: "${result.sentimentBullishRatio}"`);
+  }
+
+  const sentimentBearishRatio = extractField(parseText, 'sentiment_analysis_overall_sentiment_ratio_bearish')
+    || extractField(parseText, 'sentiment_ratio_bearish')
+    || extractField(parseText, 'bearish_ratio');
+  if (sentimentBearishRatio) {
+    result.sentimentBearishRatio = cleanText(sentimentBearishRatio);
+    console.log(`Parser: Extracted sentimentBearishRatio: "${result.sentimentBearishRatio}"`);
+  }
+
+  const sentimentNeutralRatio = extractField(parseText, 'sentiment_analysis_overall_sentiment_ratio_neutral')
+    || extractField(parseText, 'sentiment_ratio_neutral')
+    || extractField(parseText, 'neutral_ratio');
+  if (sentimentNeutralRatio) {
+    result.sentimentNeutralRatio = cleanText(sentimentNeutralRatio);
+    console.log(`Parser: Extracted sentimentNeutralRatio: "${result.sentimentNeutralRatio}"`);
+  }
+
+  // Engagement quality details
+  const likesPerPostAvg = extractField(parseText, 'attention_metrics_engagement_quality_likes_per_post_average')
+    || extractField(parseText, 'likes_per_post_average')
+    || extractField(parseText, 'likes_per_post');
+  if (likesPerPostAvg) {
+    result.likesPerPostAvg = cleanText(likesPerPostAvg);
+    console.log(`Parser: Extracted likesPerPostAvg: "${result.likesPerPostAvg}"`);
+  }
+
+  const retweetsPerPostAvg = extractField(parseText, 'attention_metrics_engagement_quality_retweets_per_post_average')
+    || extractField(parseText, 'retweets_per_post_average')
+    || extractField(parseText, 'retweets_per_post');
+  if (retweetsPerPostAvg) {
+    result.retweetsPerPostAvg = cleanText(retweetsPerPostAvg);
+    console.log(`Parser: Extracted retweetsPerPostAvg: "${result.retweetsPerPostAvg}"`);
+  }
+
+  const repliesPerPostAvg = extractField(parseText, 'attention_metrics_engagement_quality_replies_per_post_average')
+    || extractField(parseText, 'replies_per_post_average')
+    || extractField(parseText, 'replies_per_post');
+  if (repliesPerPostAvg) {
+    result.repliesPerPostAvg = cleanText(repliesPerPostAvg);
+    console.log(`Parser: Extracted repliesPerPostAvg: "${result.repliesPerPostAvg}"`);
+  }
+
+  // Cult/Mercenary ratio (flexible format)
+  const cultMercenaryRatio = extractField(parseText, 'community_coordination_cult_vs_mercenary_ratio')
+    || extractField(parseText, 'cult_mercenary_ratio');
+  if (cultMercenaryRatio) {
+    result.cultMercenaryRatio = cleanText(cultMercenaryRatio);
+    console.log(`Parser: Extracted cultMercenaryRatio: "${result.cultMercenaryRatio}"`);
+  }
+
+  // Sample size (flexible format)
+  const sentimentSampleSize = extractField(parseText, 'sentiment_analysis_sample_size_of_posts_analyzed')
+    || extractField(parseText, 'sample_size_of_posts_analyzed')
+    || extractField(parseText, 'sample_size');
+  if (sentimentSampleSize) {
+    result.sentimentSampleSize = cleanText(sentimentSampleSize);
+    console.log(`Parser: Extracted sentimentSampleSize: "${result.sentimentSampleSize}"`);
+  }
+
+  // Upside Assessment (from Stage 4)
+  const currentFdv = extractField(parseText, 'current_fdv');
+  if (currentFdv) {
+    result.currentFdv = cleanText(currentFdv);
+    console.log(`Parser: Extracted currentFdv: "${result.currentFdv}"`);
+  }
+
+  const realisticPeakFdv = extractField(parseText, 'realistic_peak_fdv');
+  if (realisticPeakFdv) {
+    result.realisticPeakFdv = cleanText(realisticPeakFdv);
+    console.log(`Parser: Extracted realisticPeakFdv: "${result.realisticPeakFdv}"`);
+  }
+
+  const upsideMultiple = extractField(parseText, 'upside_multiple');
+  if (upsideMultiple) {
+    result.upsideMultiple = cleanText(upsideMultiple);
+    console.log(`Parser: Extracted upsideMultiple: "${result.upsideMultiple}"`);
+  }
+
+  const upsideTier = extractField(parseText, 'upside_tier');
+  if (upsideTier) {
+    result.upsideTier = cleanText(upsideTier);
+    console.log(`Parser: Extracted upsideTier: "${result.upsideTier}"`);
+  }
+
+  // New Stage 4 fields
+  const narrativeDurability = extractField(parseText, 'narrative_durability');
+  if (narrativeDurability) {
+    result.narrativeDurability = cleanText(narrativeDurability);
+    console.log(`Parser: Extracted narrativeDurability: "${result.narrativeDurability}"`);
+  }
+
+  const kolMentionRecency = extractField(parseText, 'kol_mention_recency');
+  if (kolMentionRecency) {
+    result.kolMentionRecency = cleanText(kolMentionRecency);
+    console.log(`Parser: Extracted kolMentionRecency: "${result.kolMentionRecency}"`);
+  }
+
+  const distributionWarning = extractField(parseText, 'divergence_check_distribution_warning')
+    || extractField(parseText, 'distribution_warning');
+  if (distributionWarning) {
+    const cleanedWarning = cleanText(distributionWarning);
+    // Only store if it's the actual signal detection
+    if (cleanedWarning.toUpperCase().includes('DISTRIBUTION') && cleanedWarning.toUpperCase().includes('DETECTED')) {
+      result.distributionWarning = 'DISTRIBUTION SIGNAL DETECTED';
+      console.log(`Parser: Extracted distributionWarning: DISTRIBUTION SIGNAL DETECTED`);
+    } else {
+      result.distributionWarning = cleanedWarning;
+      console.log(`Parser: Extracted distributionWarning: "${cleanedWarning}"`);
+    }
+  }
+
+  // Score calculation (LLM arithmetic work for verification)
+  const scoreCalculation = extractField(parseText, 'score_calculation');
+  if (scoreCalculation) {
+    // Store the raw calculation string - don't clean it as it contains arithmetic
+    result.scoreCalculation = scoreCalculation.trim();
+    console.log(`Parser: Extracted scoreCalculation: "${result.scoreCalculation}"`);
   }
 
   // Team/Project Info (NEW)
@@ -1098,6 +1475,28 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   const modelAgreement = extractField(parseText, 'model_agreement');
   if (modelAgreement) {
     result.modelAgreement = cleanText(modelAgreement);
+  }
+
+  // Model divergence metrics (NEW)
+  const scoreSpread = extractNumericField(parseText, 'score_spread');
+  if (scoreSpread !== undefined) {
+    result.scoreSpread = scoreSpread;
+    console.log(`Parser: Extracted scoreSpread: ${result.scoreSpread}`);
+  }
+
+  const divergenceFlag = extractField(parseText, 'divergence_flag');
+  if (divergenceFlag) {
+    const flag = cleanText(divergenceFlag).toUpperCase();
+    if (['HIGH', 'MODERATE', 'LOW'].includes(flag)) {
+      result.divergenceFlag = flag;
+      console.log(`Parser: Extracted divergenceFlag: ${result.divergenceFlag}`);
+    }
+  }
+
+  const divergenceNote = extractField(parseText, 'divergence_note');
+  if (divergenceNote) {
+    result.divergenceNote = cleanText(divergenceNote);
+    console.log(`Parser: Extracted divergenceNote: "${result.divergenceNote}"`);
   }
 
   // Model Analysis - verdict, reasoning, and risks for each model
@@ -1586,10 +1985,13 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
     return result;
   }
 
+  // Sanitize field names by stripping asterisks (e.g., **final_score:** -> final_score:)
+  const sanitizedText = sanitizeFieldText(rawText);
+
   try {
     // ==================== PRIMARY STRATEGY: Parse OUTPUT SUMMARY section ====================
     // The OUTPUT SUMMARY section uses a consistent field_name: value format
-    const summarySection = extractOutputSummarySection(rawText);
+    const summarySection = extractOutputSummarySection(sanitizedText);
     let summaryMap: Map<string, string> | null = null;
 
     if (summarySection) {
@@ -1728,14 +2130,14 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
       }
     }
 
-    // Fill in remaining fields with structured output parser
-    parseStructuredOutput(rawText, result);
+    // Fill in remaining fields with structured output parser (using sanitized text)
+    parseStructuredOutput(sanitizedText, result);
 
     // Log parsed narrative for debugging
     console.log(`Parser: After parseStructuredOutput - narrative: "${result.narrative || 'undefined'}"`);
 
-    // Then, fill in any missing fields with legacy parsing
-    parseLegacyFormat(rawText, result);
+    // Then, fill in any missing fields with legacy parsing (using sanitized text)
+    parseLegacyFormat(sanitizedText, result);
 
     // Log after legacy parsing
     console.log(`Parser: After parseLegacyFormat - narrative: "${result.narrative || 'undefined'}"`);
@@ -2009,21 +2411,113 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   }
 
   // Community Status - new reliable field with fallback to old long field name
+  // Extract just the category if value contains additional text
   const communityStatus = getString('community_status')
     || getString('community_coordination_active_community_status')
     || getString('active_community_status');
   if (communityStatus) {
-    result.communityStatus = stripFieldLabelPrefix(communityStatus);
+    result.communityStatus = extractCommunityStatusCategory(stripFieldLabelPrefix(communityStatus));
     console.log(`Parser (outputs): Extracted communityStatus: "${result.communityStatus}"`);
   }
 
   // Account Quality - new reliable field with fallback to old long field name
+  // Extract just the category if value contains additional text
   const accountQuality = getString('account_quality')
     || getString('account_analysis_account_quality_assessment')
     || getString('account_quality_assessment');
   if (accountQuality) {
-    result.accountQuality = stripFieldLabelPrefix(accountQuality);
+    result.accountQuality = extractAccountQualityCategory(stripFieldLabelPrefix(accountQuality));
     console.log(`Parser (outputs): Extracted accountQuality: "${result.accountQuality}"`);
+  }
+
+  // X Research qualitative fields (NEW - replacing numeric versions)
+  const engagementQuality = getString('engagement_quality')
+    || getString('attention_metrics_engagement_quality');
+  if (engagementQuality) {
+    result.engagementQuality = engagementQuality;
+    console.log(`Parser (outputs): Extracted engagementQuality: "${result.engagementQuality}"`);
+  }
+
+  const overallSentiment = getString('overall_sentiment')
+    || getString('sentiment_analysis_overall_sentiment');
+  if (overallSentiment) {
+    result.overallSentiment = overallSentiment;
+    console.log(`Parser (outputs): Extracted overallSentiment: "${result.overallSentiment}"`);
+  }
+
+  const cultVsMercenary = getString('cult_vs_mercenary')
+    || getString('community_coordination_cult_vs_mercenary');
+  if (cultVsMercenary) {
+    result.cultVsMercenary = cultVsMercenary;
+    console.log(`Parser (outputs): Extracted cultVsMercenary: "${result.cultVsMercenary}"`);
+  }
+
+  // X Research flexible format fields (can be numeric OR qualitative)
+  // Sentiment ratios
+  const sentimentBullishRatio = getString('sentiment_analysis_overall_sentiment_ratio_bullish')
+    || getString('sentiment_ratio_bullish')
+    || getString('bullish_ratio');
+  if (sentimentBullishRatio) {
+    result.sentimentBullishRatio = sentimentBullishRatio;
+    console.log(`Parser (outputs): Extracted sentimentBullishRatio: "${result.sentimentBullishRatio}"`);
+  }
+
+  const sentimentBearishRatio = getString('sentiment_analysis_overall_sentiment_ratio_bearish')
+    || getString('sentiment_ratio_bearish')
+    || getString('bearish_ratio');
+  if (sentimentBearishRatio) {
+    result.sentimentBearishRatio = sentimentBearishRatio;
+    console.log(`Parser (outputs): Extracted sentimentBearishRatio: "${result.sentimentBearishRatio}"`);
+  }
+
+  const sentimentNeutralRatio = getString('sentiment_analysis_overall_sentiment_ratio_neutral')
+    || getString('sentiment_ratio_neutral')
+    || getString('neutral_ratio');
+  if (sentimentNeutralRatio) {
+    result.sentimentNeutralRatio = sentimentNeutralRatio;
+    console.log(`Parser (outputs): Extracted sentimentNeutralRatio: "${result.sentimentNeutralRatio}"`);
+  }
+
+  // Engagement quality details
+  const likesPerPostAvg = getString('attention_metrics_engagement_quality_likes_per_post_average')
+    || getString('likes_per_post_average')
+    || getString('likes_per_post');
+  if (likesPerPostAvg) {
+    result.likesPerPostAvg = likesPerPostAvg;
+    console.log(`Parser (outputs): Extracted likesPerPostAvg: "${result.likesPerPostAvg}"`);
+  }
+
+  const retweetsPerPostAvg = getString('attention_metrics_engagement_quality_retweets_per_post_average')
+    || getString('retweets_per_post_average')
+    || getString('retweets_per_post');
+  if (retweetsPerPostAvg) {
+    result.retweetsPerPostAvg = retweetsPerPostAvg;
+    console.log(`Parser (outputs): Extracted retweetsPerPostAvg: "${result.retweetsPerPostAvg}"`);
+  }
+
+  const repliesPerPostAvg = getString('attention_metrics_engagement_quality_replies_per_post_average')
+    || getString('replies_per_post_average')
+    || getString('replies_per_post');
+  if (repliesPerPostAvg) {
+    result.repliesPerPostAvg = repliesPerPostAvg;
+    console.log(`Parser (outputs): Extracted repliesPerPostAvg: "${result.repliesPerPostAvg}"`);
+  }
+
+  // Cult/Mercenary ratio (flexible format)
+  const cultMercenaryRatio = getString('community_coordination_cult_vs_mercenary_ratio')
+    || getString('cult_mercenary_ratio');
+  if (cultMercenaryRatio) {
+    result.cultMercenaryRatio = cultMercenaryRatio;
+    console.log(`Parser (outputs): Extracted cultMercenaryRatio: "${result.cultMercenaryRatio}"`);
+  }
+
+  // Sample size (flexible format)
+  const sentimentSampleSize = getString('sentiment_analysis_sample_size_of_posts_analyzed')
+    || getString('sample_size_of_posts_analyzed')
+    || getString('sample_size');
+  if (sentimentSampleSize) {
+    result.sentimentSampleSize = sentimentSampleSize;
+    console.log(`Parser (outputs): Extracted sentimentSampleSize: "${result.sentimentSampleSize}"`);
   }
 
   // Team/Project info (NEW)
@@ -2151,6 +2645,28 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
 
   const grokScore = getNumber('grok_score');
   if (grokScore !== undefined) result.modelScores.grok = grokScore;
+
+  // Model divergence metrics (NEW)
+  const scoreSpread = getNumber('score_spread');
+  if (scoreSpread !== undefined) {
+    result.scoreSpread = scoreSpread;
+    console.log(`Parser (outputs): Extracted scoreSpread: ${result.scoreSpread}`);
+  }
+
+  const divergenceFlag = getString('divergence_flag');
+  if (divergenceFlag) {
+    const flag = divergenceFlag.toUpperCase();
+    if (['HIGH', 'MODERATE', 'LOW'].includes(flag)) {
+      result.divergenceFlag = flag;
+      console.log(`Parser (outputs): Extracted divergenceFlag: ${result.divergenceFlag}`);
+    }
+  }
+
+  const divergenceNote = getString('divergence_note');
+  if (divergenceNote) {
+    result.divergenceNote = divergenceNote;
+    console.log(`Parser (outputs): Extracted divergenceNote: "${result.divergenceNote}"`);
+  }
 
   // Model analyses - verdict, reasoning, and risks for each model
   // Helper to parse comma-separated risks

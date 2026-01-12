@@ -5,13 +5,45 @@ import {
   dailyUsage,
   creditPurchases,
   tokenAnalyses,
+  tokenVoteRequests,
+  tokenVotes,
+  userDailyVotes,
+  priceSnapshots,
+  performanceMetrics,
   SUBSCRIPTION_TIERS,
   type UserSubscription,
   type InsertUserSubscription,
   type TokenAnalysis,
   type InsertTokenAnalysis,
   type SubscriptionTierId,
+  type TokenVoteRequest,
+  type InsertTokenVoteRequest,
+  type TokenVote,
+  type InsertTokenVote,
+  type UserDailyVotes,
+  type PriceSnapshot,
+  type InsertPriceSnapshot,
+  type PerformanceMetrics,
+  type InsertPerformanceMetrics,
 } from "@shared/schema";
+
+// ==================== HELPERS ====================
+
+// Get current date string in EST (YYYY-MM-DD)
+// EST is UTC-5
+function getESTDateString(): string {
+  const now = new Date();
+  // Subtract 5 hours to convert UTC to EST
+  const estTime = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+  return estTime.toISOString().split('T')[0];
+}
+
+// Get start of today in EST as a Date object (for timestamp comparisons)
+function getESTTodayStart(): Date {
+  const estDate = getESTDateString();
+  // Midnight EST = 05:00 UTC
+  return new Date(`${estDate}T05:00:00.000Z`);
+}
 
 // ==================== NARRATIVE NORMALIZATION ====================
 // Groups similar narratives together for leaderboard stats
@@ -19,10 +51,14 @@ import {
 
 // Define canonical narratives and their keyword patterns
 const NARRATIVE_MAPPINGS: { canonical: string; keywords: string[] }[] = [
-  // AI & Tech narratives
+  // AI & Tech narratives - more specific patterns first
   { canonical: "AI Agents", keywords: ["ai agent", "autonomous ai", "ai assistant", "intelligent agent"] },
   { canonical: "AI Infrastructure", keywords: ["ai infra", "ai infrastructure", "machine learning", "ml infra"] },
+  { canonical: "AI", keywords: ["artificial intelligence", " ai ", " ai,", "(ai)", "ai/"] }, // Generic AI catch-all (with word boundaries)
   { canonical: "DePIN", keywords: ["depin", "decentralized physical", "physical infrastructure"] },
+
+  // Science & Research
+  { canonical: "DeSci", keywords: ["desci", "decentralized science", "science token", "research token", "biotech"] },
 
   // Finance narratives
   { canonical: "Payments", keywords: ["payment", "neobank", "spending", "remittance", "transfer"] },
@@ -50,6 +86,9 @@ const NARRATIVE_MAPPINGS: { canonical: string; keywords: string[] }[] = [
   { canonical: "Meme", keywords: ["meme", "memecoin", "doge", "shib", "culture"] },
 ];
 
+// Acronyms that should always be uppercase
+const UPPERCASE_ACRONYMS = ["AI", "NFT", "DeFi", "RWA", "DePIN", "DeSci", "DAO", "DEX", "CEX", "APY", "TVL", "ZK"];
+
 /**
  * Normalizes a narrative string to a canonical form for grouping
  * @param narrative - The raw narrative string (e.g., "AI Agents / Autonomous AI")
@@ -72,13 +111,22 @@ function normalizeNarrative(narrative: string): string {
   // If no mapping found, clean up the narrative:
   // - Take the first part before "/" or "|"
   // - Trim whitespace
-  // - Capitalize first letter of each word
-  const firstPart = narrative.split(/[\/|]/)[ 0].trim();
+  // - Capitalize properly with acronym handling
+  const firstPart = narrative.split(/[\/|]/)[0].trim();
 
-  // Title case the result
+  // Title case the result, preserving acronyms
   return firstPart
     .split(' ')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .map(word => {
+      // Check if this word matches any known acronym (case-insensitive)
+      const upperWord = word.toUpperCase();
+      const matchedAcronym = UPPERCASE_ACRONYMS.find(acr => acr.toUpperCase() === upperWord);
+      if (matchedAcronym) {
+        return matchedAcronym; // Use the canonical casing
+      }
+      // Otherwise title case it
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
     .join(' ');
 }
 
@@ -120,7 +168,10 @@ export interface IStorage {
   getRunningAnalysesCount(userId: string): Promise<number>;
   getTotalRunningAnalyses(): Promise<number>;
   getStuckAnalyses(maxAgeMinutes?: number): Promise<TokenAnalysis[]>;
+  getStuckAnalysesWithRunId(minAgeMinutes?: number): Promise<TokenAnalysis[]>;
   getAnalysesByTokenId(tokenId: string): Promise<TokenAnalysis[]>;
+  getLatestAnalysisByTokenId(tokenId: string): Promise<TokenAnalysis | null>;
+  getAllAnalyses(limit?: number, offset?: number, status?: string): Promise<{ items: TokenAnalysis[]; total: number }>;
 
   // Leaderboard methods
   getLeaderboard(options: {
@@ -135,14 +186,41 @@ export interface IStorage {
       search?: string;
       tokenType?: string;
       marketCapTier?: string;
+      upsideTier?: string;
     };
   }): Promise<{ items: any[]; total: number }>;
-  getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[]; tokenTypes: string[]; marketCapTiers: string[] }>;
+  getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[]; tokenTypes: string[]; marketCapTiers: string[]; upsideTiers: string[] }>;
   getLeaderboardStats(): Promise<{
-    topToken: { symbol: string; name: string; score: number; daysOnLeaderboard: number } | null;
-    topNarrative: { narrative: string; avgScore: number; tokenCount: number } | null;
-    winner24h: { symbol: string; name: string; score: number } | null;
+    topTokens: { symbol: string; name: string; score: number; daysInTop3: number }[];
+    topNarratives: { narrative: string; avgScore: number; tokenCount: number }[];
+    winners7d: { symbol: string; name: string; score: number }[];
   }>;
+
+  // Voting methods
+  getVoteRequestByTokenId(tokenId: string): Promise<TokenVoteRequest | null>;
+  getVoteRequests(options: { limit?: number; offset?: number; status?: string }): Promise<{ items: TokenVoteRequest[]; total: number }>;
+  createVoteRequest(data: InsertTokenVoteRequest): Promise<TokenVoteRequest>;
+  updateVoteRequest(id: number, data: Partial<InsertTokenVoteRequest>): Promise<TokenVoteRequest | null>;
+  incrementVoteCount(requestId: number, isPriority: boolean): Promise<void>;
+  hasUserVotedForRequest(userId: string, requestId: number): Promise<boolean>;
+  createVote(data: InsertTokenVote): Promise<TokenVote>;
+  getUserVotedRequestIds(userId: string): Promise<number[]>;
+  getUserDailyVoteCount(userId: string, date: string): Promise<number>;
+  incrementUserDailyVotes(userId: string, date: string): Promise<void>;
+  getTopVoteRequests(limit?: number): Promise<TokenVoteRequest[]>;
+  getRecentlyAnalyzedRequests(limit?: number): Promise<TokenVoteRequest[]>;
+
+  // Performance tracking methods
+  createPriceSnapshot(data: InsertPriceSnapshot): Promise<PriceSnapshot>;
+  getPriceSnapshot(tokenId: string, date: string): Promise<PriceSnapshot | null>;
+  getTokenPriceHistory(tokenId: string, days: number): Promise<PriceSnapshot[]>;
+  getLatestPriceSnapshot(tokenId: string): Promise<PriceSnapshot | null>;
+  getLeaderboardTokenIds(): Promise<string[]>;
+  getTokenFirstAnalysis(tokenId: string): Promise<TokenAnalysis | null>;
+  getTokensByTier(tier: string): Promise<{ tokenId: string; score: number; firstAnalysisDate: Date }[]>;
+  getTokensWithBuyRecommendation(): Promise<{ tokenId: string; score: number; firstAnalysisDate: Date }[]>;
+  getLatestPerformanceMetrics(): Promise<PerformanceMetrics | null>;
+  savePerformanceMetrics(data: InsertPerformanceMetrics): Promise<PerformanceMetrics>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -399,10 +477,11 @@ export class PostgresStorage implements IStorage {
   async getAnalysisByToken(tokenId: string): Promise<TokenAnalysis | null> {
     return withRetry(async () => {
       const db = getDb();
+      // Use case-insensitive comparison for token ID matching
       const result = await db
         .select()
         .from(tokenAnalyses)
-        .where(eq(tokenAnalyses.tokenId, tokenId))
+        .where(sql`LOWER(${tokenAnalyses.tokenId}) = LOWER(${tokenId})`)
         .orderBy(desc(tokenAnalyses.createdAt))
         .limit(1);
       return result[0] || null;
@@ -508,20 +587,82 @@ export class PostgresStorage implements IStorage {
     return result;
   }
 
+  async getStuckAnalysesWithRunId(minAgeMinutes: number = 5): Promise<TokenAnalysis[]> {
+    const db = getDb();
+    const cutoffTime = new Date(Date.now() - minAgeMinutes * 60 * 1000);
+
+    const result = await db
+      .select()
+      .from(tokenAnalyses)
+      .where(
+        and(
+          or(
+            eq(tokenAnalyses.status, "pending"),
+            eq(tokenAnalyses.status, "processing")
+          ),
+          lte(tokenAnalyses.createdAt, cutoffTime),
+          isNotNull(tokenAnalyses.gumloopRunId)
+        )
+      );
+    return result;
+  }
+
   async getAnalysesByTokenId(tokenId: string): Promise<TokenAnalysis[]> {
     return withRetry(async () => {
       const db = getDb();
+      // Use case-insensitive comparison for token ID matching
       const result = await db
         .select()
         .from(tokenAnalyses)
         .where(
           and(
-            eq(tokenAnalyses.tokenId, tokenId),
+            sql`LOWER(${tokenAnalyses.tokenId}) = LOWER(${tokenId})`,
             eq(tokenAnalyses.status, "completed")
           )
         )
         .orderBy(desc(tokenAnalyses.createdAt));
       return result;
+    });
+  }
+
+  async getLatestAnalysisByTokenId(tokenId: string): Promise<TokenAnalysis | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      // Use case-insensitive comparison for token ID matching
+      const result = await db
+        .select()
+        .from(tokenAnalyses)
+        .where(sql`LOWER(${tokenAnalyses.tokenId}) = LOWER(${tokenId})`)
+        .orderBy(desc(tokenAnalyses.createdAt))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async getAllAnalyses(limit = 50, offset = 0, status?: string): Promise<{ items: TokenAnalysis[]; total: number }> {
+    return withRetry(async () => {
+      const db = getDb();
+
+      const conditions = status ? [eq(tokenAnalyses.status, status)] : [];
+
+      const [items, countResult] = await Promise.all([
+        db
+          .select()
+          .from(tokenAnalyses)
+          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .orderBy(desc(tokenAnalyses.createdAt))
+          .limit(limit)
+          .offset(offset),
+        db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(tokenAnalyses)
+          .where(conditions.length > 0 ? and(...conditions) : undefined),
+      ]);
+
+      return {
+        items,
+        total: countResult[0]?.count || 0,
+      };
     });
   }
 
@@ -539,6 +680,7 @@ export class PostgresStorage implements IStorage {
       search?: string;
       tokenType?: string;
       marketCapTier?: string;
+      upsideTier?: string;
     };
   }): Promise<{ items: any[]; total: number }> {
     return withRetry(async () => {
@@ -571,6 +713,7 @@ export class PostgresStorage implements IStorage {
     if (filters?.marketCapTier) {
       conditions.push(eq(tokenAnalyses.marketCapTier, filters.marketCapTier));
     }
+    // Note: upsideTier filter is applied post-aggregation to filter by LATEST analysis
 
     // Get aggregated data per token with time-based metrics
     const now = new Date();
@@ -594,6 +737,8 @@ export class PostgresStorage implements IStorage {
         tokenType: tokenAnalyses.tokenType,
         asymmetryScore: tokenAnalyses.asymmetryScore,
         marketCapTier: tokenAnalyses.marketCapTier,
+        upsideTier: tokenAnalyses.upsideTier,
+        upsideMultiple: tokenAnalyses.upsideMultiple,
       })
       .from(tokenAnalyses)
       .where(and(...conditions))
@@ -618,11 +763,14 @@ export class PostgresStorage implements IStorage {
       latestRecommendation: string | null;
       latestAnalysisId: number;
       latestAnalysisDate: string;
+      latestScore: number;
       scores7d: number[];
       scores30d: number[];
       tokenType: string | null;
       asymmetryScore: number | null;
       marketCapTier: string | null;
+      upsideTier: string | null;
+      upsideMultiple: string | null;
     }>();
 
     for (const row of allResults) {
@@ -648,11 +796,14 @@ export class PostgresStorage implements IStorage {
           latestRecommendation: row.recommendation,
           latestAnalysisId: row.id,
           latestAnalysisDate: row.createdAt.toISOString(),
+          latestScore: score, // Score from the most recent analysis
           scores7d: [],
           scores30d: [],
           tokenType: row.tokenType,
           asymmetryScore: row.asymmetryScore ? parseFloat(row.asymmetryScore as string) : null,
           marketCapTier: row.marketCapTier,
+          upsideTier: row.upsideTier,
+          upsideMultiple: row.upsideMultiple,
         });
       }
 
@@ -707,8 +858,14 @@ export class PostgresStorage implements IStorage {
       items.push(cleanItem);
     }
 
+    // Post-aggregation filter: filter by latest analysis's upside tier
+    let filteredItems = items;
+    if (filters?.upsideTier) {
+      filteredItems = items.filter(item => item.upsideTier === filters.upsideTier);
+    }
+
     // Sort based on sortBy parameter
-    items.sort((a, b) => {
+    filteredItems.sort((a, b) => {
       let comparison = 0;
 
       switch (sortBy) {
@@ -749,6 +906,19 @@ export class PostgresStorage implements IStorage {
           else comparison = aScore - bScore;
           break;
         }
+        case 'upsideTier': {
+          // Sort by actual upside multiple value (extract number from "58x", "100x+", etc.)
+          const parseMultiple = (val: string | null): number => {
+            if (!val) return 0;
+            // Remove 'x' and '+' suffixes, parse as float
+            const num = parseFloat(val.replace(/[x+]/gi, ''));
+            return isNaN(num) ? 0 : num;
+          };
+          const aVal = parseMultiple(a.upsideMultiple);
+          const bVal = parseMultiple(b.upsideMultiple);
+          comparison = aVal - bVal;
+          break;
+        }
         case 'recommendation': {
           // Sort by recommendation: BUY > HOLD > AVOID
           const aRec = (a.latestRecommendation || '').toUpperCase();
@@ -766,25 +936,33 @@ export class PostgresStorage implements IStorage {
     });
 
     // Paginate
-    const paginatedItems = items.slice(offset, offset + limit);
+    const paginatedItems = filteredItems.slice(offset, offset + limit);
 
     return {
       items: paginatedItems,
-      total: items.length,
+      total: filteredItems.length,
     };
     });
   }
 
-  async getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[]; tokenTypes: string[]; marketCapTiers: string[] }> {
+  async getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[]; tokenTypes: string[]; marketCapTiers: string[]; upsideTiers: string[] }> {
     const db = getDb();
 
-    const [tiersResult, narrativesResult, chainsResult, tokenTypesResult, marketCapTiersResult] = await Promise.all([
+    const [tiersResult, narrativesResult, chainsResult, tokenTypesResult, marketCapTiersResult, upsideTiersResult] = await Promise.all([
       db.selectDistinct({ tier: tokenAnalyses.tier }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
       db.selectDistinct({ narrative: tokenAnalyses.narrative }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
       db.selectDistinct({ chain: tokenAnalyses.chain }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
       db.selectDistinct({ tokenType: tokenAnalyses.tokenType }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
       db.selectDistinct({ marketCapTier: tokenAnalyses.marketCapTier }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
+      db.selectDistinct({ upsideTier: tokenAnalyses.upsideTier }).from(tokenAnalyses).where(eq(tokenAnalyses.status, "completed")),
     ]);
+
+    // Sort upside tiers in descending order (highest upside first)
+    const upsideTierOrder = ['100x+', '50-100x', '25-50x', '10-25x', '5-10x', '<5x'];
+    const upsideTiers = upsideTiersResult
+      .map((r) => r.upsideTier)
+      .filter(Boolean) as string[];
+    upsideTiers.sort((a, b) => upsideTierOrder.indexOf(a) - upsideTierOrder.indexOf(b));
 
     return {
       tiers: tiersResult.map((r) => r.tier).filter(Boolean) as string[],
@@ -792,18 +970,19 @@ export class PostgresStorage implements IStorage {
       chains: chainsResult.map((r) => r.chain).filter(Boolean) as string[],
       tokenTypes: tokenTypesResult.map((r) => r.tokenType).filter(Boolean) as string[],
       marketCapTiers: marketCapTiersResult.map((r) => r.marketCapTier).filter(Boolean) as string[],
+      upsideTiers,
     };
   }
 
   async getLeaderboardStats(): Promise<{
-    topToken: { symbol: string; name: string; score: number; daysOnLeaderboard: number } | null;
-    topNarrative: { narrative: string; avgScore: number; tokenCount: number } | null;
-    winner24h: { symbol: string; name: string; score: number } | null;
+    topTokens: { symbol: string; name: string; score: number; daysInTop3: number }[];
+    topNarratives: { narrative: string; avgScore: number; tokenCount: number }[];
+    winners7d: { symbol: string; name: string; score: number }[];
   }> {
     const db = getDb();
 
-    // Get the top token (highest 7-day average score) and when they first appeared
-    const topTokenQuery = await db
+    // Get the top 3 tokens (highest 7-day average score) and when they first appeared
+    const topTokensQuery = await db
       .select({
         tokenSymbol: tokenAnalyses.tokenSymbol,
         tokenName: tokenAnalyses.tokenName,
@@ -819,7 +998,7 @@ export class PostgresStorage implements IStorage {
       )
       .groupBy(tokenAnalyses.tokenSymbol, tokenAnalyses.tokenName)
       .orderBy(sql`avg_score DESC`)
-      .limit(1);
+      .limit(3);
 
     // Get all narratives with their scores and token IDs for normalization
     const allNarrativesQuery = await db
@@ -851,62 +1030,478 @@ export class PostgresStorage implements IStorage {
       group.tokenIds.add(row.tokenId);
     }
 
-    // Find the narrative with highest average score
-    let topNarrativeData: { narrative: string; avgScore: number; tokenCount: number } | null = null;
-    let highestAvg = -1;
+    // Find the top 3 narratives with highest average scores
+    // Minimum 3 unique tokens required to qualify as "hot narrative"
+    const MIN_TOKENS_FOR_HOT_NARRATIVE = 3;
+    const narrativeScores: { narrative: string; avgScore: number; tokenCount: number }[] = [];
 
     narrativeGroups.forEach((data, narrative) => {
+      const tokenCount = data.tokenIds.size;
+      // Only consider narratives with at least 3 unique tokens
+      if (tokenCount < MIN_TOKENS_FOR_HOT_NARRATIVE) return;
+
       const avgScore = data.scores.reduce((a: number, b: number) => a + b, 0) / data.scores.length;
-      if (avgScore > highestAvg) {
-        highestAvg = avgScore;
-        topNarrativeData = {
-          narrative,
-          avgScore,
-          tokenCount: data.tokenIds.size,
-        };
-      }
+      narrativeScores.push({ narrative, avgScore, tokenCount });
     });
 
-    // Get highest rated token from past 24 hours
-    const winner24hQuery = await db
+    // Sort by avgScore descending and take top 3
+    const topNarratives = narrativeScores
+      .sort((a, b) => b.avgScore - a.avgScore)
+      .slice(0, 3);
+
+    // Get top 3 highest rated UNIQUE tokens from past 7 days (deduplicated by symbol)
+    const winners7dQuery = await db
       .select({
         tokenSymbol: tokenAnalyses.tokenSymbol,
         tokenName: tokenAnalyses.tokenName,
-        finalScore: tokenAnalyses.finalScore,
+        maxScore: sql<number>`MAX(CAST(${tokenAnalyses.finalScore} AS DECIMAL))`.as('max_score'),
       })
       .from(tokenAnalyses)
       .where(
         and(
           eq(tokenAnalyses.status, 'completed'),
-          gte(tokenAnalyses.createdAt, sql`NOW() - INTERVAL '24 hours'`)
+          gte(tokenAnalyses.createdAt, sql`NOW() - INTERVAL '7 days'`)
         )
       )
-      .orderBy(sql`CAST(${tokenAnalyses.finalScore} AS DECIMAL) DESC`)
-      .limit(1);
+      .groupBy(tokenAnalyses.tokenSymbol, tokenAnalyses.tokenName)
+      .orderBy(sql`max_score DESC`)
+      .limit(3);
 
-    // Calculate days on leaderboard for top token
-    let topToken = null;
-    if (topTokenQuery[0]) {
-      const firstAnalysisDate = new Date(topTokenQuery[0].firstAnalysis);
-      const daysOnLeaderboard = Math.floor((Date.now() - firstAnalysisDate.getTime()) / (1000 * 60 * 60 * 24));
-      topToken = {
-        symbol: topTokenQuery[0].tokenSymbol,
-        name: topTokenQuery[0].tokenName,
-        score: parseFloat(String(topTokenQuery[0].avgScore)) || 0,
-        daysOnLeaderboard: Math.max(1, daysOnLeaderboard),
+    // Calculate days in top 3 for each top token
+    const topTokens = topTokensQuery.map(row => {
+      const firstAnalysisDate = new Date(row.firstAnalysis);
+      const daysInTop3 = Math.floor((Date.now() - firstAnalysisDate.getTime()) / (1000 * 60 * 60 * 24));
+      return {
+        symbol: row.tokenSymbol,
+        name: row.tokenName,
+        score: parseFloat(String(row.avgScore)) || 0,
+        daysInTop3: Math.max(1, daysInTop3),
       };
-    }
+    });
 
-    let winner24h = null;
-    if (winner24hQuery[0]) {
-      winner24h = {
-        symbol: winner24hQuery[0].tokenSymbol,
-        name: winner24hQuery[0].tokenName,
-        score: parseFloat(winner24hQuery[0].finalScore as string) || 0,
+    // Map all 7d winners (now deduplicated)
+    const winners7d = winners7dQuery.map(row => ({
+      symbol: row.tokenSymbol,
+      name: row.tokenName,
+      score: parseFloat(String(row.maxScore)) || 0,
+    }));
+
+    return { topTokens, topNarratives, winners7d };
+  }
+
+  // ==================== VOTING METHODS ====================
+
+  async getVoteRequestByTokenId(tokenId: string): Promise<TokenVoteRequest | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(tokenVoteRequests)
+        .where(eq(tokenVoteRequests.tokenId, tokenId))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async getVoteRequests(options: { limit?: number; offset?: number; status?: string }): Promise<{ items: TokenVoteRequest[]; total: number }> {
+    return withRetry(async () => {
+      const db = getDb();
+      const { limit = 50, offset = 0, status } = options;
+
+      const conditions = [];
+      if (status) {
+        conditions.push(eq(tokenVoteRequests.status, status));
+      }
+
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const [items, countResult] = await Promise.all([
+        db
+          .select()
+          .from(tokenVoteRequests)
+          .where(whereClause)
+          .orderBy(desc(sql`${tokenVoteRequests.voteCount} + (${tokenVoteRequests.priorityVoteCount} * 2)`))
+          .limit(limit)
+          .offset(offset),
+        db
+          .select({ count: count() })
+          .from(tokenVoteRequests)
+          .where(whereClause),
+      ]);
+
+      return {
+        items,
+        total: countResult[0]?.count || 0,
       };
-    }
+    });
+  }
 
-    return { topToken, topNarrative: topNarrativeData, winner24h };
+  async createVoteRequest(data: InsertTokenVoteRequest): Promise<TokenVoteRequest> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db.insert(tokenVoteRequests).values(data).returning();
+      return result[0];
+    });
+  }
+
+  async updateVoteRequest(id: number, data: Partial<InsertTokenVoteRequest>): Promise<TokenVoteRequest | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .update(tokenVoteRequests)
+        .set(data)
+        .where(eq(tokenVoteRequests.id, id))
+        .returning();
+      return result[0] || null;
+    });
+  }
+
+  async incrementVoteCount(requestId: number, isPriority: boolean): Promise<void> {
+    return withRetry(async () => {
+      const db = getDb();
+      if (isPriority) {
+        await db
+          .update(tokenVoteRequests)
+          .set({
+            priorityVoteCount: sql`${tokenVoteRequests.priorityVoteCount} + 1`,
+          })
+          .where(eq(tokenVoteRequests.id, requestId));
+      } else {
+        await db
+          .update(tokenVoteRequests)
+          .set({
+            voteCount: sql`${tokenVoteRequests.voteCount} + 1`,
+          })
+          .where(eq(tokenVoteRequests.id, requestId));
+      }
+    });
+  }
+
+  async hasUserVotedForRequest(userId: string, requestId: number): Promise<boolean> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select({ count: count() })
+        .from(tokenVotes)
+        .where(
+          and(
+            eq(tokenVotes.userId, userId),
+            eq(tokenVotes.tokenVoteRequestId, requestId)
+          )
+        );
+      return (result[0]?.count || 0) > 0;
+    });
+  }
+
+  async createVote(data: InsertTokenVote): Promise<TokenVote> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db.insert(tokenVotes).values(data).returning();
+      return result[0];
+    });
+  }
+
+  async getUserVotedRequestIds(userId: string): Promise<number[]> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select({ requestId: tokenVotes.tokenVoteRequestId })
+        .from(tokenVotes)
+        .where(eq(tokenVotes.userId, userId));
+      return result.map(r => r.requestId);
+    });
+  }
+
+  async getUserDailyVoteCount(userId: string, date: string): Promise<number> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(userDailyVotes)
+        .where(
+          and(
+            eq(userDailyVotes.userId, userId),
+            eq(userDailyVotes.date, date)
+          )
+        )
+        .limit(1);
+      return result[0]?.votesUsed || 0;
+    });
+  }
+
+  async incrementUserDailyVotes(userId: string, date: string): Promise<void> {
+    return withRetry(async () => {
+      const db = getDb();
+      const existing = await this.getUserDailyVoteCount(userId, date);
+
+      if (existing > 0) {
+        await db
+          .update(userDailyVotes)
+          .set({ votesUsed: sql`${userDailyVotes.votesUsed} + 1` })
+          .where(
+            and(
+              eq(userDailyVotes.userId, userId),
+              eq(userDailyVotes.date, date)
+            )
+          );
+      } else {
+        await db.insert(userDailyVotes).values({
+          userId,
+          date,
+          votesUsed: 1,
+        });
+      }
+    });
+  }
+
+  async getTopVoteRequests(limit: number = 20): Promise<TokenVoteRequest[]> {
+    return withRetry(async () => {
+      const db = getDb();
+      const todayStart = getESTTodayStart();
+
+      // Get today's votes grouped by request, calculating scores
+      // Regular votes = 1 point, Priority votes = 2 points
+      const todaysVotes = await db
+        .select({
+          tokenVoteRequestId: tokenVotes.tokenVoteRequestId,
+          totalScore: sql<number>`SUM(CASE WHEN ${tokenVotes.isPriorityVote} THEN 2 ELSE 1 END)`.as('total_score'),
+          regularVotes: sql<number>`SUM(CASE WHEN ${tokenVotes.isPriorityVote} THEN 0 ELSE 1 END)`.as('regular_votes'),
+          priorityVotes: sql<number>`SUM(CASE WHEN ${tokenVotes.isPriorityVote} THEN 1 ELSE 0 END)`.as('priority_votes'),
+        })
+        .from(tokenVotes)
+        .where(gte(tokenVotes.createdAt, todayStart))
+        .groupBy(tokenVotes.tokenVoteRequestId)
+        .orderBy(desc(sql`total_score`))
+        .limit(limit);
+
+      if (todaysVotes.length === 0) {
+        return [];
+      }
+
+      // Get the full request details for tokens with votes today
+      const requestIds = todaysVotes.map(v => v.tokenVoteRequestId);
+      const requests = await db
+        .select()
+        .from(tokenVoteRequests)
+        .where(
+          and(
+            sql`${tokenVoteRequests.id} = ANY(${requestIds})`,
+            eq(tokenVoteRequests.status, "pending")
+          )
+        );
+
+      // Create a map for quick lookup and merge vote counts
+      const requestMap = new Map(requests.map(r => [r.id, r]));
+      const voteMap = new Map(todaysVotes.map(v => [v.tokenVoteRequestId, v]));
+
+      // Return requests sorted by today's votes, with today's counts
+      return todaysVotes
+        .filter(v => requestMap.has(v.tokenVoteRequestId))
+        .map(v => {
+          const request = requestMap.get(v.tokenVoteRequestId)!;
+          // Override counts with today's counts for display
+          return {
+            ...request,
+            voteCount: v.regularVotes,
+            priorityVoteCount: v.priorityVotes,
+          };
+        });
+    });
+  }
+
+  async getRecentlyAnalyzedRequests(limit: number = 10): Promise<TokenVoteRequest[]> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(tokenVoteRequests)
+        .where(eq(tokenVoteRequests.status, "analyzed"))
+        .orderBy(desc(tokenVoteRequests.analyzedAt))
+        .limit(limit);
+      return result;
+    });
+  }
+
+  // ==================== PERFORMANCE TRACKING METHODS ====================
+
+  async createPriceSnapshot(data: InsertPriceSnapshot): Promise<PriceSnapshot> {
+    return withRetry(async () => {
+      const db = getDb();
+      // Use upsert to handle duplicate snapshots for same token/date
+      const result = await db
+        .insert(priceSnapshots)
+        .values(data as any)
+        .onConflictDoUpdate({
+          target: [priceSnapshots.tokenId, priceSnapshots.snapshotDate],
+          set: {
+            priceUsd: data.priceUsd,
+            marketCap: data.marketCap,
+            fdv: data.fdv,
+            volume24h: data.volume24h,
+          },
+        })
+        .returning();
+      return result[0];
+    });
+  }
+
+  async getPriceSnapshot(tokenId: string, date: string): Promise<PriceSnapshot | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(priceSnapshots)
+        .where(
+          and(
+            sql`LOWER(${priceSnapshots.tokenId}) = LOWER(${tokenId})`,
+            eq(priceSnapshots.snapshotDate, date)
+          )
+        )
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async getTokenPriceHistory(tokenId: string, days: number): Promise<PriceSnapshot[]> {
+    return withRetry(async () => {
+      const db = getDb();
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - days);
+      const cutoffStr = cutoffDate.toISOString().split('T')[0];
+
+      const result = await db
+        .select()
+        .from(priceSnapshots)
+        .where(
+          and(
+            sql`LOWER(${priceSnapshots.tokenId}) = LOWER(${tokenId})`,
+            gte(priceSnapshots.snapshotDate, cutoffStr)
+          )
+        )
+        .orderBy(desc(priceSnapshots.snapshotDate));
+      return result;
+    });
+  }
+
+  async getLatestPriceSnapshot(tokenId: string): Promise<PriceSnapshot | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(priceSnapshots)
+        .where(sql`LOWER(${priceSnapshots.tokenId}) = LOWER(${tokenId})`)
+        .orderBy(desc(priceSnapshots.snapshotDate))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async getLeaderboardTokenIds(): Promise<string[]> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .selectDistinct({ tokenId: tokenAnalyses.tokenId })
+        .from(tokenAnalyses)
+        .where(eq(tokenAnalyses.status, "completed"));
+      return result.map(r => r.tokenId);
+    });
+  }
+
+  async getTokenFirstAnalysis(tokenId: string): Promise<TokenAnalysis | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(tokenAnalyses)
+        .where(
+          and(
+            sql`LOWER(${tokenAnalyses.tokenId}) = LOWER(${tokenId})`,
+            eq(tokenAnalyses.status, "completed")
+          )
+        )
+        .orderBy(tokenAnalyses.createdAt) // ASC to get first
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async getTokensByTier(tier: string): Promise<{ tokenId: string; score: number; firstAnalysisDate: Date }[]> {
+    return withRetry(async () => {
+      const db = getDb();
+      // Get unique tokens by tier with their first analysis date and latest score
+      const result = await db
+        .select({
+          tokenId: tokenAnalyses.tokenId,
+          score: sql<number>`CAST(${tokenAnalyses.finalScore} AS DECIMAL)`.as('score'),
+          firstAnalysisDate: sql<Date>`MIN(${tokenAnalyses.createdAt})`.as('first_analysis_date'),
+        })
+        .from(tokenAnalyses)
+        .where(
+          and(
+            eq(tokenAnalyses.status, "completed"),
+            eq(tokenAnalyses.tier, tier)
+          )
+        )
+        .groupBy(tokenAnalyses.tokenId, tokenAnalyses.finalScore);
+      return result;
+    });
+  }
+
+  async getTokensWithBuyRecommendation(): Promise<{ tokenId: string; score: number; firstAnalysisDate: Date }[]> {
+    return withRetry(async () => {
+      const db = getDb();
+      // BUY recommendation = score >= 70
+      const result = await db
+        .select({
+          tokenId: tokenAnalyses.tokenId,
+          score: sql<number>`CAST(${tokenAnalyses.finalScore} AS DECIMAL)`.as('score'),
+          firstAnalysisDate: sql<Date>`MIN(${tokenAnalyses.createdAt})`.as('first_analysis_date'),
+        })
+        .from(tokenAnalyses)
+        .where(
+          and(
+            eq(tokenAnalyses.status, "completed"),
+            gte(tokenAnalyses.finalScore, "70")
+          )
+        )
+        .groupBy(tokenAnalyses.tokenId, tokenAnalyses.finalScore);
+      return result;
+    });
+  }
+
+  async getLatestPerformanceMetrics(): Promise<PerformanceMetrics | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(performanceMetrics)
+        .orderBy(desc(performanceMetrics.metricDate))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async savePerformanceMetrics(data: InsertPerformanceMetrics): Promise<PerformanceMetrics> {
+    return withRetry(async () => {
+      const db = getDb();
+      // Upsert to update if date already exists
+      const result = await db
+        .insert(performanceMetrics)
+        .values(data as any)
+        .onConflictDoUpdate({
+          target: [performanceMetrics.metricDate],
+          set: {
+            top10Avg7dReturn: data.top10Avg7dReturn,
+            top10Avg30dReturn: data.top10Avg30dReturn,
+            hitRate7d: data.hitRate7d,
+            hitRate30d: data.hitRate30d,
+            tierMetrics: data.tierMetrics,
+            totalTokens: data.totalTokens,
+          },
+        })
+        .returning();
+      return result[0];
+    });
   }
 }
 
@@ -1118,26 +1713,227 @@ export class MemStorage implements IStorage {
       );
   }
 
+  async getStuckAnalysesWithRunId(minAgeMinutes: number = 5): Promise<TokenAnalysis[]> {
+    const cutoffTime = new Date(Date.now() - minAgeMinutes * 60 * 1000);
+    return Array.from(this.analyses.values())
+      .filter((a) =>
+        (a.status === "pending" || a.status === "processing") &&
+        a.createdAt <= cutoffTime &&
+        a.gumloopRunId != null
+      );
+  }
+
   async getAnalysesByTokenId(tokenId: string): Promise<TokenAnalysis[]> {
     return Array.from(this.analyses.values())
       .filter((a) => a.tokenId === tokenId && a.status === "completed")
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
+  async getLatestAnalysisByTokenId(tokenId: string): Promise<TokenAnalysis | null> {
+    const analyses = Array.from(this.analyses.values())
+      .filter((a) => a.tokenId === tokenId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return analyses[0] || null;
+  }
+
+  async getAllAnalyses(limit = 50, offset = 0, status?: string): Promise<{ items: TokenAnalysis[]; total: number }> {
+    let analyses = Array.from(this.analyses.values());
+    if (status) {
+      analyses = analyses.filter((a) => a.status === status);
+    }
+    analyses.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return {
+      items: analyses.slice(offset, offset + limit),
+      total: analyses.length,
+    };
+  }
+
   async getLeaderboard(_options: any): Promise<{ items: any[]; total: number }> {
     return { items: [], total: 0 };
   }
 
-  async getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[]; tokenTypes: string[]; marketCapTiers: string[] }> {
-    return { tiers: [], narratives: [], chains: [], tokenTypes: [], marketCapTiers: [] };
+  async getFilterOptions(): Promise<{ tiers: string[]; narratives: string[]; chains: string[]; tokenTypes: string[]; marketCapTiers: string[]; upsideTiers: string[] }> {
+    return { tiers: [], narratives: [], chains: [], tokenTypes: [], marketCapTiers: [], upsideTiers: [] };
   }
 
   async getLeaderboardStats(): Promise<{
-    topToken: { symbol: string; name: string; score: number; daysOnLeaderboard: number } | null;
-    topNarrative: { narrative: string; avgScore: number; tokenCount: number } | null;
-    winner24h: { symbol: string; name: string; score: number } | null;
+    topTokens: { symbol: string; name: string; score: number; daysInTop3: number }[];
+    topNarratives: { narrative: string; avgScore: number; tokenCount: number }[];
+    winners7d: { symbol: string; name: string; score: number }[];
   }> {
-    return { topToken: null, topNarrative: null, winner24h: null };
+    return { topTokens: [], topNarratives: [], winners7d: [] };
+  }
+
+  // ==================== VOTING METHODS (In-Memory) ====================
+  private voteRequests = new Map<number, TokenVoteRequest>();
+  private votes = new Map<number, TokenVote>();
+  private dailyVotes = new Map<string, number>(); // key: `${userId}:${date}`
+  private voteRequestCounter = 1;
+  private voteCounter = 1;
+
+  async getVoteRequestByTokenId(tokenId: string): Promise<TokenVoteRequest | null> {
+    for (const request of Array.from(this.voteRequests.values())) {
+      if (request.tokenId === tokenId) return request;
+    }
+    return null;
+  }
+
+  async getVoteRequests(options: { limit?: number; offset?: number; status?: string }): Promise<{ items: TokenVoteRequest[]; total: number }> {
+    const { limit = 50, offset = 0, status } = options;
+    let items = Array.from(this.voteRequests.values());
+
+    if (status) {
+      items = items.filter(r => r.status === status);
+    }
+
+    // Sort by weighted vote count
+    items.sort((a, b) => {
+      const scoreA = (a.voteCount || 0) + ((a.priorityVoteCount || 0) * 2);
+      const scoreB = (b.voteCount || 0) + ((b.priorityVoteCount || 0) * 2);
+      return scoreB - scoreA;
+    });
+
+    return {
+      items: items.slice(offset, offset + limit),
+      total: items.length,
+    };
+  }
+
+  async createVoteRequest(data: InsertTokenVoteRequest): Promise<TokenVoteRequest> {
+    const id = this.voteRequestCounter++;
+    const now = new Date();
+    const request: TokenVoteRequest = {
+      id,
+      tokenId: data.tokenId,
+      tokenSymbol: data.tokenSymbol,
+      tokenName: data.tokenName,
+      tokenImage: data.tokenImage ?? null,
+      voteCount: data.voteCount ?? 0,
+      priorityVoteCount: data.priorityVoteCount ?? 0,
+      status: data.status ?? "pending",
+      createdAt: now,
+      analyzedAt: data.analyzedAt ?? null,
+      analysisId: data.analysisId ?? null,
+    };
+    this.voteRequests.set(id, request);
+    return request;
+  }
+
+  async updateVoteRequest(id: number, data: Partial<InsertTokenVoteRequest>): Promise<TokenVoteRequest | null> {
+    const existing = this.voteRequests.get(id);
+    if (!existing) return null;
+    const updated = { ...existing, ...data } as TokenVoteRequest;
+    this.voteRequests.set(id, updated);
+    return updated;
+  }
+
+  async incrementVoteCount(requestId: number, isPriority: boolean): Promise<void> {
+    const request = this.voteRequests.get(requestId);
+    if (request) {
+      if (isPriority) {
+        request.priorityVoteCount = (request.priorityVoteCount || 0) + 1;
+      } else {
+        request.voteCount = (request.voteCount || 0) + 1;
+      }
+    }
+  }
+
+  async hasUserVotedForRequest(userId: string, requestId: number): Promise<boolean> {
+    for (const vote of Array.from(this.votes.values())) {
+      if (vote.userId === userId && vote.tokenVoteRequestId === requestId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async createVote(data: InsertTokenVote): Promise<TokenVote> {
+    const id = this.voteCounter++;
+    const now = new Date();
+    const vote: TokenVote = {
+      id,
+      userId: data.userId,
+      tokenVoteRequestId: data.tokenVoteRequestId,
+      isPriorityVote: data.isPriorityVote ?? false,
+      createdAt: now,
+    };
+    this.votes.set(id, vote);
+    return vote;
+  }
+
+  async getUserVotedRequestIds(userId: string): Promise<number[]> {
+    return Array.from(this.votes.values())
+      .filter(v => v.userId === userId)
+      .map(v => v.tokenVoteRequestId);
+  }
+
+  async getUserDailyVoteCount(userId: string, date: string): Promise<number> {
+    return this.dailyVotes.get(`${userId}:${date}`) || 0;
+  }
+
+  async incrementUserDailyVotes(userId: string, date: string): Promise<void> {
+    const key = `${userId}:${date}`;
+    this.dailyVotes.set(key, (this.dailyVotes.get(key) || 0) + 1);
+  }
+
+  async getTopVoteRequests(limit: number = 20): Promise<TokenVoteRequest[]> {
+    const items = Array.from(this.voteRequests.values())
+      .filter(r => r.status === "pending")
+      .sort((a, b) => {
+        const scoreA = (a.voteCount || 0) + ((a.priorityVoteCount || 0) * 2);
+        const scoreB = (b.voteCount || 0) + ((b.priorityVoteCount || 0) * 2);
+        return scoreB - scoreA;
+      });
+    return items.slice(0, limit);
+  }
+
+  async getRecentlyAnalyzedRequests(limit: number = 10): Promise<TokenVoteRequest[]> {
+    const items = Array.from(this.voteRequests.values())
+      .filter(r => r.status === "analyzed" && r.analyzedAt)
+      .sort((a, b) => (b.analyzedAt?.getTime() || 0) - (a.analyzedAt?.getTime() || 0));
+    return items.slice(0, limit);
+  }
+
+  // ==================== PERFORMANCE TRACKING METHODS (In-Memory Stubs) ====================
+
+  async createPriceSnapshot(_data: InsertPriceSnapshot): Promise<PriceSnapshot> {
+    throw new Error("Performance tracking not available in memory storage");
+  }
+
+  async getPriceSnapshot(_tokenId: string, _date: string): Promise<PriceSnapshot | null> {
+    return null;
+  }
+
+  async getTokenPriceHistory(_tokenId: string, _days: number): Promise<PriceSnapshot[]> {
+    return [];
+  }
+
+  async getLatestPriceSnapshot(_tokenId: string): Promise<PriceSnapshot | null> {
+    return null;
+  }
+
+  async getLeaderboardTokenIds(): Promise<string[]> {
+    return [];
+  }
+
+  async getTokenFirstAnalysis(_tokenId: string): Promise<TokenAnalysis | null> {
+    return null;
+  }
+
+  async getTokensByTier(_tier: string): Promise<{ tokenId: string; score: number; firstAnalysisDate: Date }[]> {
+    return [];
+  }
+
+  async getTokensWithBuyRecommendation(): Promise<{ tokenId: string; score: number; firstAnalysisDate: Date }[]> {
+    return [];
+  }
+
+  async getLatestPerformanceMetrics(): Promise<PerformanceMetrics | null> {
+    return null;
+  }
+
+  async savePerformanceMetrics(_data: InsertPerformanceMetrics): Promise<PerformanceMetrics> {
+    throw new Error("Performance tracking not available in memory storage");
   }
 }
 

@@ -32,12 +32,13 @@ export function formatComponentScore(score: number | string | null | undefined):
 /**
  * Format a modifier value with exactly 1 decimal place and +/- sign
  * Used for: phase modifier, narrative modifier, etc.
- * Examples: 5 -> "+5.0", -3 -> "-3.0", 0 -> "0.0"
+ * Examples: 5 -> "+5.0", -3 -> "-3.0", 0 -> "+0.0"
  */
 export function formatModifier(value: number | string | null | undefined): string {
-  if (value === null || value === undefined) return "0.0";
+  if (value === null || value === undefined) return "+0.0";
   const num = typeof value === "string" ? parseFloat(value) : value;
-  if (isNaN(num)) return "0.0";
-  const prefix = num > 0 ? "+" : "";
+  if (isNaN(num)) return "+0.0";
+  // Show "+" for zero and positive values for consistency
+  const prefix = num >= 0 ? "+" : "";
   return `${prefix}${num.toFixed(1)}`;
 }
