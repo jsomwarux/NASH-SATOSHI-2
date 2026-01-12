@@ -16,10 +16,17 @@ declare global {
 // Example: ADMIN_EMAILS=admin@example.com,owner@example.com
 function getAdminEmails(): string[] {
   const adminEmails = process.env.ADMIN_EMAILS || "";
-  return adminEmails
+  const parsed = adminEmails
     .split(",")
     .map(email => email.trim().toLowerCase())
     .filter(email => email.length > 0);
+
+  // Debug logging (remove in production if too noisy)
+  if (parsed.length === 0) {
+    console.warn("[Auth] ADMIN_EMAILS is empty or not set");
+  }
+
+  return parsed;
 }
 
 /**
@@ -28,7 +35,14 @@ function getAdminEmails(): string[] {
 export function isAdminEmail(email: string | undefined): boolean {
   if (!email) return false;
   const adminEmails = getAdminEmails();
-  return adminEmails.includes(email.toLowerCase());
+  const isAdmin = adminEmails.includes(email.toLowerCase());
+
+  // Debug logging for admin check failures
+  if (!isAdmin && adminEmails.length > 0) {
+    console.log(`[Auth] Admin check: ${email} not in [${adminEmails.join(', ')}]`);
+  }
+
+  return isAdmin;
 }
 
 // Initialize Supabase client for token verification
@@ -52,6 +66,14 @@ if (supabase) {
   console.log("Supabase auth configured successfully");
 } else {
   console.warn("Supabase auth not configured - set SUPABASE_PROJECT_URL and SUPABASE_SERVICE_ROLE_KEY (or equivalent VITE_ prefixed vars)");
+}
+
+// Log admin configuration
+const startupAdminEmails = getAdminEmails();
+if (startupAdminEmails.length > 0) {
+  console.log(`Admin emails configured: ${startupAdminEmails.length} email(s)`);
+} else {
+  console.warn("ADMIN_EMAILS not configured - no users will have admin access");
 }
 
 /**
@@ -181,26 +203,33 @@ export async function optionalAuth(
   const token = extractToken(req.headers.authorization);
 
   if (!token) {
+    console.log("[OptionalAuth] No token provided");
     next();
     return;
   }
 
   if (!supabase) {
-    console.warn("Supabase not configured");
+    console.warn("[OptionalAuth] Supabase not configured");
     next();
     return;
   }
 
   try {
+    console.log("[OptionalAuth] Verifying token...");
     const { data: { user }, error } = await supabase.auth.getUser(token);
 
-    if (!error && user) {
+    if (error) {
+      console.log(`[OptionalAuth] Token verification error: ${error.message}`);
+    } else if (!user) {
+      console.log("[OptionalAuth] No user returned from token");
+    } else {
+      console.log(`[OptionalAuth] User verified: ${user.email}`);
       req.userId = user.id;
       req.userEmail = user.email;
       req.isAdmin = isAdminEmail(user.email);
     }
   } catch (error) {
-    console.error("Optional auth error:", error);
+    console.error("[OptionalAuth] Exception:", error);
   }
 
   next();

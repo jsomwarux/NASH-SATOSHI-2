@@ -88,14 +88,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    if (!supabase) return;
-    await supabase.auth.signOut();
+    if (!supabase) {
+      console.warn('[Auth] Cannot sign out - Supabase not configured');
+      // Still clear local state
+      setUser(null);
+      setSession(null);
+      return;
+    }
+    try {
+      console.log('[Auth] Signing out...');
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      if (error) {
+        console.error('[Auth] Sign out error:', error);
+      }
+      // Always clear local state regardless of API response
+      setUser(null);
+      setSession(null);
+      console.log('[Auth] Sign out complete, local state cleared');
+    } catch (err) {
+      console.error('[Auth] Sign out exception:', err);
+      // Still clear local state on error
+      setUser(null);
+      setSession(null);
+    }
   };
 
   const getAccessToken = async () => {
     if (!supabase) return null;
-    const { data: { session } } = await supabase.auth.getSession();
-    return session?.access_token ?? null;
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error('[Auth] getSession error:', error);
+        // Session is invalid - clear local state
+        await supabase.auth.signOut();
+        return null;
+      }
+      return session?.access_token ?? null;
+    } catch (err) {
+      console.error('[Auth] getAccessToken exception:', err);
+      return null;
+    }
   };
 
   return (

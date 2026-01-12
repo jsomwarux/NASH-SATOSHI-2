@@ -658,6 +658,8 @@ export async function registerRoutes(
   // Check if current user is admin
   app.get("/api/admin/status", optionalAuth, async (req: Request, res: Response) => {
     const isAdmin = req.isAdmin || false;
+    // Debug logging for admin status check
+    console.log(`[Admin Status] userId: ${req.userId || 'none'}, email: ${req.userEmail || 'none'}, isAdmin: ${isAdmin}`);
     res.json({ isAdmin, email: req.userEmail || null });
   });
 
