@@ -1,4 +1,4 @@
-import { eq, and, desc, sql, gte, lte, ilike, or, count, isNotNull } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lte, ilike, or, count, isNotNull, inArray } from "drizzle-orm";
 import { getDb, withRetry } from "./db";
 import {
   userSubscriptions,
@@ -1280,19 +1280,19 @@ export class PostgresStorage implements IStorage {
 
       // Get the full request details for tokens with votes today
       const requestIds = todaysVotes.map(v => v.tokenVoteRequestId);
+
       const requests = await db
         .select()
         .from(tokenVoteRequests)
         .where(
           and(
-            sql`${tokenVoteRequests.id} = ANY(${requestIds})`,
+            inArray(tokenVoteRequests.id, requestIds),
             eq(tokenVoteRequests.status, "pending")
           )
         );
 
       // Create a map for quick lookup and merge vote counts
       const requestMap = new Map(requests.map(r => [r.id, r]));
-      const voteMap = new Map(todaysVotes.map(v => [v.tokenVoteRequestId, v]));
 
       // Return requests sorted by today's votes, with today's counts
       return todaysVotes
@@ -1300,10 +1300,11 @@ export class PostgresStorage implements IStorage {
         .map(v => {
           const request = requestMap.get(v.tokenVoteRequestId)!;
           // Override counts with today's counts for display
+          // Note: PostgreSQL SUM returns bigint as string, so we convert to number
           return {
             ...request,
-            voteCount: v.regularVotes,
-            priorityVoteCount: v.priorityVotes,
+            voteCount: Number(v.regularVotes) || 0,
+            priorityVoteCount: Number(v.priorityVotes) || 0,
           };
         });
     });

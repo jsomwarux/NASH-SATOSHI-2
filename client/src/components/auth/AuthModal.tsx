@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Mail, Lock, Loader2, AlertCircle, CheckCircle, Terminal, UserPlus, LogIn, Zap, Gift, Clock, ArrowRight, Sparkles } from 'lucide-react';
+import { X, Mail, Lock, Loader2, AlertCircle, CheckCircle, Terminal, LogIn, Zap, ArrowRight, Sparkles, Trophy, Vote, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
@@ -138,44 +138,34 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
                 </div>
               )}
 
-              {/* Free Trial Banner */}
-              <div className="p-4 rounded border border-green-500/30 bg-green-500/5 mb-4">
+              {/* Free Account Benefits */}
+              <div className="p-4 rounded border border-primary/30 bg-primary/5 mb-4">
                 <div className="flex items-center gap-2 mb-3">
-                  <Gift className="w-5 h-5 text-green-400" />
-                  <span className="font-mono text-green-400 font-bold text-sm">7-DAY FREE TRIAL</span>
+                  <Zap className="w-5 h-5 text-primary" />
+                  <span className="font-mono text-primary font-bold text-sm">FREE ACCOUNT INCLUDES</span>
                 </div>
-                <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="space-y-2 text-xs">
                   <div className="flex items-center gap-2">
-                    <CheckCircle className="w-3.5 h-3.5 text-green-400" />
-                    <span className="text-muted-foreground">1 analysis per day</span>
+                    <Trophy className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-muted-foreground">Access to <span className="text-white">top 10 ranked tokens</span></span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <CheckCircle className="w-3.5 h-3.5 text-green-400" />
-                    <span className="text-muted-foreground">Full leaderboard access</span>
+                    <FileText className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-muted-foreground">Full 4-LLM consensus scorecards</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <CheckCircle className="w-3.5 h-3.5 text-green-400" />
-                    <span className="text-muted-foreground">4-LLM consensus reports</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle className="w-3.5 h-3.5 text-green-400" />
-                    <span className="text-muted-foreground">No credit card required</span>
+                    <Vote className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-muted-foreground">1 vote per day for new tokens</span>
                   </div>
                 </div>
               </div>
 
-              {/* After Trial Info */}
-              <div className="flex items-start gap-3 p-3 rounded border border-white/10 bg-white/5 text-xs">
-                <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-muted-foreground">
-                    <span className="text-white">After trial:</span> Free tier includes 1 analysis/week.
-                    Upgrade anytime for more analyses.
-                  </p>
-                  <Link href="/pricing" onClick={onClose} className="inline-flex items-center gap-1 text-primary hover:underline mt-1">
-                    View pricing plans <ArrowRight className="w-3 h-3" />
-                  </Link>
-                </div>
+              {/* Upgrade CTA */}
+              <div className="flex items-center justify-between p-3 rounded border border-white/10 bg-white/5 text-xs">
+                <span className="text-muted-foreground">Want the full leaderboard?</span>
+                <Link href="/pricing" onClick={onClose} className="inline-flex items-center gap-1 text-primary hover:underline font-medium">
+                  View plans <ArrowRight className="w-3 h-3" />
+                </Link>
               </div>
             </div>
           )}
@@ -296,7 +286,7 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
               ) : (
                 <>
                   <Zap className="w-4 h-4 mr-2" />
-                  {tokenName ? `START TRIAL & ANALYZE` : 'START FREE TRIAL'}
+                  CREATE_ACCOUNT
                 </>
               )}
             </Button>
