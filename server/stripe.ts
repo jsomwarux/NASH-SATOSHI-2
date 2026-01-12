@@ -10,18 +10,26 @@ export const stripe = STRIPE_SECRET_KEY
   ? new Stripe(STRIPE_SECRET_KEY)
   : null;
 
-// Map Stripe price IDs to tier IDs
-const PRICE_TO_TIER: Record<string, SubscriptionTierId> = {
-  [process.env.STRIPE_PRO_PRICE_ID || 'price_pro']: 'pro',
-  [process.env.STRIPE_PREMIUM_PRICE_ID || 'price_premium']: 'premium',
-};
+// Map Stripe price IDs to tier IDs (computed at runtime to ensure env vars are loaded)
+function getPriceToTier(): Record<string, SubscriptionTierId> {
+  const mapping: Record<string, SubscriptionTierId> = {};
+  if (process.env.STRIPE_PRO_PRICE_ID) {
+    mapping[process.env.STRIPE_PRO_PRICE_ID] = 'pro';
+  }
+  if (process.env.STRIPE_PREMIUM_PRICE_ID) {
+    mapping[process.env.STRIPE_PREMIUM_PRICE_ID] = 'premium';
+  }
+  return mapping;
+}
 
-// Map tier IDs to Stripe price IDs
-const TIER_TO_PRICE: Record<SubscriptionTierId, string | null> = {
-  free: null,
-  pro: process.env.STRIPE_PRO_PRICE_ID || null,
-  premium: process.env.STRIPE_PREMIUM_PRICE_ID || null,
-};
+// Map tier IDs to Stripe price IDs (computed at runtime)
+function getTierToPrice(): Record<SubscriptionTierId, string | null> {
+  return {
+    free: null,
+    pro: process.env.STRIPE_PRO_PRICE_ID || null,
+    premium: process.env.STRIPE_PREMIUM_PRICE_ID || null,
+  };
+}
 
 export function isStripeConfigured(): boolean {
   return !!stripe;
@@ -69,7 +77,7 @@ export async function createCheckoutSession(
 ): Promise<string> {
   if (!stripe) throw new Error('Stripe not configured');
 
-  const priceId = TIER_TO_PRICE[tier];
+  const priceId = getTierToPrice()[tier];
   if (!priceId) {
     throw new Error(`No price configured for tier: ${tier}`);
   }
@@ -232,7 +240,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
 async function updateUserSubscription(userId: string, subscription: Stripe.Subscription) {
   const firstItem = subscription.items.data[0];
   const priceId = firstItem?.price.id;
-  const tier = priceId ? (PRICE_TO_TIER[priceId] || 'free') : 'free';
+  const tier = priceId ? (getPriceToTier()[priceId] || 'free') : 'free';
 
   const status = subscription.status === 'active' || subscription.status === 'trialing'
     ? 'active'
@@ -377,7 +385,7 @@ export async function syncSubscriptionFromStripe(userId: string): Promise<{
     const subscription = subscriptions.data[0];
     const firstItem = subscription.items.data[0];
     const priceId = firstItem?.price.id;
-    const tier = priceId ? (PRICE_TO_TIER[priceId] || 'free') : 'free';
+    const tier = priceId ? (getPriceToTier()[priceId] || 'free') : 'free';
 
     const status = subscription.status === 'active' || subscription.status === 'trialing'
       ? 'active'
@@ -457,7 +465,13 @@ export async function verifyAndSyncCheckoutSession(sessionId: string, userId: st
     // Update the user's subscription in our database
     const firstItem = subscription.items.data[0];
     const priceId = firstItem?.price.id;
-    const tier = priceId ? (PRICE_TO_TIER[priceId] || 'free') : 'free';
+    const priceToTier = getPriceToTier();
+    const tier = priceId ? (priceToTier[priceId] || 'free') : 'free';
+
+    // Debug logging for price mapping
+    console.log(`[Stripe verifyCheckout] Price ID: ${priceId}`);
+    console.log(`[Stripe verifyCheckout] Price mapping:`, priceToTier);
+    console.log(`[Stripe verifyCheckout] Resolved tier: ${tier}`);
 
     const status = subscription.status === 'active' || subscription.status === 'trialing'
       ? 'active'
@@ -635,7 +649,7 @@ export async function verifyAndCompleteCreditPurchase(sessionId: string, userId:
 export function getSubscriptionTiers() {
   return Object.entries(SUBSCRIPTION_TIERS).map(([id, tier]) => {
     // Get price ID from server-side mapping
-    const priceId = TIER_TO_PRICE[id as SubscriptionTierId] || null;
+    const priceId = getTierToPrice()[id as SubscriptionTierId] || null;
 
     return {
       id,
