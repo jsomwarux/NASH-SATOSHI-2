@@ -58,27 +58,27 @@ const aiModels = [
 
 const benefits = [
   {
-    icon: Shield,
-    title: "ELIMINATE AI BIAS",
-    desc: "Single-model analysis has blind spots. Our 4-LLM ensemble cross-validates findings to eliminate hallucinations and bias.",
+    icon: Target,
+    title: "FIND ASYMMETRIC PLAYS",
+    desc: "Identify tokens with high upside potential before the crowd. Our scoring surfaces early-stage opportunities with favorable risk/reward.",
     color: "primary",
   },
   {
-    icon: Target,
-    title: "GAME THEORY SCORING",
-    desc: "Go beyond price charts. Nash equilibrium analysis reveals coordination signals, Schelling points, and exit liquidity dynamics.",
+    icon: Eye,
+    title: "AVOID EXIT LIQUIDITY",
+    desc: "Know if you're buying into strength or holding someone else's bags. Clear positioning analysis tells you which side of the trade you're on.",
     color: "accent",
   },
   {
     icon: Scan,
     title: "PHASE DETECTION",
-    desc: "Know exactly where a token is in its lifecycle: Stealth, Expansion, Mania, Distribution, or Dead phase.",
+    desc: "Know exactly where a token is in its lifecycle: Stealth, Expansion, Mania, Distribution, or Dead. Time your entries and exits.",
     color: "primary",
   },
   {
-    icon: Eye,
-    title: "RISK TRANSPARENCY",
-    desc: "Clear exit liquidity assessment tells you if you're positioned on the winning side or at risk of being exit liquidity.",
+    icon: BarChart3,
+    title: "TRACK RECORD",
+    desc: "See real performance data. We track how our top-rated tokens perform over time so you can judge the system yourself.",
     color: "accent",
   },
 ];
@@ -291,10 +291,10 @@ export default function Home() {
               FEATURES
             </div>
             <h2 className="text-3xl md:text-5xl font-display font-bold mb-4 text-glow-magenta">
-              Analysis You Can Trust
+              Your Edge in Crypto
             </h2>
             <p className="text-muted-foreground max-w-xl mx-auto font-mono text-sm">
-              Go beyond basic metrics. Understand the game theory behind every token.
+              Game theory analysis powered by 4-LLM consensus. No single point of failure.
             </p>
           </motion.div>
 
@@ -399,11 +399,11 @@ export default function Home() {
 
               <div className="space-y-2">
                 {[
-                  { range: "85-100", tier: "S+", color: "purple", label: "STRONG BUY", desc: "Exceptional opportunity" },
-                  { range: "70-84", tier: "S", color: "green", label: "BUY", desc: "High conviction" },
-                  { range: "55-69", tier: "A", color: "emerald", label: "BUY/HOLD", desc: "Moderate opportunity" },
-                  { range: "40-54", tier: "B", color: "yellow", label: "HOLD", desc: "Weak / risky" },
-                  { range: "0-39", tier: "C", color: "red", label: "AVOID", desc: "Avoid" },
+                  { range: "85-100", tier: "S+", color: "purple", label: "STRONG BUY", desc: "Top-tier asymmetry" },
+                  { range: "70-84", tier: "S", color: "green", label: "BUY", desc: "Favorable setup" },
+                  { range: "55-69", tier: "A", color: "emerald", label: "ACCUMULATE", desc: "Worth watching" },
+                  { range: "40-54", tier: "B", color: "yellow", label: "HOLD", desc: "Limited upside" },
+                  { range: "0-39", tier: "C", color: "red", label: "AVOID", desc: "Poor risk/reward" },
                 ].map((item) => (
                   <div
                     key={item.tier}
