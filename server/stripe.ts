@@ -65,7 +65,14 @@ export async function getOrCreateCustomer(userId: string, email: string): Promis
 }
 
 /**
- * Create a checkout session for subscription
+ * Result type for checkout/upgrade operations
+ */
+export type CheckoutResult =
+  | { type: 'checkout'; url: string }
+  | { type: 'upgraded'; tier: string };
+
+/**
+ * Create a checkout session for NEW subscription, or upgrade existing subscription
  */
 export async function createCheckoutSession(
   userId: string,
@@ -74,7 +81,7 @@ export async function createCheckoutSession(
   successUrl: string,
   cancelUrl: string,
   referralCode?: string
-): Promise<string> {
+): Promise<CheckoutResult> {
   if (!stripe) throw new Error('Stripe not configured');
 
   const priceId = getTierToPrice()[tier];
@@ -83,6 +90,18 @@ export async function createCheckoutSession(
   }
 
   const customerId = await getOrCreateCustomer(userId, email);
+
+  // Check if user already has an active subscription - if so, use upgrade/downgrade flow
+  const existingSub = await storage.getUserSubscription(userId);
+  if (existingSub?.stripeSubscriptionId && existingSub.status === 'active' && existingSub.tier !== 'free') {
+    // User has an active paid subscription - upgrade/downgrade instead
+    const result = await changeSubscriptionTier(userId, tier);
+    if (result.success) {
+      // Return indicator that subscription was upgraded directly
+      return { type: 'upgraded', tier };
+    }
+    throw new Error(result.error || 'Failed to change subscription');
+  }
 
   // Build metadata with optional referral code
   const metadata: Record<string, string> = {
@@ -112,7 +131,84 @@ export async function createCheckoutSession(
     },
   });
 
-  return session.url || '';
+  return { type: 'checkout', url: session.url || '' };
+}
+
+/**
+ * Change subscription tier (upgrade or downgrade)
+ * This modifies the existing subscription instead of creating a new one
+ */
+export async function changeSubscriptionTier(
+  userId: string,
+  newTier: SubscriptionTierId
+): Promise<{ success: boolean; error?: string }> {
+  if (!stripe) return { success: false, error: 'Stripe not configured' };
+
+  try {
+    const subscription = await storage.getUserSubscription(userId);
+    if (!subscription?.stripeSubscriptionId) {
+      return { success: false, error: 'No active subscription found' };
+    }
+
+    const newPriceId = getTierToPrice()[newTier];
+    if (!newPriceId) {
+      return { success: false, error: `No price configured for tier: ${newTier}` };
+    }
+
+    // Get the current subscription from Stripe
+    const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId);
+
+    if (stripeSubscription.status !== 'active' && stripeSubscription.status !== 'trialing') {
+      return { success: false, error: 'Subscription is not active' };
+    }
+
+    // Get the subscription item ID (we need this to update the price)
+    const subscriptionItemId = stripeSubscription.items.data[0]?.id;
+    if (!subscriptionItemId) {
+      return { success: false, error: 'No subscription item found' };
+    }
+
+    // Determine if this is an upgrade or downgrade
+    const currentTier = subscription.tier;
+    const tierOrder = { free: 0, pro: 1, premium: 2 };
+    const isUpgrade = tierOrder[newTier] > tierOrder[currentTier as keyof typeof tierOrder];
+
+    // Update the subscription with the new price
+    // For upgrades: prorate immediately (charge difference now)
+    // For downgrades: apply at end of billing period
+    await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
+      items: [
+        {
+          id: subscriptionItemId,
+          price: newPriceId,
+        },
+      ],
+      proration_behavior: isUpgrade ? 'create_prorations' : 'none',
+      // For downgrades, we could also use 'none' and let it take effect at renewal
+      // or use the billing portal for more control
+      metadata: {
+        userId,
+        tier: newTier,
+      },
+    });
+
+    console.log(`Subscription ${isUpgrade ? 'upgraded' : 'downgraded'} for user ${userId}: ${currentTier} -> ${newTier}`);
+
+    // Update our database immediately
+    await storage.createOrUpdateSubscription({
+      userId,
+      tier: newTier,
+      status: 'active',
+      stripeSubscriptionId: subscription.stripeSubscriptionId,
+      stripeCustomerId: subscription.stripeCustomerId,
+      stripePriceId: newPriceId,
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error changing subscription tier:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to change tier' };
+  }
 }
 
 /**

@@ -73,7 +73,7 @@ export default function Pricing() {
   // Track if we've already processed the checkout to prevent double-processing
   const [checkoutProcessed, setCheckoutProcessed] = useState(false);
 
-  // Verify and sync subscription when returning from Stripe checkout
+  // Verify and sync subscription when returning from Stripe checkout or after upgrade
   useEffect(() => {
     // Only run once and only when we have the necessary conditions
     if (checkoutProcessed) return;
@@ -81,6 +81,8 @@ export default function Pricing() {
     const urlParams = new URLSearchParams(window.location.search);
     const sessionId = urlParams.get("session_id");
     const subscriptionCanceled = urlParams.get("subscription") === "canceled";
+    const subscriptionUpgraded = urlParams.get("subscription") === "upgraded";
+    const upgradedTier = urlParams.get("tier");
 
     // Handle canceled checkouts
     if (subscriptionCanceled) {
@@ -90,6 +92,19 @@ export default function Pricing() {
         description: "No changes were made to your subscription.",
         variant: "destructive",
       });
+      navigate("/pricing", { replace: true });
+      return;
+    }
+
+    // Handle direct subscription upgrade/downgrade (no Stripe checkout needed)
+    if (subscriptionUpgraded && upgradedTier && user) {
+      setCheckoutProcessed(true);
+      toast({
+        title: "Subscription updated!",
+        description: `You're now on the ${upgradedTier.charAt(0).toUpperCase()}${upgradedTier.slice(1)} plan.`,
+      });
+      // Refetch subscription status to update UI
+      queryClient.invalidateQueries({ queryKey: ["subscriptionStatus"] });
       navigate("/pricing", { replace: true });
       return;
     }

@@ -10,6 +10,19 @@ import type { AggregatedLeaderboardItem } from "@/types/leaderboard";
 
 const API_BASE = "";
 
+// Custom error class for API errors with code
+export class ApiError extends Error {
+  code?: string;
+  status: number;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
 export async function fetchApi<T>(
   path: string,
   options?: RequestInit & { authToken?: string }
@@ -33,7 +46,11 @@ export async function fetchApi<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: "Request failed" }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    throw new ApiError(
+      error.message || `HTTP ${response.status}`,
+      response.status,
+      error.code
+    );
   }
 
   return response.json();

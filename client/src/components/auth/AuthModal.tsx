@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Mail, Lock, Loader2, AlertCircle, CheckCircle, Terminal, LogIn, Zap, ArrowRight, Sparkles, Trophy, Vote, FileText } from 'lucide-react';
+import { X, Mail, Lock, Loader2, AlertCircle, CheckCircle, Terminal, LogIn, Zap, ArrowRight, Sparkles, Trophy, Vote, FileText, KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
@@ -15,7 +15,7 @@ interface AuthModalProps {
 }
 
 export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessage, tokenName }: AuthModalProps) {
-  const [mode, setMode] = useState<'signin' | 'signup'>(defaultMode);
+  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>(defaultMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -23,15 +23,20 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, resetPassword } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
 
-    if (!email || !password) {
-      setError('Please fill in all fields');
+    if (!email) {
+      setError('Please enter your email');
+      return;
+    }
+
+    if (mode !== 'forgot' && !password) {
+      setError('Please enter your password');
       return;
     }
 
@@ -40,7 +45,7 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
       return;
     }
 
-    if (password.length < 6) {
+    if (mode !== 'forgot' && password.length < 6) {
       setError('Password must be at least 6 characters');
       return;
     }
@@ -48,7 +53,15 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
     setLoading(true);
 
     try {
-      if (mode === 'signup') {
+      if (mode === 'forgot') {
+        const { error } = await resetPassword(email);
+        if (error) {
+          setError(error.message);
+        } else {
+          setSuccess('Password reset email sent! Check your inbox.');
+          setEmail('');
+        }
+      } else if (mode === 'signup') {
         const { error, session } = await signUp(email, password);
         if (error) {
           setError(error.message);
@@ -83,6 +96,19 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
     setSuccess(null);
   };
 
+  const goToForgot = () => {
+    setMode('forgot');
+    setError(null);
+    setSuccess(null);
+    setPassword('');
+  };
+
+  const backToSignIn = () => {
+    setMode('signin');
+    setError(null);
+    setSuccess(null);
+  };
+
   if (!isOpen) return null;
 
   // Show enhanced signup flow when there's a pending token analysis
@@ -107,9 +133,13 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-primary/20 bg-primary/5">
             <div className="flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-primary" />
+              {mode === 'forgot' ? (
+                <KeyRound className="w-4 h-4 text-primary" />
+              ) : (
+                <Terminal className="w-4 h-4 text-primary" />
+              )}
               <span className="font-mono text-sm text-primary tracking-wider">
-                {mode === 'signin' ? 'SIGN_IN' : 'CREATE_ACCOUNT'}
+                {mode === 'signin' ? 'SIGN_IN' : mode === 'signup' ? 'CREATE_ACCOUNT' : 'RESET_PASSWORD'}
               </span>
             </div>
             <button
@@ -228,23 +258,25 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
               </div>
             </div>
 
-            {/* Password Field */}
-            <div>
-              <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">
-                PASSWORD
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="pl-10 font-mono bg-background/50 border-primary/20 focus:border-primary"
-                  disabled={loading}
-                />
+            {/* Password Field (hidden in forgot mode) */}
+            {mode !== 'forgot' && (
+              <div>
+                <label className="text-[10px] font-mono text-muted-foreground mb-1 block tracking-wider">
+                  PASSWORD
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="pl-10 font-mono bg-background/50 border-primary/20 focus:border-primary"
+                    disabled={loading}
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Confirm Password (signup only) */}
             {mode === 'signup' && (
@@ -283,27 +315,53 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
                   <LogIn className="w-4 h-4 mr-2" />
                   SIGN_IN
                 </>
-              ) : (
+              ) : mode === 'signup' ? (
                 <>
                   <Zap className="w-4 h-4 mr-2" />
                   CREATE_ACCOUNT
                 </>
+              ) : (
+                <>
+                  <Mail className="w-4 h-4 mr-2" />
+                  SEND_RESET_LINK
+                </>
               )}
             </Button>
 
-            {/* Switch Mode */}
-            <div className="text-center pt-2">
-              <button
-                type="button"
-                onClick={switchMode}
-                className="text-sm font-mono text-muted-foreground hover:text-primary transition-colors"
-              >
-                {mode === 'signin' ? (
-                  <>Don't have an account? <span className="text-primary">Sign up</span></>
-                ) : (
-                  <>Already have an account? <span className="text-primary">Sign in</span></>
-                )}
-              </button>
+            {/* Switch Mode / Forgot Password */}
+            <div className="text-center pt-2 space-y-2">
+              {mode === 'forgot' ? (
+                <button
+                  type="button"
+                  onClick={backToSignIn}
+                  className="text-sm font-mono text-muted-foreground hover:text-primary transition-colors"
+                >
+                  <span className="text-primary">Back to sign in</span>
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={switchMode}
+                    className="text-sm font-mono text-muted-foreground hover:text-primary transition-colors block w-full"
+                  >
+                    {mode === 'signin' ? (
+                      <>Don't have an account? <span className="text-primary">Sign up</span></>
+                    ) : (
+                      <>Already have an account? <span className="text-primary">Sign in</span></>
+                    )}
+                  </button>
+                  {mode === 'signin' && (
+                    <button
+                      type="button"
+                      onClick={goToForgot}
+                      className="text-sm font-mono text-muted-foreground hover:text-primary transition-colors"
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           </form>
         </motion.div>

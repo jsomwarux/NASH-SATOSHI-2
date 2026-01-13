@@ -397,7 +397,7 @@ export async function registerRoutes(
       const successUrl = `${baseUrl}/pricing?subscription=success&session_id={CHECKOUT_SESSION_ID}`;
       const cancelUrl = `${baseUrl}/pricing?subscription=canceled`;
 
-      const checkoutUrl = await createCheckoutSession(
+      const result = await createCheckoutSession(
         userId,
         userEmail,
         tier as SubscriptionTierId,
@@ -406,7 +406,14 @@ export async function registerRoutes(
         referralCode || undefined
       );
 
-      res.json({ url: checkoutUrl });
+      if (result.type === 'upgraded') {
+        // Subscription was upgraded/downgraded directly - no checkout needed
+        const upgradedUrl = `${baseUrl}/pricing?subscription=upgraded&tier=${result.tier}`;
+        res.json({ url: upgradedUrl, upgraded: true, tier: result.tier });
+      } else {
+        // New subscription - redirect to Stripe checkout
+        res.json({ url: result.url });
+      }
     } catch (error) {
       console.error("Error creating checkout session:", error);
       res.status(500).json({ message: "Failed to create checkout session" });
