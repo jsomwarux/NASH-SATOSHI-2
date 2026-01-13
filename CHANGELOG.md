@@ -4,7 +4,103 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-12 Part 2 - Security, Auth Fixes, Home Page Optimization & "Rankings" Rebrand (Latest)
+## Session: 2026-01-13 - Support Contact, Auth Improvements, UX Fixes & Narrative Normalization (Latest)
+
+### Summary
+Added support/contact feature with email via Resend, forgot password functionality, subscription upgrade/downgrade confirmation modal, improved narrative normalization for hot narratives, fixed scorecard share/download functionality, and various UX improvements including URL change from `/leaderboard` to `/rankings`.
+
+### Changes Made
+
+#### 1. Support/Contact Feature
+- Added `/api/support` POST endpoint for sending support emails via Resend
+- Created `SupportModal` component with form validation and success/error states
+- Added "HELP" button to Layout footer/status bar
+- Configurable via environment variables:
+  - `RESEND_API_KEY` - Resend API key
+  - `RESEND_FROM_EMAIL` - Sender email (must match verified domain in Resend)
+  - `SUPPORT_EMAIL` - Destination email (defaults to nashsatoshi@gmail.com)
+- Email includes user's email as `replyTo` for easy response
+- Fixed email state sync with useEffect when modal opens
+
+#### 2. Forgot Password Feature
+- Added `resetPassword` method to AuthContext using Supabase's `resetPasswordForEmail`
+- Updated AuthModal with 'forgot' mode
+- Added "Forgot password?" link on sign-in form
+- Redirects to `/account` after password reset
+
+#### 3. Scorecard Access Error Improvement
+- Added `ApiError` class to `client/src/lib/api.ts` with `code` and `status` properties
+- Updated Analyze page to detect `ACCESS_DENIED` errors
+- Shows "Premium Content" message with upgrade CTA instead of generic "Analysis not found"
+
+#### 4. URL Route Change
+- Changed route from `/leaderboard` to `/rankings`
+- Updated all navigation links in: App.tsx, Layout.tsx, Analyze.tsx, Vote.tsx, Home.tsx
+
+#### 5. Pricing Page Scroll Fix
+- Added `window.scrollTo(0, 0)` in useEffect on Pricing page mount
+- Fixes issue where clicking upgrade CTA scrolled to bottom of page
+
+#### 6. Subscription Upgrade/Downgrade Confirmation
+- Added `pendingPlanChange` state for confirmation modal
+- Created confirmation UI showing upgrade/downgrade details with price comparison
+- Both upgrades and downgrades now require explicit confirmation before processing
+- Fixed downgrade button to use API instead of redirecting to Stripe portal
+
+#### 7. Narrative Normalization Improvements
+- Merged generic "AI" keywords into "AI Agents" mapping
+- Added post-processing filter to remove parent narratives when specific children exist:
+  - "AI" filtered when "AI Agents" or "AI Infrastructure" present
+  - "Gaming" filtered when "GameFi" present
+  - "Finance" filtered when "DeFi" present
+  - "Social" filtered when "SocialFi" present
+  - "Infrastructure" filtered when "L1/L2", "DePIN", or "Interoperability" present
+
+#### 8. Share/Download Image Fix
+- Improved `generateImage` function with better CORS handling
+- Added fallback that retries without external images if CORS fails
+- Fixed Firefox compatibility by appending download link to document body
+- Replaced `onAnimationComplete` with `useEffect` for reliable image generation on modal open
+- Added user feedback via alerts when generation fails
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/routes.ts` | Added support email endpoint, moved `sendSupportEmail` to top of file, configurable via env vars |
+| `client/src/components/common/SupportModal.tsx` | New component for support contact form |
+| `client/src/components/common/Layout.tsx` | Added HELP button and SupportModal |
+| `client/src/contexts/AuthContext.tsx` | Added `resetPassword` method |
+| `client/src/components/auth/AuthModal.tsx` | Added forgot password mode |
+| `client/src/lib/api.ts` | Added `ApiError` class |
+| `client/src/pages/Analyze.tsx` | Premium content error handling |
+| `client/src/App.tsx` | Changed `/leaderboard` to `/rankings` route |
+| `client/src/pages/Pricing.tsx` | Added scroll-to-top, confirmation modal, fixed downgrade flow |
+| `server/storage.ts` | Updated narrative mappings, added post-processing filter |
+| `client/src/components/scorecard/ShareModal.tsx` | Fixed image generation and download |
+
+### Environment Variables Added
+```bash
+# Support email configuration
+RESEND_API_KEY=your_resend_api_key
+RESEND_FROM_EMAIL=support@yourverifieddomain.com  # Must match Resend verified domain
+SUPPORT_EMAIL=nashsatoshi@gmail.com  # Optional, defaults to this
+```
+
+### Commands Run
+- `npm install resend` - Added Resend email package
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- Support contact feature fully functional with Resend
+- Forgot password flow works via Supabase
+- Subscription changes require confirmation
+- Hot narratives no longer show redundant generic/specific pairs
+- Scorecard sharing/download works reliably
+- All TypeScript compiles successfully
+
+---
+
+## Session: 2026-01-12 Part 2 - Security, Auth Fixes, Home Page Optimization & "Rankings" Rebrand
 
 ### Summary
 Comprehensive security audit with fixes, resolved auth session handling issues, updated sign up modal to show free tier benefits, fixed voting system bugs, fixed Stripe subscription flow, redesigned Home page "Your Edge in Crypto" section, and renamed all "Leaderboard" references to "Rankings" for brand consistency.

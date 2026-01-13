@@ -684,7 +684,7 @@ export class PostgresStorage implements IStorage {
   }): Promise<{ items: any[]; total: number }> {
     return withRetry(async () => {
       const db = getDb();
-      const { limit = 50, offset = 0, sortBy = "score7d", order = "desc", filters } = options;
+      const { limit = 100, offset = 0, sortBy = "score7d", order = "desc", filters } = options;
 
     // Build WHERE conditions
     const conditions = [eq(tokenAnalyses.status, "completed")];

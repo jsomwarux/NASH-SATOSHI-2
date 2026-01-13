@@ -1149,7 +1149,7 @@ export async function registerRoutes(
   app.get("/api/leaderboard", optionalAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.userId;
-      const requestedLimit = parseInt(req.query.limit as string) || 50;
+      const requestedLimit = parseInt(req.query.limit as string) || 100;
       const requestedOffset = parseInt(req.query.offset as string) || 0;
       const sortBy = (req.query.sortBy as string) || "score7d";
       const order = (req.query.order as "asc" | "desc") || "desc";
