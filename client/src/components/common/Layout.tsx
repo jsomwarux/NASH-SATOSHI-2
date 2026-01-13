@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { BarChart3, Home, Vote, Terminal, Cpu, Wifi, Shield, Loader2, Crown, User, LogOut, CreditCard, ChevronDown, AlertTriangle } from "lucide-react";
+import { BarChart3, Home, Vote, Terminal, Cpu, Wifi, Shield, Loader2, Crown, User, LogOut, CreditCard, ChevronDown, AlertTriangle, HelpCircle } from "lucide-react";
 import { CyberBackground } from "../CyberBackground";
 import { useAnalysisTracker } from "@/contexts/AnalysisTrackerContext";
 import { useSubscriptionStatus, useCreateBillingPortal } from "@/hooks/useSubscription";
 import { useAuth } from "@/contexts/AuthContext";
 import { AuthModal } from "@/components/auth/AuthModal";
+import { SupportModal } from "@/components/common/SupportModal";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -24,6 +25,7 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const [location] = useLocation();
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showSupportModal, setShowSupportModal] = useState(false);
   const { trackedAnalyses } = useAnalysisTracker();
   const { data: subscriptionStatus } = useSubscriptionStatus();
   const { user, signOut, isConfigured } = useAuth();
@@ -327,6 +329,14 @@ export function Layout({ children }: LayoutProps) {
 
         {/* Right Side */}
         <div className="flex items-center gap-4">
+          {/* Help Button */}
+          <button
+            onClick={() => setShowSupportModal(true)}
+            className="flex items-center gap-1.5 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+          >
+            <HelpCircle className="w-3 h-3" />
+            <span className="hidden sm:inline">HELP</span>
+          </button>
           {/* Usage Indicator */}
           {subscriptionStatus && (
             <Link href="/pricing">
@@ -362,6 +372,12 @@ export function Layout({ children }: LayoutProps) {
         isOpen={showAuthModal}
         onClose={() => setShowAuthModal(false)}
         defaultMode="signin"
+      />
+
+      {/* Support Modal */}
+      <SupportModal
+        isOpen={showSupportModal}
+        onClose={() => setShowSupportModal(false)}
       />
     </div>
   );

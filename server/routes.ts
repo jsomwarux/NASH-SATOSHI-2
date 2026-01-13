@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import type { Server } from "http";
 import fs from "fs";
 import path from "path";
+import { Resend } from 'resend';
 import { storage } from "./storage";
 import { requireAuth, optionalAuth, requireAdmin, isAdminEmail } from "./auth";
 import {
@@ -16,6 +17,50 @@ import {
   verifyAndCompleteCreditPurchase,
 } from "./stripe";
 import { CREDIT_PACKS, SUBSCRIPTION_TIERS, type CreditPackId, type SubscriptionTierId } from "@shared/schema";
+
+// ==================== SUPPORT EMAIL HELPER ====================
+const SUPPORT_EMAIL = 'nashsatoshi@gmail.com';
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+
+async function sendSupportEmail(
+  userEmail: string,
+  subject: string,
+  message: string,
+  userName?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!resend) {
+    console.error('Resend not configured - RESEND_API_KEY missing');
+    return { success: false, error: 'Email service not configured' };
+  }
+
+  try {
+    await resend.emails.send({
+      from: 'Support <support@updates.memecoinalytics.com>',
+      to: SUPPORT_EMAIL,
+      replyTo: userEmail,
+      subject: `[Support] ${subject}`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #0ea5e9;">New Support Request</h2>
+          <p><strong>From:</strong> ${userName || 'User'} &lt;${userEmail}&gt;</p>
+          <p><strong>Subject:</strong> ${subject}</p>
+          <hr style="border: 1px solid #e5e7eb; margin: 20px 0;" />
+          <div style="white-space: pre-wrap;">${message}</div>
+          <hr style="border: 1px solid #e5e7eb; margin: 20px 0;" />
+          <p style="color: #6b7280; font-size: 12px;">
+            Reply directly to this email to respond to the user.
+          </p>
+        </div>
+      `,
+    });
+
+    console.log(`Support email sent from ${userEmail}: ${subject}`);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to send support email:', error);
+    return { success: false, error: 'Failed to send email' };
+  }
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -1765,6 +1810,36 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error submitting vote:", error);
       res.status(500).json({ message: "Failed to submit vote" });
+    }
+  });
+
+  // ==================== SUPPORT / CONTACT ====================
+  app.post("/api/support", optionalAuth, async (req: Request, res: Response) => {
+    try {
+      const { email, subject, message, name } = req.body;
+
+      // Validate required fields
+      if (!email || !subject || !message) {
+        return res.status(400).json({ message: "Email, subject, and message are required" });
+      }
+
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ message: "Invalid email address" });
+      }
+
+      // Send the support email
+      const result = await sendSupportEmail(email, subject, message, name);
+
+      if (result.success) {
+        res.json({ message: "Support request sent successfully" });
+      } else {
+        res.status(500).json({ message: result.error || "Failed to send support request" });
+      }
+    } catch (error) {
+      console.error("Error sending support request:", error);
+      res.status(500).json({ message: "Failed to send support request" });
     }
   });
 

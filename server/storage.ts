@@ -52,9 +52,8 @@ function getESTTodayStart(): Date {
 // Define canonical narratives and their keyword patterns
 const NARRATIVE_MAPPINGS: { canonical: string; keywords: string[] }[] = [
   // AI & Tech narratives - more specific patterns first
-  { canonical: "AI Agents", keywords: ["ai agent", "autonomous ai", "ai assistant", "intelligent agent"] },
-  { canonical: "AI Infrastructure", keywords: ["ai infra", "ai infrastructure", "machine learning", "ml infra"] },
-  { canonical: "AI", keywords: ["artificial intelligence", " ai ", " ai,", "(ai)", "ai/"] }, // Generic AI catch-all (with word boundaries)
+  { canonical: "AI Agents", keywords: ["ai agent", "autonomous ai", "ai assistant", "intelligent agent", "artificial intelligence", " ai ", " ai,", "(ai)", "ai/", "ai token", "ai crypto"] },
+  { canonical: "AI Infrastructure", keywords: ["ai infra", "ai infrastructure", "machine learning infra", "ml infra", "gpu network", "compute network"] },
   { canonical: "DePIN", keywords: ["depin", "decentralized physical", "physical infrastructure"] },
 
   // Science & Research
@@ -1044,10 +1043,36 @@ export class PostgresStorage implements IStorage {
       narrativeScores.push({ narrative, avgScore, tokenCount });
     });
 
-    // Sort by avgScore descending and take top 3
-    const topNarratives = narrativeScores
-      .sort((a, b) => b.avgScore - a.avgScore)
-      .slice(0, 3);
+    // Sort by avgScore descending
+    const sortedNarratives = narrativeScores.sort((a, b) => b.avgScore - a.avgScore);
+
+    // Filter out generic narratives when more specific ones exist
+    // e.g., if "AI Agents" is present, filter out "AI"
+    const GENERIC_NARRATIVE_PARENTS: Record<string, string[]> = {
+      "AI": ["AI Agents", "AI Infrastructure"],
+      "Gaming": ["GameFi"],
+      "Finance": ["DeFi"],
+      "Social": ["SocialFi"],
+      "Infrastructure": ["L1/L2", "DePIN", "Interoperability"],
+    };
+
+    const filteredNarratives = sortedNarratives.filter(narrative => {
+      // Check if this narrative is a generic parent of any other narrative in the list
+      const moreSpecificNarratives = GENERIC_NARRATIVE_PARENTS[narrative.narrative];
+      if (moreSpecificNarratives) {
+        // If any more specific narrative exists in our list, filter out this generic one
+        const hasMoreSpecific = sortedNarratives.some(other =>
+          moreSpecificNarratives.includes(other.narrative)
+        );
+        if (hasMoreSpecific) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // Take top 3 from filtered list
+    const topNarratives = filteredNarratives.slice(0, 3);
 
     // Get top 3 highest rated UNIQUE tokens from past 7 days (deduplicated by symbol)
     const winners7dQuery = await db
