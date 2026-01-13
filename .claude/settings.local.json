@@ -39,7 +39,8 @@
       "Bash(timeout 20 npm run dev:*)",
       "Bash(/dev/null pkill -9 -f node.*server/index.ts)",
       "Bash(git checkout:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "WebFetch(domain:resend.com)"
     ]
   }
 }

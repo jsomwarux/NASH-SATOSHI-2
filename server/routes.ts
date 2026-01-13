@@ -19,7 +19,9 @@ import {
 import { CREDIT_PACKS, SUBSCRIPTION_TIERS, type CreditPackId, type SubscriptionTierId } from "@shared/schema";
 
 // ==================== SUPPORT EMAIL HELPER ====================
-const SUPPORT_EMAIL = 'nashsatoshi@gmail.com';
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'nashsatoshi@gmail.com';
+// RESEND_FROM_EMAIL should match your verified domain in Resend (e.g., "support@yourdomain.com")
+const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 async function sendSupportEmail(
@@ -34,8 +36,8 @@ async function sendSupportEmail(
   }
 
   try {
-    await resend.emails.send({
-      from: 'Support <support@updates.memecoinalytics.com>',
+    const result = await resend.emails.send({
+      from: `Nash Satoshi Support <${RESEND_FROM_EMAIL}>`,
       to: SUPPORT_EMAIL,
       replyTo: userEmail,
       subject: `[Support] ${subject}`,
@@ -54,11 +56,11 @@ async function sendSupportEmail(
       `,
     });
 
-    console.log(`Support email sent from ${userEmail}: ${subject}`);
+    console.log(`Support email sent from ${userEmail}: ${subject}`, result);
     return { success: true };
-  } catch (error) {
-    console.error('Failed to send support email:', error);
-    return { success: false, error: 'Failed to send email' };
+  } catch (error: any) {
+    console.error('Failed to send support email:', error?.message || error);
+    return { success: false, error: error?.message || 'Failed to send email' };
   }
 }
 

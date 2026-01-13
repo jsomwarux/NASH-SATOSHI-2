@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { toPng } from "html-to-image";
 import { X, Download, Share2, Copy, Check, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -114,15 +114,30 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
 
   // Download the image
   const handleDownload = useCallback(async () => {
-    let url = imageUrl;
-    if (!url) {
-      url = await generateImage();
-    }
-    if (url) {
-      const link = document.createElement("a");
-      link.download = `${analysis.tokenSymbol}-scorecard.png`;
-      link.href = url;
-      link.click();
+    setIsGenerating(true);
+    try {
+      let url = imageUrl;
+      if (!url) {
+        url = await generateImage();
+      }
+      if (url) {
+        const link = document.createElement("a");
+        link.download = `${analysis.tokenSymbol}-scorecard.png`;
+        link.href = url;
+        // Append to body for Firefox compatibility
+        document.body.appendChild(link);
+        link.click();
+        // Clean up
+        document.body.removeChild(link);
+      } else {
+        console.error("Failed to generate image for download");
+        alert("Failed to generate image. Please try again.");
+      }
+    } catch (error) {
+      console.error("Download error:", error);
+      alert("Failed to download image. Please try again.");
+    } finally {
+      setIsGenerating(false);
     }
   }, [imageUrl, generateImage, analysis.tokenSymbol]);
 
@@ -166,11 +181,15 @@ ${shareUrl}`;
   }, [analysis, finalScore, shareUrl, imageUploaded, imageUrl, uploadImage, generateImage]);
 
   // Generate image when modal opens
-  const handleModalOpen = useCallback(() => {
-    if (!imageUrl) {
-      setTimeout(generateImage, 100);
+  useEffect(() => {
+    if (isOpen && !imageUrl && !isGenerating) {
+      // Small delay to ensure the DOM is ready
+      const timer = setTimeout(() => {
+        generateImage();
+      }, 200);
+      return () => clearTimeout(timer);
     }
-  }, [imageUrl, generateImage]);
+  }, [isOpen, imageUrl, isGenerating, generateImage]);
 
   if (!isOpen) return null;
 
@@ -182,7 +201,6 @@ ${shareUrl}`;
         exit={{ opacity: 0 }}
         className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
         onClick={onClose}
-        onAnimationComplete={handleModalOpen}
       >
         <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
