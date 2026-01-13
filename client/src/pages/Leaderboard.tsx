@@ -25,11 +25,11 @@ import { usePerformanceMetrics } from "@/hooks/usePerformance";
 import type { LeaderboardFilters } from "@shared/schema";
 import { formatScore } from "@/lib/utils";
 
-type SortField = "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "upsideTier";
+type SortField = "latestScore" | "scoreTrend" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "upsideTier";
 type SortOrder = "asc" | "desc";
 
 export default function Leaderboard() {
-  const [sortBy, setSortBy] = useState<SortField>("score7d");
+  const [sortBy, setSortBy] = useState<SortField>("latestScore");
   const [order, setOrder] = useState<SortOrder>("desc");
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<LeaderboardFilters>({});
@@ -75,8 +75,8 @@ export default function Leaderboard() {
   useEffect(() => {
     if (data && !data.isPremium) {
       // Reset to default sort for free users
-      if (sortBy !== "score7d" || order !== "desc") {
-        setSortBy("score7d");
+      if (sortBy !== "latestScore" || order !== "desc") {
+        setSortBy("latestScore");
         setOrder("desc");
       }
       // Clear any filters

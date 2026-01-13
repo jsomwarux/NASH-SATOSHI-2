@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { ArrowUpDown, ExternalLink, Clock, BarChart3, Terminal, Shield, ShieldCheck, ShieldAlert, Lock, Crown, HelpCircle } from "lucide-react";
+import { ArrowUpDown, ExternalLink, Clock, Terminal, Shield, ShieldCheck, ShieldAlert, Lock, Crown, HelpCircle, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -21,7 +21,7 @@ import type { AggregatedLeaderboardItem } from "@/types/leaderboard";
 import { formatScore, formatComponentScore } from "@/lib/utils";
 import { ScoringMethodologyModal } from "@/components/common/ScoringMethodologyModal";
 
-type SortField = "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "upsideTier";
+type SortField = "latestScore" | "scoreTrend" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "upsideTier";
 
 interface LeaderboardTableProps {
   items: AggregatedLeaderboardItem[];
@@ -137,6 +137,56 @@ function getUpsideTierInfo(tier: string | null, multiple: string | null) {
   }
 }
 
+// Get trend display info based on score change
+function getTrendInfo(scoreTrend: number | null): {
+  icon: typeof TrendingUp | typeof TrendingDown | typeof Minus;
+  color: string;
+  bg: string;
+  display: string;
+  label: string;
+} {
+  if (scoreTrend === null) {
+    return {
+      icon: Minus,
+      color: 'text-blue-400',
+      bg: 'bg-blue-500/10 border-blue-500/20',
+      display: 'NEW',
+      label: 'First analysis - no trend data yet'
+    };
+  }
+
+  const absChange = Math.abs(scoreTrend);
+  const sign = scoreTrend >= 0 ? '+' : '';
+
+  if (scoreTrend >= 3) {
+    return {
+      icon: TrendingUp,
+      color: 'text-green-400',
+      bg: 'bg-green-500/10 border-green-500/20',
+      display: `${sign}${scoreTrend.toFixed(1)}`,
+      label: `Score improved by ${absChange.toFixed(1)} points`
+    };
+  }
+
+  if (scoreTrend <= -3) {
+    return {
+      icon: TrendingDown,
+      color: 'text-red-400',
+      bg: 'bg-red-500/10 border-red-500/20',
+      display: `${scoreTrend.toFixed(1)}`,
+      label: `Score declined by ${absChange.toFixed(1)} points`
+    };
+  }
+
+  return {
+    icon: Minus,
+    color: 'text-muted-foreground',
+    bg: 'bg-muted/10 border-muted/20',
+    display: '—',
+    label: `Stable (${sign}${scoreTrend.toFixed(1)} points)`
+  };
+}
+
 export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, totalTokens, canSort = true }: LeaderboardTableProps) {
   const [showMethodologyModal, setShowMethodologyModal] = useState(false);
 
@@ -217,10 +267,10 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
               <TableHead className="text-center font-mono text-[10px] tracking-wider">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span><SortButton field="score7d">SCORE</SortButton></span>
+                    <span><SortButton field="latestScore">SCORE</SortButton></span>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="cyber-card border-primary/20 max-w-[200px]">
-                    <p className="text-xs font-mono">Average game theory score across all analyses (0-100)</p>
+                    <p className="text-xs font-mono">Latest game theory score (0-100) with time since analysis</p>
                   </TooltipContent>
                 </Tooltip>
               </TableHead>
@@ -259,10 +309,10 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
               <TableHead className="text-center hidden md:table-cell font-mono text-[10px] tracking-wider">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span><SortButton field="runs7d">RUNS</SortButton></span>
+                    <span><SortButton field="scoreTrend">TREND</SortButton></span>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="cyber-card border-primary/20 max-w-[200px]">
-                    <p className="text-xs font-mono">Analysis count: 7-day / 30-day</p>
+                    <p className="text-xs font-mono">Score change from previous analysis</p>
                   </TooltipContent>
                 </Tooltip>
               </TableHead>
@@ -274,26 +324,12 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                   </TooltipContent>
                 </Tooltip>
               </TableHead>
-              <TableHead className="text-center hidden sm:table-cell font-mono text-[10px] tracking-wider min-w-[90px] pr-4">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span><SortButton field="latestAnalysis">LATEST</SortButton></span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="cyber-card border-primary/20 max-w-[200px]">
-                    <p className="text-xs font-mono">Most recent analysis: date and score</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TableHead>
               <TableHead className="w-14 pr-2"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {items.map((item, index) => {
-              const score7d = item.score7d || 0;
-              const score30d = item.score30d || 0;
               const cleanedNarrative = cleanNarrative(item.latestNarrative);
-              const confidenceInfo = getConfidenceInfo(item.confidence || 'low');
-              const ConfidenceIcon = confidenceInfo.icon;
               const gated = isGated(index);
               const isFirstGatedRow = gated && accessLimit !== null && index === accessLimit;
 
@@ -303,7 +339,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                   <React.Fragment key={`cta-and-${item.tokenId}`}>
                     {/* Sticky CTA Row */}
                     <tr className="sticky top-16 z-20">
-                      <td colSpan={11} className="p-0 border-0 bg-transparent">
+                      <td colSpan={10} className="p-0 border-0 bg-transparent">
                         <div className="flex justify-center py-3">
                           <motion.div
                             initial={{ opacity: 0, y: -10 }}
@@ -361,7 +397,10 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                         <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-mono opacity-30">???</Badge>
                       </TableCell>
                       <TableCell className="text-center blur-[2px]">
-                        <span className="text-lg font-bold font-mono text-muted-foreground/50">??.??</span>
+                        <div className="flex flex-col items-center">
+                          <span className="text-lg font-bold font-mono text-muted-foreground/50">??.??</span>
+                          <span className="text-[9px] text-muted-foreground/30 font-mono">??h</span>
+                        </div>
                       </TableCell>
                       <TableCell className="text-center blur-[2px]">
                         <Badge variant="outline" className="font-mono font-bold opacity-30">?</Badge>
@@ -375,13 +414,12 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                         <span className="text-sm font-mono text-muted-foreground/30">?</span>
                       </TableCell>
                       <TableCell className="text-center hidden md:table-cell blur-[2px]">
-                        <span className="font-mono text-sm text-muted-foreground/30">?/?</span>
+                        <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted/30 opacity-30">
+                          <span className="text-[10px] font-mono">???</span>
+                        </div>
                       </TableCell>
                       <TableCell className="hidden xl:table-cell blur-[2px]">
                         <span className="text-sm text-muted-foreground/30">Hidden</span>
-                      </TableCell>
-                      <TableCell className="text-center hidden sm:table-cell pr-4 blur-[2px]">
-                        <span className="text-[10px] text-muted-foreground/30 font-mono">??? • ??.??</span>
                       </TableCell>
                       <TableCell className="pr-2">
                         <Link href="/pricing">
@@ -421,7 +459,10 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                       <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-mono opacity-30">???</Badge>
                     </TableCell>
                     <TableCell className="text-center blur-[2px]">
-                      <span className="text-lg font-bold font-mono text-muted-foreground/50">??.??</span>
+                      <div className="flex flex-col items-center">
+                        <span className="text-lg font-bold font-mono text-muted-foreground/50">??.??</span>
+                        <span className="text-[9px] text-muted-foreground/30 font-mono">??h</span>
+                      </div>
                     </TableCell>
                     <TableCell className="text-center blur-[2px]">
                       <Badge variant="outline" className="font-mono font-bold opacity-30">?</Badge>
@@ -435,13 +476,12 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                       <span className="text-sm font-mono text-muted-foreground/30">?</span>
                     </TableCell>
                     <TableCell className="text-center hidden md:table-cell blur-[2px]">
-                      <span className="font-mono text-sm text-muted-foreground/30">?/?</span>
+                      <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted/30 opacity-30">
+                        <span className="text-[10px] font-mono">???</span>
+                      </div>
                     </TableCell>
                     <TableCell className="hidden xl:table-cell blur-[2px]">
                       <span className="text-sm text-muted-foreground/30">Hidden</span>
-                    </TableCell>
-                    <TableCell className="text-center hidden sm:table-cell pr-4 blur-[2px]">
-                      <span className="text-[10px] text-muted-foreground/30 font-mono">??? • ??.??</span>
                     </TableCell>
                     <TableCell className="pr-2">
                       <Link href="/pricing">
@@ -511,15 +551,18 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                   <TableCell className="text-center">
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <div className="flex items-center justify-center gap-1 cursor-help">
+                        <div className="flex flex-col items-center cursor-help">
                           <span className={`text-lg font-bold font-mono ${getScoreColorByTier(item.latestTier)}`}>
-                            {formatScore(score7d)}
+                            {formatScore(item.latestScore)}
                           </span>
-                          <ConfidenceIcon className={`w-3 h-3 ${confidenceInfo.color}`} />
+                          <span className="text-[9px] text-muted-foreground font-mono flex items-center gap-0.5">
+                            <Clock className="w-2.5 h-2.5" />
+                            {formatDate(item.latestAnalysisDate)}
+                          </span>
                         </div>
                       </TooltipTrigger>
                       <TooltipContent side="top" className="cyber-card border-primary/20">
-                        <p className="text-sm font-mono">{confidenceInfo.label}</p>
+                        <p className="text-sm font-mono">Latest: {new Date(item.latestAnalysisDate).toLocaleDateString()}</p>
                       </TooltipContent>
                     </Tooltip>
                   </TableCell>
@@ -562,19 +605,23 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                     )}
                   </TableCell>
                   <TableCell className="text-center hidden md:table-cell">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="flex items-center justify-center gap-1 cursor-help">
-                          <BarChart3 className="w-3 h-3 text-primary/70" />
-                          <span className="font-mono text-sm text-primary/90">
-                            {item.runs7d}/{item.runs30d}
-                          </span>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="cyber-card border-primary/20">
-                        <p className="text-sm font-mono">7D: {item.runs7d} runs | 30D: {item.runs30d} runs</p>
-                      </TooltipContent>
-                    </Tooltip>
+                    {(() => {
+                      const trendInfo = getTrendInfo(item.scoreTrend ?? null);
+                      const TrendIcon = trendInfo.icon;
+                      return (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className={`inline-flex items-center justify-center gap-1 px-2 py-0.5 rounded border ${trendInfo.bg} cursor-help min-w-[52px]`}>
+                              <TrendIcon className={`w-3 h-3 ${trendInfo.color}`} />
+                              <span className={`text-[11px] font-mono font-bold ${trendInfo.color}`}>{trendInfo.display}</span>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="cyber-card border-primary/20">
+                            <p className="text-sm font-mono">{trendInfo.label}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="hidden xl:table-cell">
                     {cleanedNarrative ? (
@@ -591,24 +638,6 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                     ) : (
                       <span className="text-muted-foreground text-sm font-mono">—</span>
                     )}
-                  </TableCell>
-                  <TableCell className="text-center hidden sm:table-cell pr-4">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="flex flex-col items-center gap-0.5 cursor-help">
-                          <span className={`text-sm font-bold font-mono ${getScoreColorByTier(item.latestTier)}`}>
-                            {formatScore(item.latestScore)}
-                          </span>
-                          <span className="text-[9px] text-muted-foreground font-mono flex items-center gap-0.5">
-                            <Clock className="w-2.5 h-2.5" />
-                            {formatDate(item.latestAnalysisDate)}
-                          </span>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="cyber-card border-primary/20">
-                        <p className="text-xs font-mono">Latest: {new Date(item.latestAnalysisDate).toLocaleDateString()}</p>
-                      </TooltipContent>
-                    </Tooltip>
                   </TableCell>
                   <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                     <Link href={`/analyze/${item.latestAnalysisId}`}>

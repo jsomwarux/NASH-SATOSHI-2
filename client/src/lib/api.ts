@@ -93,7 +93,7 @@ export async function getTokenStats(tokenId: string): Promise<TokenStats> {
 export interface LeaderboardOptions {
   limit?: number;
   offset?: number;
-  sortBy?: "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "upsideTier";
+  sortBy?: "latestScore" | "scoreTrend" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "upsideTier";
   order?: "asc" | "desc";
   filters?: LeaderboardFilters;
 }

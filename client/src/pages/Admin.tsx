@@ -74,14 +74,14 @@ function getStatusColor(status: string): { bg: string; text: string } {
   }
 }
 
-type SortField = "score7d" | "score30d" | "runs7d" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "upsideTier";
+type SortField = "latestScore" | "scoreTrend" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "upsideTier";
 
 export default function Admin() {
   const { user, getAccessToken } = useAuth();
   const queryClient = useQueryClient();
   const [selectedToken, setSelectedToken] = useState<TokenSearchResult | null>(null);
   const [activeTab, setActiveTab] = useState("analyze");
-  const [sortBy, setSortBy] = useState<SortField>("score7d");
+  const [sortBy, setSortBy] = useState<SortField>("latestScore");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [filters, setFilters] = useState<LeaderboardFilters>({});
   const [searchQuery, setSearchQuery] = useState("");

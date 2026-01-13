@@ -5,21 +5,23 @@ export interface AggregatedLeaderboardItem {
   tokenName: string;
   tokenImage: string | null;
   chain: string | null;
-  // Primary metric: 7D weighted average score
+  // Historical metrics (kept for backward compatibility)
   score7d: number;
   runs7d: number;
-  // Secondary metric: 30D average score
   score30d: number;
   runs30d: number;
   // Confidence indicator based on sample size
   confidence: 'high' | 'medium' | 'low';
-  // Latest analysis info
+  // Latest analysis info (primary display)
   latestTier: string;
   latestNarrative: string | null;
   latestRecommendation: string | null; // BUY, HOLD, AVOID
   latestAnalysisId: number;
   latestAnalysisDate: string; // ISO date string from API
-  latestScore: number; // Score from the most recent analysis
+  latestScore: number; // Score from the most recent analysis (PRIMARY SCORE)
+  // Score trend (for TREND column)
+  previousScore: number | null; // Score from second most recent analysis
+  scoreTrend: number | null; // Difference: latestScore - previousScore
   // Token type and asymmetry
   tokenType: 'UTILITY' | 'MEMECOIN' | null;
   asymmetryScore: number | null;

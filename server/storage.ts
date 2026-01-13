@@ -684,7 +684,7 @@ export class PostgresStorage implements IStorage {
   }): Promise<{ items: any[]; total: number }> {
     return withRetry(async () => {
       const db = getDb();
-      const { limit = 100, offset = 0, sortBy = "score7d", order = "desc", filters } = options;
+      const { limit = 100, offset = 0, sortBy = "latestScore", order = "desc", filters } = options;
 
     // Build WHERE conditions
     const conditions = [eq(tokenAnalyses.status, "completed")];
@@ -763,6 +763,8 @@ export class PostgresStorage implements IStorage {
       latestAnalysisId: number;
       latestAnalysisDate: string;
       latestScore: number;
+      previousScore: number | null; // Score from second most recent analysis
+      scoreTrend: number | null; // Difference between latest and previous score
       scores7d: number[];
       scores30d: number[];
       tokenType: string | null;
@@ -796,6 +798,8 @@ export class PostgresStorage implements IStorage {
           latestAnalysisId: row.id,
           latestAnalysisDate: row.createdAt.toISOString(),
           latestScore: score, // Score from the most recent analysis
+          previousScore: null, // Will be set when we see the second analysis
+          scoreTrend: null, // Will be calculated after we have previousScore
           scores7d: [],
           scores30d: [],
           tokenType: row.tokenType,
@@ -804,6 +808,13 @@ export class PostgresStorage implements IStorage {
           upsideTier: row.upsideTier,
           upsideMultiple: row.upsideMultiple,
         });
+      } else {
+        // This is not the first analysis for this token - capture as previousScore if not set
+        const item = tokenMap.get(row.tokenId)!;
+        if (item.previousScore === null) {
+          item.previousScore = score;
+          item.scoreTrend = item.latestScore - score;
+        }
       }
 
       const item = tokenMap.get(row.tokenId)!;
@@ -868,14 +879,23 @@ export class PostgresStorage implements IStorage {
       let comparison = 0;
 
       switch (sortBy) {
+        case 'latestScore':
+          comparison = (a.latestScore || 0) - (b.latestScore || 0);
+          break;
         case 'score7d':
           comparison = (a.score7d || 0) - (b.score7d || 0);
           break;
         case 'score30d':
           comparison = (a.score30d || 0) - (b.score30d || 0);
           break;
-        case 'runs7d':
-          comparison = (a.runs7d || 0) - (b.runs7d || 0);
+        case 'scoreTrend':
+          // Sort by score trend, nulls (new tokens) at the end
+          const aTrend = a.scoreTrend;
+          const bTrend = b.scoreTrend;
+          if (aTrend === null && bTrend === null) comparison = 0;
+          else if (aTrend === null) comparison = -1;
+          else if (bTrend === null) comparison = 1;
+          else comparison = aTrend - bTrend;
           break;
         case 'latestAnalysis':
           comparison = new Date(a.latestAnalysisDate).getTime() - new Date(b.latestAnalysisDate).getTime();
@@ -928,7 +948,7 @@ export class PostgresStorage implements IStorage {
           break;
         }
         default:
-          comparison = (a.score7d || 0) - (b.score7d || 0);
+          comparison = (a.latestScore || 0) - (b.latestScore || 0);
       }
 
       return order === "desc" ? -comparison : comparison;
