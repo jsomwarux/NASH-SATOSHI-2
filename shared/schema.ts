@@ -21,6 +21,22 @@ export const SUBSCRIPTION_TIERS = {
     ],
     popular: false,
   },
+  beta_free: {
+    id: 'beta_free',
+    name: 'Beta Access',
+    price: 0,
+    priceId: null,
+    leaderboardAccess: null, // FULL ACCESS (unlimited) during beta
+    votesPerDay: 1, // 1 vote per day during beta
+    priorityVotes: false, // No 2x weight during beta
+    tagline: 'Full access during beta period.',
+    features: [
+      'Full rankings access',
+      'All scorecards',
+      '1 vote per day',
+    ],
+    popular: false,
+  },
   pro: {
     id: 'pro',
     name: 'Pro',

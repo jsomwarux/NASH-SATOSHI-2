@@ -26,6 +26,7 @@ function getPriceToTier(): Record<string, SubscriptionTierId> {
 function getTierToPrice(): Record<SubscriptionTierId, string | null> {
   return {
     free: null,
+    beta_free: null, // Beta tier has no Stripe price
     pro: process.env.STRIPE_PRO_PRICE_ID || null,
     premium: process.env.STRIPE_PREMIUM_PRICE_ID || null,
   };
@@ -170,7 +171,7 @@ export async function changeSubscriptionTier(
 
     // Determine if this is an upgrade or downgrade
     const currentTier = subscription.tier;
-    const tierOrder = { free: 0, pro: 1, premium: 2 };
+    const tierOrder = { free: 0, beta_free: 0, pro: 1, premium: 2 };
     const isUpgrade = tierOrder[newTier] > tierOrder[currentTier as keyof typeof tierOrder];
 
     // Update the subscription with the new price

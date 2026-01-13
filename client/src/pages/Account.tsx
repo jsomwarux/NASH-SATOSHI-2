@@ -15,6 +15,7 @@ import {
   CheckCircle,
   LogOut,
   RefreshCw,
+  Rocket,
 } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { Button } from "@/components/ui/button";
@@ -130,6 +131,7 @@ export default function Account() {
   const getTierColor = (tierId: string) => {
     const colors: Record<string, string> = {
       free: "text-primary border-primary/30 bg-primary/10",
+      beta_free: "text-green-400 border-green-500/30 bg-green-500/10",
       starter: "text-blue-400 border-blue-500/30 bg-blue-500/10",
       trader: "text-accent border-accent/30 bg-accent/10",
       pro: "text-purple-400 border-purple-500/30 bg-purple-500/10",
@@ -248,11 +250,11 @@ export default function Account() {
                       {status.tierName}
                     </span>
                     <Badge className={getTierColor(status.tier)}>
-                      {status.isSubscribed ? "ACTIVE" : status.tier === "free" ? "FREE" : "INACTIVE"}
+                      {status.isBeta ? "BETA" : status.isSubscribed ? "ACTIVE" : status.tier === "free" ? "FREE" : "INACTIVE"}
                     </Badge>
                   </div>
                 </div>
-                {status.isSubscribed && status.subscription?.currentPeriodEnd && (
+                {status.isSubscribed && status.subscription?.currentPeriodEnd && !status.isBeta && (
                   <div className="text-right">
                     <p className="text-xs text-muted-foreground font-mono mb-1">RENEWS</p>
                     <p className="font-mono text-sm">
@@ -261,6 +263,19 @@ export default function Account() {
                   </div>
                 )}
               </div>
+
+              {/* Beta Access Message */}
+              {status.isBeta && (
+                <div className="p-4 rounded bg-green-500/10 border border-green-500/30">
+                  <div className="flex items-center gap-2 text-green-400 mb-2">
+                    <Rocket className="w-5 h-5" />
+                    <span className="font-mono font-bold">FULL BETA ACCESS</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground font-mono">
+                    You have full platform access during our beta period. Premium tiers coming soon.
+                  </p>
+                </div>
+              )}
 
               {/* Votes Remaining */}
               <div className="p-4 rounded bg-black/30 border border-white/5">
@@ -287,13 +302,13 @@ export default function Account() {
                 </p>
               </div>
 
-              {/* Plan Benefits - Only show for paid users */}
-              {status.tier !== 'free' && (
+              {/* Plan Benefits - Show for paid users and beta users */}
+              {(status.tier !== 'free' || status.isBeta) && (
                 <div className="p-4 rounded bg-black/30 border border-white/5">
                   <div className="flex items-center gap-2 mb-2">
                     <CheckCircle className="w-4 h-4 text-green-400" />
                     <span className="text-xs font-mono text-muted-foreground">
-                      PLAN BENEFITS
+                      {status.isBeta ? 'BETA BENEFITS' : 'PLAN BENEFITS'}
                     </span>
                   </div>
                   <ul className="text-sm font-mono space-y-1 text-muted-foreground">
@@ -309,6 +324,11 @@ export default function Account() {
                     {status.priorityVotes && (
                       <li className="flex items-center gap-2">
                         <span className="text-purple-400">★</span> <span className="text-purple-400">Priority votes (2x weight)</span>
+                      </li>
+                    )}
+                    {status.isBeta && (
+                      <li className="flex items-center gap-2">
+                        <span className="text-primary">•</span> 1 vote per day during beta
                       </li>
                     )}
                   </ul>
@@ -329,7 +349,12 @@ export default function Account() {
 
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                {status.isSubscribed ? (
+                {status.isBeta ? (
+                  // During beta, no billing or upgrade options
+                  <div className="flex-1 text-center text-muted-foreground font-mono text-sm py-2">
+                    Premium tiers launching soon
+                  </div>
+                ) : status.isSubscribed ? (
                   <Button
                     variant="outline"
                     className="flex-1 font-mono"
@@ -354,24 +379,28 @@ export default function Account() {
                     </Button>
                   </Link>
                 )}
-                <Button
-                  variant="ghost"
-                  className="font-mono"
-                  onClick={handleSyncSubscription}
-                  disabled={syncSubscription.isPending}
-                  title="Refresh subscription status from Stripe"
-                >
-                  {syncSubscription.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="w-4 h-4" />
-                  )}
-                </Button>
-                <Link href="/pricing">
-                  <Button variant="ghost" className="font-mono">
-                    VIEW ALL PLANS
-                  </Button>
-                </Link>
+                {!status.isBeta && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      className="font-mono"
+                      onClick={handleSyncSubscription}
+                      disabled={syncSubscription.isPending}
+                      title="Refresh subscription status from Stripe"
+                    >
+                      {syncSubscription.isPending ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                    </Button>
+                    <Link href="/pricing">
+                      <Button variant="ghost" className="font-mono">
+                        VIEW ALL PLANS
+                      </Button>
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
           ) : (

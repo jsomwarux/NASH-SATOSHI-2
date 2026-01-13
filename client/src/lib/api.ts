@@ -105,6 +105,7 @@ export interface LeaderboardResponse {
   hasGatedItems: boolean;
   isPremium: boolean;
   userTier: string;
+  isBeta?: boolean; // True when platform is in beta mode
 }
 
 export async function getLeaderboard(
@@ -224,6 +225,8 @@ export interface SubscriptionStatus {
   tier: string;
   tierName: string;
   isSubscribed: boolean;
+  isPremium: boolean;
+  isBeta?: boolean; // True when platform is in beta mode (full access for all)
   isInTrial: boolean;
   trialDaysRemaining: number | null;
   // Vote tracking
@@ -373,6 +376,7 @@ export interface VoteStatus {
   resetTime: string;
   votedRequestIds: number[];
   authenticated: boolean;
+  isBeta?: boolean; // True when platform is in beta mode
 }
 
 export interface VoteRequest {

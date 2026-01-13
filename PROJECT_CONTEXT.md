@@ -134,8 +134,11 @@ To test without real payments, swap ALL Stripe credentials to test mode:
 | Tier | Price | Leaderboard | Scorecards | Votes/Day | Priority |
 |------|-------|-------------|------------|-----------|----------|
 | Free | $0 | Top 10 only | Top 10 only | 1 | No |
+| Beta Free | $0 | Unlimited | Unlimited | 1 | No |
 | Pro | $19/mo | Unlimited | Unlimited | 5 | No |
 | Premium | $49/mo | Unlimited | Unlimited | 15 | Yes (2x) |
+
+**Note:** The `beta_free` tier is active when `BETA_MODE=true`. See "Beta Mode" section below.
 
 ### Voting System
 - Users search for any token and vote for it to be analyzed
@@ -169,6 +172,56 @@ The app tracks historical performance to measure how well the scoring system pre
 **Display:**
 - Leaderboard header shows aggregate performance stats
 - ScoreCard shows individual token performance since analysis
+
+---
+
+## Beta Mode
+
+The platform has a **Beta Mode** that provides full access to all users for free while preserving all pricing infrastructure for future paid tier implementation.
+
+### How Beta Mode Works
+
+When `BETA_MODE=true` (environment variable):
+- **All users get full access** (equivalent to Pro/Premium features)
+- **Voting limited to 1 vote/day** with no priority votes
+- **Pricing page hidden** from navigation (still accessible via direct URL)
+- **Billing options hidden** in account settings
+- **Beta banners shown** on Rankings and Pricing pages
+- **Usage tracking continues** for analytics
+
+### Enabling/Disabling Beta Mode
+
+| Action | Steps |
+|--------|-------|
+| **Enable Beta** | Set `BETA_MODE=true` in Replit Secrets |
+| **Disable Beta** | 1. Run migration `0006_end_beta_convert_users.sql` to convert beta_free users to free tier<br>2. Set `BETA_MODE=false` in Replit Secrets |
+
+### Beta Mode Implementation Details
+
+| Component | Behavior During Beta |
+|-----------|---------------------|
+| `server/routes.ts` | Checks `BETA_MODE` env var at top of file |
+| `/api/subscription/status` | Returns `isBeta: true`, `tier: "beta_free"` |
+| `/api/leaderboard` | Bypasses access limits, returns `isBeta: true` |
+| `checkScorecardAccess()` | Grants access to all scorecards |
+| `/api/vote` and `/api/vote/status` | Uses beta_free tier (1 vote/day, no priority) |
+| `Layout.tsx` | Hides "PRICING" nav link when `isBeta` |
+| `Account.tsx` | Shows "FULL BETA ACCESS" banner, hides billing |
+| `Leaderboard.tsx` | Shows dismissible beta banner |
+| `Pricing.tsx` | Shows "BETA ACCESS ACTIVE" notice |
+
+### Migration for Ending Beta
+
+When ready to launch paid tiers, run this SQL before/after disabling beta:
+
+```sql
+-- migrations/0006_end_beta_convert_users.sql
+UPDATE user_subscriptions
+SET tier = 'free', updated_at = NOW()
+WHERE tier = 'beta_free';
+```
+
+This converts all beta users to the standard free tier (top 10 access only).
 
 ---
 
@@ -745,6 +798,10 @@ CREATE INDEX IF NOT EXISTS "idx_price_snapshots_date" ON "price_snapshots" ("sna
 
 -- Add price at analysis column to token_analyses
 ALTER TABLE token_analyses ADD COLUMN IF NOT EXISTS price_at_analysis numeric(20, 10);
+
+-- End Beta Mode - Convert beta users to free tier (run when disabling beta)
+-- migrations/0006_end_beta_convert_users.sql
+UPDATE user_subscriptions SET tier = 'free', updated_at = NOW() WHERE tier = 'beta_free';
 ```
 
 ## Stripe Configuration
@@ -1013,5 +1070,6 @@ Webhooks occasionally fail. The Gumloop sync polling (`syncStuckAnalysesWithGuml
 | `VITE_STRIPE_PUBLIC_KEY` | Yes | Stripe publishable key (frontend) |
 | `STRIPE_PRO_PRICE_ID` | Yes | Pro tier price ID |
 | `STRIPE_PREMIUM_PRICE_ID` | Yes | Premium tier price ID |
+| `BETA_MODE` | No | Set to `true` to enable beta mode (full access for all users) |
 | `ADMIN_EMAILS` | No | Comma-separated admin emails |
 | `REDIS_URL` | No | Redis for rate limiting (optional) |

@@ -18,6 +18,11 @@ import {
 } from "./stripe";
 import { CREDIT_PACKS, SUBSCRIPTION_TIERS, type CreditPackId, type SubscriptionTierId } from "@shared/schema";
 
+// ==================== BETA MODE ====================
+// When true, all users get full access (beta_free tier) bypassing paywalls
+// Set to false when ready to launch paid tiers
+const BETA_MODE = process.env.BETA_MODE === 'true';
+
 // ==================== SUPPORT EMAIL HELPER ====================
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'nashsatoshi@gmail.com';
 // RESEND_FROM_EMAIL should match your verified domain in Resend (e.g., "support@yourdomain.com")
@@ -353,19 +358,23 @@ export async function registerRoutes(
     try {
       const userId = req.userId;
       const freeTier = SUBSCRIPTION_TIERS.free;
+      const betaTier = SUBSCRIPTION_TIERS.beta_free;
 
       // Default status for unauthenticated users
       if (!userId) {
+        // During beta, unauthenticated users see beta tier info (but can't vote without account)
+        const effectiveTier = BETA_MODE ? betaTier : freeTier;
         res.json({
-          tier: "free",
-          tierName: freeTier.name,
+          tier: BETA_MODE ? "beta_free" : "free",
+          tierName: effectiveTier.name,
           isSubscribed: false,
-          isPremium: false,
-          leaderboardAccess: freeTier.leaderboardAccess,
-          votesPerDay: freeTier.votesPerDay,
+          isPremium: BETA_MODE, // Beta users get premium features
+          isBeta: BETA_MODE, // Flag for frontend to show beta UI
+          leaderboardAccess: effectiveTier.leaderboardAccess,
+          votesPerDay: effectiveTier.votesPerDay,
           votesUsedToday: 0,
-          votesRemaining: freeTier.votesPerDay,
-          priorityVotes: freeTier.priorityVotes,
+          votesRemaining: effectiveTier.votesPerDay,
+          priorityVotes: effectiveTier.priorityVotes,
           // Legacy fields for backward compatibility
           isInTrial: false,
           trialDaysRemaining: null,
@@ -380,7 +389,7 @@ export async function registerRoutes(
           monthlyRemaining: null,
           creditBalance: 0,
           canAnalyze: false,
-          leaderboardLimit: freeTier.leaderboardAccess,
+          leaderboardLimit: effectiveTier.leaderboardAccess,
           subscription: null,
         });
         return;
@@ -390,18 +399,21 @@ export async function registerRoutes(
       let subscription = await storage.getUserSubscription(userId);
 
       if (!subscription) {
-        // Create default free subscription
+        // Create default subscription (beta_free during beta, free otherwise)
         subscription = await storage.createOrUpdateSubscription({
           userId,
-          tier: "free",
+          tier: BETA_MODE ? "beta_free" : "free",
           status: "active",
         });
       }
 
-      const tier = subscription.tier as SubscriptionTierId;
-      const tierConfig = SUBSCRIPTION_TIERS[tier] || SUBSCRIPTION_TIERS.free;
-      const isSubscribed = tier !== "free";
-      const isPremium = tier === "pro" || tier === "premium";
+      // During beta, override all users to beta_free tier for access checks
+      // but preserve their actual tier in database for future migration
+      const actualTier = subscription.tier as SubscriptionTierId;
+      const effectiveTier = BETA_MODE ? "beta_free" : actualTier;
+      const tierConfig = SUBSCRIPTION_TIERS[effectiveTier] || SUBSCRIPTION_TIERS.free;
+      const isSubscribed = !BETA_MODE && actualTier !== "free" && actualTier !== "beta_free";
+      const isPremium = BETA_MODE || actualTier === "pro" || actualTier === "premium";
 
       // Get user's vote usage for today (EST timezone)
       const today = getESTDateString();
@@ -410,10 +422,11 @@ export async function registerRoutes(
       const votesRemaining = Math.max(0, votesPerDay - votesUsedToday);
 
       res.json({
-        tier,
+        tier: effectiveTier,
         tierName: tierConfig.name,
         isSubscribed,
         isPremium,
+        isBeta: BETA_MODE, // Flag for frontend to show beta UI
         leaderboardAccess: tierConfig.leaderboardAccess,
         votesPerDay,
         votesUsedToday,
@@ -1210,8 +1223,14 @@ export async function registerRoutes(
       let accessLimit: number | null = null; // null = unlimited
       let isPremium = false;
       let userTier = "free";
+      let isBeta = BETA_MODE;
 
-      if (userId) {
+      // During beta, everyone gets full access
+      if (BETA_MODE) {
+        accessLimit = null; // Unlimited
+        isPremium = true;
+        userTier = "beta_free";
+      } else if (userId) {
         const subscription = await storage.getUserSubscription(userId);
         userTier = subscription?.tier || "free";
         const tierConfig = SUBSCRIPTION_TIERS[userTier as SubscriptionTierId] || SUBSCRIPTION_TIERS.free;
@@ -1259,6 +1278,7 @@ export async function registerRoutes(
         hasGatedItems,
         isPremium,
         userTier,
+        isBeta,
       });
     } catch (error) {
       console.error("Error getting leaderboard:", error);
@@ -1677,23 +1697,27 @@ export async function registerRoutes(
 
       // Default for unauthenticated users
       if (!userId) {
-        const freeTier = SUBSCRIPTION_TIERS.free;
+        // During beta, show beta_free tier info (but they still need to auth to vote)
+        const effectiveTier = BETA_MODE ? SUBSCRIPTION_TIERS.beta_free : SUBSCRIPTION_TIERS.free;
         res.json({
           votesRemaining: 0,
           votesUsed: 0,
-          maxVotes: freeTier.votesPerDay,
-          hasPriorityVotes: false,
+          maxVotes: effectiveTier.votesPerDay,
+          hasPriorityVotes: effectiveTier.priorityVotes,
           resetTime: getNextMidnightEST(),
           votedTokenIds: [],
           authenticated: false,
+          isBeta: BETA_MODE,
         });
         return;
       }
 
       // Get user subscription to determine vote limits
+      // During beta, all users get beta_free tier (1 vote/day, no priority)
       const subscription = await storage.getUserSubscription(userId);
-      const tier = (subscription?.tier || "free") as SubscriptionTierId;
-      const tierConfig = SUBSCRIPTION_TIERS[tier] || SUBSCRIPTION_TIERS.free;
+      const actualTier = (subscription?.tier || "free") as SubscriptionTierId;
+      const effectiveTier = BETA_MODE ? "beta_free" : actualTier;
+      const tierConfig = SUBSCRIPTION_TIERS[effectiveTier] || SUBSCRIPTION_TIERS.free;
 
       const maxVotes = tierConfig.votesPerDay;
       const hasPriorityVotes = tierConfig.priorityVotes;
@@ -1708,6 +1732,7 @@ export async function registerRoutes(
         resetTime: getNextMidnightEST(),
         votedRequestIds,
         authenticated: true,
+        isBeta: BETA_MODE,
       });
     } catch (error) {
       console.error("Error getting vote status:", error);
@@ -1791,9 +1816,11 @@ export async function registerRoutes(
       }
 
       // Check user's vote limit
+      // During beta, all users get beta_free tier voting limits (1 vote/day, no priority)
       const subscription = await storage.getUserSubscription(userId);
-      const tier = (subscription?.tier || "free") as SubscriptionTierId;
-      const tierConfig = SUBSCRIPTION_TIERS[tier] || SUBSCRIPTION_TIERS.free;
+      const actualTier = (subscription?.tier || "free") as SubscriptionTierId;
+      const effectiveTier = BETA_MODE ? "beta_free" : actualTier;
+      const tierConfig = SUBSCRIPTION_TIERS[effectiveTier] || SUBSCRIPTION_TIERS.free;
 
       const today = getESTDateString();
       const votesUsed = await storage.getUserDailyVoteCount(userId, today);
@@ -1998,6 +2025,11 @@ async function checkScorecardAccess(
   userId: string | undefined,
   tokenId: string
 ): Promise<{ hasAccess: boolean; rank: number | null; accessLimit: number | null }> {
+  // During beta, everyone gets full access to all scorecards
+  if (BETA_MODE) {
+    return { hasAccess: true, rank: null, accessLimit: null };
+  }
+
   // Determine user's access limit
   let accessLimit: number | null = null;
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import { BarChart3, Home, Vote, Terminal, Cpu, Wifi, Shield, Loader2, Crown, User, LogOut, CreditCard, ChevronDown, AlertTriangle, HelpCircle, MessageCircle } from "lucide-react";
@@ -59,12 +59,19 @@ export function Layout({ children }: LayoutProps) {
     return email;
   };
 
-  const navLinks = [
-    { href: "/", label: "HOME", icon: Home },
-    { href: "/rankings", label: "RANKINGS", icon: BarChart3 },
-    { href: "/vote", label: "VOTE", icon: Vote },
-    { href: "/pricing", label: "PRICING", icon: Crown },
-  ];
+  // Hide pricing nav during beta (isBeta flag comes from subscription status)
+  const navLinks = useMemo(() => {
+    const links = [
+      { href: "/", label: "HOME", icon: Home },
+      { href: "/rankings", label: "RANKINGS", icon: BarChart3 },
+      { href: "/vote", label: "VOTE", icon: Vote },
+    ];
+    // Only show pricing if not in beta mode
+    if (!subscriptionStatus?.isBeta) {
+      links.push({ href: "/pricing", label: "PRICING", icon: Crown });
+    }
+    return links;
+  }, [subscriptionStatus?.isBeta]);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background text-foreground font-sans">
@@ -193,7 +200,7 @@ export function Layout({ children }: LayoutProps) {
                           Account
                         </DropdownMenuItem>
                       </Link>
-                      {subscriptionStatus?.isSubscribed && (
+                      {subscriptionStatus?.isSubscribed && !subscriptionStatus?.isBeta && (
                         <DropdownMenuItem
                           className="cursor-pointer"
                           onClick={handleManageBilling}

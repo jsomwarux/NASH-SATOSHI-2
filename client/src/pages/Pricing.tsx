@@ -259,8 +259,30 @@ export default function Pricing() {
           </div>
         </motion.div>
 
-        {/* Current Plan Banner */}
-        {status && status.tier !== "free" && (
+        {/* Beta Access Banner */}
+        {status?.isBeta && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="mb-8 p-4 rounded border border-green-500/30 bg-green-500/10 flex items-center gap-3"
+          >
+            <div className="w-10 h-10 rounded bg-green-500/20 flex items-center justify-center flex-shrink-0">
+              <Rocket className="w-5 h-5 text-green-400" />
+            </div>
+            <div>
+              <p className="font-mono font-bold text-green-400 text-sm sm:text-base">
+                BETA ACCESS ACTIVE
+              </p>
+              <p className="text-[10px] sm:text-xs text-muted-foreground font-mono">
+                You currently have full platform access during beta. Paid tiers will launch soon.
+              </p>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Current Plan Banner - Only show for paid users not in beta */}
+        {status && status.tier !== "free" && !status.isBeta && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}

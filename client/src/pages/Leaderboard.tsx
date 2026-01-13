@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database, Crown, Flame, Award, Sparkles, Lock, TrendingUp } from "lucide-react";
+import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database, Crown, Flame, Award, Sparkles, Lock, TrendingUp, Rocket } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { LeaderboardTable } from "@/components/leaderboard/LeaderboardTable";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,11 @@ export default function Leaderboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<LeaderboardFilters>({});
   const [showFilters, setShowFilters] = useState(false);
+
+  // Beta banner dismissal state (persisted to localStorage)
+  const [showBetaBanner, setShowBetaBanner] = useState(() => {
+    return localStorage.getItem('beta-banner-dismissed') !== 'true';
+  });
 
   // Build filter options with search
   const activeFilters = useMemo(() => ({
@@ -140,6 +145,32 @@ export default function Leaderboard() {
             </Link>
           </div>
         </motion.div>
+
+        {/* Beta Banner - Dismissible */}
+        {data?.isBeta && showBetaBanner && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded border border-accent/30 bg-accent/10 flex items-center justify-between"
+          >
+            <div className="flex items-center gap-3">
+              <Rocket className="w-5 h-5 text-accent flex-shrink-0" />
+              <p className="text-sm font-mono text-accent">
+                <span className="font-bold">BETA ACCESS:</span>{" "}
+                <span className="text-accent/80">Full platform access is free while we build our track record. Premium tiers coming soon.</span>
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setShowBetaBanner(false);
+                localStorage.setItem('beta-banner-dismissed', 'true');
+              }}
+              className="text-muted-foreground hover:text-white ml-4 flex-shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
 
         {/* Stats Summary - 4 cards across */}
         {(stats || leaderboardStats) && (
