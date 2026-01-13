@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
   Check,
@@ -15,6 +15,9 @@ import {
   Search,
   FileText,
   Globe,
+  X,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { Button } from "@/components/ui/button";
@@ -69,9 +72,20 @@ export default function Pricing() {
   const verifyCheckout = useVerifyCheckout();
   const [processingTier, setProcessingTier] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [pendingPlanChange, setPendingPlanChange] = useState<{
+    tierId: string;
+    tierName: string;
+    price: number;
+    isUpgrade: boolean;
+  } | null>(null);
 
   // Track if we've already processed the checkout to prevent double-processing
   const [checkoutProcessed, setCheckoutProcessed] = useState(false);
+
+  // Scroll to top when page loads
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
 
   // Verify and sync subscription when returning from Stripe checkout or after upgrade
   useEffect(() => {
@@ -138,6 +152,29 @@ export default function Pricing() {
       return;
     }
 
+    // Check if this is a plan change (upgrade or downgrade)
+    const currentTierOrder = TIER_ORDER[currentTier] ?? 0;
+    const newTierOrder = TIER_ORDER[tierId] ?? 0;
+    const isUpgrade = newTierOrder > currentTierOrder;
+    const isDowngrade = newTierOrder < currentTierOrder;
+
+    // If user has an active paid subscription, show confirmation first
+    if ((isUpgrade || isDowngrade) && currentTier !== 'free') {
+      const tier = tiers.find(t => t.id === tierId);
+      setPendingPlanChange({
+        tierId,
+        tierName: tier?.name || tierId,
+        price: tier?.price || 0,
+        isUpgrade,
+      });
+      return;
+    }
+
+    // For new subscriptions (free -> paid), proceed directly to checkout
+    await processSubscription(tierId);
+  };
+
+  const processSubscription = async (tierId: string) => {
     setProcessingTier(tierId);
     try {
       const { url } = await createCheckout.mutateAsync(tierId);
@@ -146,9 +183,24 @@ export default function Pricing() {
       }
     } catch (error) {
       console.error("Checkout error:", error);
+      toast({
+        title: "Error",
+        description: "Failed to process subscription change. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setProcessingTier(null);
     }
+  };
+
+  const confirmPlanChange = async () => {
+    if (!pendingPlanChange) return;
+    setPendingPlanChange(null);
+    await processSubscription(pendingPlanChange.tierId);
+  };
+
+  const cancelPlanChange = () => {
+    setPendingPlanChange(null);
   };
 
   const handleStartFree = () => {
@@ -402,11 +454,11 @@ export default function Pricing() {
                         return (
                           <Button
                             variant="outline"
-                            className="w-full font-mono text-sm opacity-50"
-                            onClick={handleManageSubscription}
-                            disabled={createPortal.isPending}
+                            className="w-full font-mono text-sm border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+                            onClick={() => handleSubscribe(tier.id)}
+                            disabled={processingTier === tier.id}
                           >
-                            {createPortal.isPending ? (
+                            {processingTier === tier.id ? (
                               <Loader2 className="w-4 h-4 animate-spin" />
                             ) : (
                               "DOWNGRADE"
@@ -517,6 +569,112 @@ export default function Pricing() {
         defaultMode="signup"
         promptMessage="Create an account to run analyses"
       />
+
+      {/* Plan Change Confirmation Modal */}
+      <AnimatePresence>
+        {pendingPlanChange && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={cancelPlanChange}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="cyber-card w-full max-w-md rounded-lg border border-primary/30 overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-primary/20 bg-primary/5">
+                <div className="flex items-center gap-2">
+                  {pendingPlanChange.isUpgrade ? (
+                    <ArrowUp className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <ArrowDown className="w-4 h-4 text-amber-400" />
+                  )}
+                  <span className="font-mono text-sm text-primary tracking-wider">
+                    {pendingPlanChange.isUpgrade ? 'CONFIRM_UPGRADE' : 'CONFIRM_DOWNGRADE'}
+                  </span>
+                </div>
+                <button
+                  onClick={cancelPlanChange}
+                  className="text-muted-foreground hover:text-white transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="p-6">
+                <div className="text-center mb-6">
+                  <div className={`w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center ${
+                    pendingPlanChange.isUpgrade ? 'bg-green-500/10' : 'bg-amber-500/10'
+                  }`}>
+                    {pendingPlanChange.isUpgrade ? (
+                      <ArrowUp className="w-8 h-8 text-green-400" />
+                    ) : (
+                      <ArrowDown className="w-8 h-8 text-amber-400" />
+                    )}
+                  </div>
+                  <h3 className="text-xl font-bold mb-2">
+                    {pendingPlanChange.isUpgrade ? 'Upgrade to' : 'Downgrade to'} {pendingPlanChange.tierName}
+                  </h3>
+                  <p className="text-muted-foreground text-sm">
+                    {pendingPlanChange.isUpgrade ? (
+                      <>
+                        You'll be charged a prorated amount for the remainder of your billing period.
+                        Your new plan will be active immediately.
+                      </>
+                    ) : (
+                      <>
+                        Your plan will change to {pendingPlanChange.tierName} immediately.
+                        You won't be charged until your next billing date.
+                      </>
+                    )}
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-lg border border-primary/20 bg-primary/5 mb-6">
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground font-mono text-sm">New monthly price</span>
+                    <span className="text-xl font-bold text-primary">
+                      ${pendingPlanChange.price}<span className="text-sm text-muted-foreground">/mo</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    className="flex-1 font-mono"
+                    onClick={cancelPlanChange}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    className={`flex-1 font-mono ${
+                      pendingPlanChange.isUpgrade
+                        ? 'bg-green-600 hover:bg-green-700'
+                        : 'bg-amber-600 hover:bg-amber-700'
+                    }`}
+                    onClick={confirmPlanChange}
+                    disabled={processingTier !== null}
+                  >
+                    {processingTier ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <>Confirm {pendingPlanChange.isUpgrade ? 'Upgrade' : 'Downgrade'}</>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </Layout>
   );
 }
