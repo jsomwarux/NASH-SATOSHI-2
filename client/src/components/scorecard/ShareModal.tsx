@@ -49,7 +49,10 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
 
   // Generate image from ShareCard
   const generateImage = useCallback(async () => {
-    if (!shareCardRef.current) return null;
+    if (!shareCardRef.current) {
+      console.error("ShareCard ref not available");
+      return null;
+    }
 
     setIsGenerating(true);
     try {
@@ -57,6 +60,18 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
         quality: 1,
         pixelRatio: 2,
         cacheBust: true,
+        skipAutoScale: true,
+        // Handle CORS for external images
+        fetchRequestInit: {
+          mode: 'cors',
+          cache: 'no-cache',
+        },
+        // Filter out problematic elements or convert external images
+        filter: (node: HTMLElement) => {
+          // Skip any hidden elements
+          if (node.style?.display === 'none') return false;
+          return true;
+        },
       });
       setImageUrl(dataUrl);
 
@@ -66,7 +81,32 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
       return dataUrl;
     } catch (error) {
       console.error("Error generating image:", error);
-      return null;
+      // Try again without external images if CORS fails
+      try {
+        const dataUrl = await toPng(shareCardRef.current, {
+          quality: 1,
+          pixelRatio: 2,
+          cacheBust: true,
+          skipAutoScale: true,
+          // Skip external images that might cause CORS issues
+          filter: (node: HTMLElement) => {
+            if (node.tagName === 'IMG') {
+              const src = (node as HTMLImageElement).src;
+              // Skip external images
+              if (src && !src.startsWith(window.location.origin) && !src.startsWith('data:')) {
+                return false;
+              }
+            }
+            return true;
+          },
+        });
+        setImageUrl(dataUrl);
+        await uploadImage(dataUrl);
+        return dataUrl;
+      } catch (retryError) {
+        console.error("Retry also failed:", retryError);
+        return null;
+      }
     } finally {
       setIsGenerating(false);
     }
