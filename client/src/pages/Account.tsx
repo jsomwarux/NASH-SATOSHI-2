@@ -242,11 +242,11 @@ export default function Account() {
           ) : status ? (
             <div className="space-y-6">
               {/* Current Plan */}
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
                 <div>
                   <p className="text-xs text-muted-foreground font-mono mb-1">CURRENT PLAN</p>
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl font-display font-bold">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <span className="text-xl sm:text-2xl font-display font-bold">
                       {status.tierName}
                     </span>
                     <Badge className={getTierColor(status.tier)}>
@@ -255,7 +255,7 @@ export default function Account() {
                   </div>
                 </div>
                 {status.isSubscribed && status.subscription?.currentPeriodEnd && !status.isBeta && (
-                  <div className="text-right">
+                  <div className="sm:text-right">
                     <p className="text-xs text-muted-foreground font-mono mb-1">RENEWS</p>
                     <p className="font-mono text-sm">
                       {new Date(status.subscription.currentPeriodEnd).toLocaleDateString()}
@@ -266,12 +266,12 @@ export default function Account() {
 
               {/* Beta Access Message */}
               {status.isBeta && (
-                <div className="p-4 rounded bg-green-500/10 border border-green-500/30">
+                <div className="p-3 sm:p-4 rounded bg-green-500/10 border border-green-500/30">
                   <div className="flex items-center gap-2 text-green-400 mb-2">
-                    <Rocket className="w-5 h-5" />
-                    <span className="font-mono font-bold">FULL BETA ACCESS</span>
+                    <Rocket className="w-4 h-4 sm:w-5 sm:h-5" />
+                    <span className="font-mono font-bold text-sm sm:text-base">FULL BETA ACCESS</span>
                   </div>
-                  <p className="text-sm text-muted-foreground font-mono">
+                  <p className="text-xs sm:text-sm text-muted-foreground font-mono">
                     You have full platform access during our beta period. Premium tiers coming soon.
                   </p>
                 </div>

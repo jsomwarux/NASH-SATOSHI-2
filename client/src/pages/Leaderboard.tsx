@@ -151,13 +151,14 @@ export default function Leaderboard() {
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-4 rounded border border-accent/30 bg-accent/10 flex items-center justify-between"
+            className="mb-6 p-3 sm:p-4 rounded border border-accent/30 bg-accent/10 flex items-start sm:items-center justify-between gap-2"
           >
-            <div className="flex items-center gap-3">
-              <Rocket className="w-5 h-5 text-accent flex-shrink-0" />
-              <p className="text-sm font-mono text-accent">
+            <div className="flex items-start sm:items-center gap-2 sm:gap-3">
+              <Rocket className="w-4 h-4 sm:w-5 sm:h-5 text-accent flex-shrink-0 mt-0.5 sm:mt-0" />
+              <p className="text-xs sm:text-sm font-mono text-accent">
                 <span className="font-bold">BETA ACCESS:</span>{" "}
-                <span className="text-accent/80">Full platform access is free while we build our track record. Premium tiers coming soon.</span>
+                <span className="text-accent/80 hidden sm:inline">Full platform access is free while we build our track record. Premium tiers coming soon.</span>
+                <span className="text-accent/80 sm:hidden">Full access free during beta.</span>
               </p>
             </div>
             <button
@@ -165,7 +166,7 @@ export default function Leaderboard() {
                 setShowBetaBanner(false);
                 localStorage.setItem('beta-banner-dismissed', 'true');
               }}
-              className="text-muted-foreground hover:text-white ml-4 flex-shrink-0"
+              className="text-muted-foreground hover:text-white flex-shrink-0 p-1"
             >
               <X className="w-4 h-4" />
             </button>

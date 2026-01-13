@@ -248,11 +248,11 @@ export default function Pricing() {
           </Link>
 
           <div className="text-center">
-            <h1 className="text-4xl font-display font-bold mb-4">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-display font-bold mb-4">
               <span className="text-glow-cyan">CHOOSE</span>{" "}
               <span className="text-accent">YOUR PLAN</span>
             </h1>
-            <p className="text-muted-foreground font-mono text-sm max-w-2xl mx-auto">
+            <p className="text-muted-foreground font-mono text-xs sm:text-sm max-w-2xl mx-auto">
               Access 4-LLM consensus scorecards and vote for token analysis.
               Free users can view top 10 rankings.
             </p>
@@ -265,10 +265,10 @@ export default function Pricing() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="mb-8 p-4 rounded border border-green-500/30 bg-green-500/10 flex items-center gap-3"
+            className="mb-8 p-3 sm:p-4 rounded border border-green-500/30 bg-green-500/10 flex items-start sm:items-center gap-3"
           >
-            <div className="w-10 h-10 rounded bg-green-500/20 flex items-center justify-center flex-shrink-0">
-              <Rocket className="w-5 h-5 text-green-400" />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded bg-green-500/20 flex items-center justify-center flex-shrink-0">
+              <Rocket className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" />
             </div>
             <div>
               <p className="font-mono font-bold text-green-400 text-sm sm:text-base">

@@ -147,8 +147,8 @@ export default function Home() {
 
             {/* Main Headline - Terminal Style */}
             <div className="mb-8">
-              <h1 className="text-4xl md:text-6xl lg:text-7xl font-display font-bold tracking-tight mb-4">
-                <span className="text-primary font-mono text-lg md:text-xl block mb-2 opacity-70">
+              <h1 className="text-3xl sm:text-4xl md:text-6xl lg:text-7xl font-display font-bold tracking-tight mb-4">
+                <span className="text-primary font-mono text-base sm:text-lg md:text-xl block mb-2 opacity-70">
                   {">"} init_rankings.exe
                 </span>
                 <span className="text-glow-cyan block leading-tight">
@@ -156,7 +156,7 @@ export default function Home() {
                   {!isComplete && <span className="animate-pulse">_</span>}
                 </span>
               </h1>
-              <p className="max-w-2xl mx-auto text-base md:text-lg text-muted-foreground font-mono leading-relaxed">
+              <p className="max-w-2xl mx-auto text-sm sm:text-base md:text-lg text-muted-foreground font-mono leading-relaxed">
                 Curated token rankings powered by a 4-LLM ensemble. Game theory scores you can actually act on.
               </p>
             </div>

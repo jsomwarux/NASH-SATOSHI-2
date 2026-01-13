@@ -244,16 +244,16 @@ export function Layout({ children }: LayoutProps) {
 
         {/* Mobile Nav */}
         <div className="md:hidden border-t border-primary/10">
-          <div className="flex justify-around py-2">
+          <div className="flex justify-around py-1">
             {navLinks.map((link) => {
               const isActive = location === link.href;
               return (
                 <Link key={link.href} href={link.href}>
-                  <div className={`flex flex-col items-center gap-1 px-4 py-2 ${
+                  <div className={`flex flex-col items-center gap-1 px-5 py-3 min-h-[48px] ${
                     isActive ? "text-primary" : "text-muted-foreground"
                   }`}>
                     <link.icon className="w-5 h-5" />
-                    <span className="text-[9px] font-mono tracking-wider">{link.label}</span>
+                    <span className="text-[10px] font-mono tracking-wider">{link.label}</span>
                   </div>
                 </Link>
               );
