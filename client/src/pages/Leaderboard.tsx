@@ -14,6 +14,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useLeaderboard, useFilterOptions, useLeaderboardStats } from "@/hooks/useLeaderboard";
 import { usePerformanceMetrics } from "@/hooks/usePerformance";
 import type { LeaderboardFilters } from "@shared/schema";
@@ -243,14 +249,22 @@ export default function Leaderboard() {
                       <div key={narrative.narrative} className={`flex items-center justify-between gap-2 ${opacity}`}>
                         <div className="flex items-center gap-1 min-w-0">
                           <span className={`font-mono text-orange-400/50 ${textSize} flex-shrink-0`}>#{index + 1}</span>
-                          <span
-                            className={`font-bold font-mono text-orange-400 ${textSize} truncate`}
-                            title={narrative.narrative}
-                          >
-                            {narrative.narrative.length > 8
-                              ? narrative.narrative.slice(0, 8) + "…"
-                              : narrative.narrative}
-                          </span>
+                          <TooltipProvider delayDuration={100}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span
+                                  className={`font-bold font-mono text-orange-400 ${textSize} truncate cursor-help`}
+                                >
+                                  {narrative.narrative.length > 10
+                                    ? narrative.narrative.slice(0, 10) + "…"
+                                    : narrative.narrative}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" sideOffset={5}>
+                                <p className="font-semibold">{narrative.narrative}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <span className={`${isFirst ? 'text-xs' : 'text-[10px]'} text-muted-foreground font-mono`}>

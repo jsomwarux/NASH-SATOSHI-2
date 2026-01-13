@@ -51,11 +51,19 @@ Enhanced parsing logic for enum fields (community_status, account_quality, kol_n
 - Token image marked as `flex-shrink-0` to prevent shrinking
 - Right market data section marked as `flex-shrink-0` to prevent squishing
 
+#### 6. Added Tooltip to Hot Narratives on Rankings Page
+- Narrative names in HOT_NARRATIVES section now show full name on hover/tap
+- Works on both desktop (hover) and mobile (tap) via Radix Tooltip component
+- Added `delayDuration={100}` for quick response
+- Increased truncation threshold from 8 to 10 characters for better readability
+- Added `cursor-help` visual hint
+
 ### Files Modified
 | File | Changes |
 |------|---------|
 | `server/gumloop-parser.ts` | Enhanced extractCommunityStatusCategory, extractAccountQualityCategory functions; Added normalizeKolValue function; Updated xTopKols parsing to use normalization |
-| `client/src/components/scorecard/ScoreCard.tsx` | Removed kolMentionRecency display from Notable KOLs section |
+| `client/src/components/scorecard/ScoreCard.tsx` | Removed kolMentionRecency; Fixed hero layout for long token names with tooltip; Added flex constraints |
+| `client/src/pages/Leaderboard.tsx` | Added Tooltip to hot narratives section for viewing full narrative names |
 
 ### Commands Run
 - `npx tsc --noEmit` - TypeScript compiles successfully
