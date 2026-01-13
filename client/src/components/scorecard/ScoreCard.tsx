@@ -34,6 +34,7 @@ import {
   Minimize2,
   RefreshCw,
   Calculator,
+  ExternalLink,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -173,6 +174,31 @@ function formatDate(date: Date | string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+// Detect and log liquidity stats that may have slipped through in displaySummary
+// These patterns indicate Dexscreener-derived data that may be unreliable
+function checkForLiquidityStats(summary: string, tokenSymbol: string): string {
+  const liquidityPatterns = [
+    /\d+\.?\d*%\s*(of\s*mcap|liquidity)/gi,
+    /\$\d+[KMB]?\s*liquidity/gi,
+  ];
+
+  let hasLiquidityStats = false;
+  for (const pattern of liquidityPatterns) {
+    const matches = summary.match(pattern);
+    if (matches) {
+      hasLiquidityStats = true;
+      console.warn(`[ScoreCard] Liquidity stats detected in displaySummary for ${tokenSymbol}:`, matches);
+    }
+  }
+
+  // Log for review but don't block display
+  if (hasLiquidityStats) {
+    console.warn(`[ScoreCard] Token ${tokenSymbol} has liquidity stats in summary - may need review`);
+  }
+
+  return summary; // Return unchanged - just logging for review
 }
 
 // Expandable text component for fields that may be truncated
@@ -820,17 +846,21 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
   const maxComponentScore = scoreComponents.reduce((sum, c) => sum + c.max, 0);
 
   // All modifiers for the detailed display
-  // Show all modifiers for consistency, even if value is 0
-  const modifiers = [
+  // Exit Liquidity modifier is hidden when value is 0/missing (Dexscreener data unavailable)
+  const exitLiquidityValue = parseFloat(analysis.exitLiquidityModifier as string) || 0;
+  const allModifiers = [
     { label: "Phase", value: parseFloat(analysis.phaseModifier as string) || 0 },
     { label: isMemecoin ? "Meta" : "Narrative", value: parseFloat(analysis.narrativeModifier as string) || 0 },
-    { label: "Exit Liquidity", value: parseFloat(analysis.exitLiquidityModifier as string) || 0 },
+    { label: "Exit Liquidity", value: exitLiquidityValue, hideWhenZero: true },
     { label: "Peak Proximity", value: parseFloat(analysis.peakProximityModifier as string) || 0 },
     { label: "Data Quality", value: parseFloat(analysis.dataQualityModifier as string) || 0 },
     { label: "FDV", value: parseFloat((analysis.fdvModifier || analysis.marketCapModifier) as string) || 0 },
   ];
 
-  // Calculate total modifiers
+  // Filter out Exit Liquidity when it's 0 (Dexscreener data missing/unavailable)
+  const modifiers = allModifiers.filter(m => !m.hideWhenZero || m.value !== 0);
+
+  // Calculate total modifiers (only from visible modifiers)
   const totalModifiersValue = modifiers.reduce((sum, m) => sum + m.value, 0);
 
   // FDV scaling context (with fallback to marketCapTier for old analyses)
@@ -1089,6 +1119,21 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                       <Share2 className="w-3.5 h-3.5 mr-1.5" />
                       Share
                     </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      asChild
+                      className="h-8 px-3 bg-secondary/50 border-white/10 hover:bg-secondary hover:border-white/20 text-muted-foreground hover:text-foreground text-xs"
+                    >
+                      <a
+                        href={`https://www.coingecko.com/en/coins/${analysis.tokenId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                        CoinGecko
+                      </a>
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -1241,7 +1286,9 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
             {/* Summary */}
             {analysis.displaySummary && (
               <div className="mt-6 p-4 rounded-lg bg-secondary/30 border border-white/5">
-                <p className="text-muted-foreground leading-relaxed">{analysis.displaySummary}</p>
+                <p className="text-muted-foreground leading-relaxed">
+                  {checkForLiquidityStats(analysis.displaySummary, analysis.tokenSymbol)}
+                </p>
               </div>
             )}
 

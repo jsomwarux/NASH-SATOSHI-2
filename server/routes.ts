@@ -73,6 +73,58 @@ export async function registerRoutes(
     res.json({ status: "ok" });
   });
 
+  // ==================== IMAGE PROXY (for share card generation) ====================
+  // Proxies external images to bypass CORS restrictions for html-to-image capture
+  app.get("/api/image-proxy", async (req: Request, res: Response) => {
+    try {
+      const imageUrl = req.query.url as string;
+
+      if (!imageUrl) {
+        res.status(400).json({ message: "URL parameter is required" });
+        return;
+      }
+
+      // Only allow image URLs from trusted domains
+      const allowedDomains = [
+        'assets.coingecko.com',
+        'coin-images.coingecko.com',
+        'static.coingecko.com',
+        'i.imgur.com',
+        'raw.githubusercontent.com',
+      ];
+
+      const url = new URL(imageUrl);
+      if (!allowedDomains.some(domain => url.hostname.includes(domain))) {
+        res.status(403).json({ message: "Domain not allowed" });
+        return;
+      }
+
+      const response = await fetch(imageUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; NashSatoshi/1.0)',
+        },
+      });
+
+      if (!response.ok) {
+        res.status(response.status).json({ message: "Failed to fetch image" });
+        return;
+      }
+
+      const contentType = response.headers.get('content-type') || 'image/png';
+      const buffer = await response.arrayBuffer();
+
+      res.set({
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=86400', // Cache for 24 hours
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.send(Buffer.from(buffer));
+    } catch (error) {
+      console.error("Image proxy error:", error);
+      res.status(500).json({ message: "Failed to proxy image" });
+    }
+  });
+
   // ==================== TOKEN SEARCH (CoinGecko Proxy) ====================
   app.get("/api/token/search", async (req: Request, res: Response) => {
     try {

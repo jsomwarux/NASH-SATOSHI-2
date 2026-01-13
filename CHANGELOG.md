@@ -58,12 +58,27 @@ Enhanced parsing logic for enum fields (community_status, account_quality, kol_n
 - Increased truncation threshold from 8 to 10 characters for better readability
 - Added `cursor-help` visual hint
 
+#### 7. Redesigned Shareable Scorecard Image
+- **16:9 aspect ratio** (800x450) for consistent X/Twitter previews without cropping
+- **Added Narrative and Phase** cards on right side - explains score at a glance
+- **Component scores with denominators** - now shows "19/25" instead of "19.0"
+- **Redesigned footer strip** with:
+  - Nash Satoshi hexagonal logo (matching site branding)
+  - "NASH SATOSHI • 4-LLM Game Theory Consensus • nashsatoshi.com"
+  - Gradient background for visual distinction
+- Added CAUTIOUS BUY recommendation style (amber color)
+- Phase displays with color-coded badge (Stealth, Expansion, Mania, Distribution, Dead)
+- **Fixed token logo images**: Added `/api/image-proxy` endpoint to bypass CORS restrictions - proxies external images through server for html-to-image capture
+- **Removed confusing "MIXED" consensus** from footer - avoided trust issue where S+ tier + BUY + "MIXED" would confuse viewers
+
 ### Files Modified
 | File | Changes |
 |------|---------|
 | `server/gumloop-parser.ts` | Enhanced extractCommunityStatusCategory, extractAccountQualityCategory functions; Added normalizeKolValue function; Updated xTopKols parsing to use normalization |
 | `client/src/components/scorecard/ScoreCard.tsx` | Removed kolMentionRecency; Fixed hero layout for long token names with tooltip; Added flex constraints |
+| `client/src/components/scorecard/ShareCard.tsx` | Redesigned with 16:9 ratio, Narrative/Phase cards, component score denominators, branded footer, image proxy |
 | `client/src/pages/Leaderboard.tsx` | Added Tooltip to hot narratives section for viewing full narrative names |
+| `server/routes.ts` | Added `/api/image-proxy` endpoint for CORS-free image loading in share cards |
 
 ### Commands Run
 - `npx tsc --noEmit` - TypeScript compiles successfully

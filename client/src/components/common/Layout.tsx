@@ -284,7 +284,7 @@ export function Layout({ children }: LayoutProps) {
           <AlertTriangle className="w-3 h-3" />
           <span className="hidden sm:inline">NOT FINANCIAL ADVICE</span>
           <span className="hidden sm:inline text-muted-foreground/50">•</span>
-          <span className="text-muted-foreground/50">For research purposes only. Always DYOR.</span>
+          <span className="text-muted-foreground/50">LLMs can make mistakes. For research purposes only. Always DYOR.</span>
         </span>
       </div>
 

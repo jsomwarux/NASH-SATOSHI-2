@@ -1,7 +1,7 @@
 import { forwardRef } from "react";
 import { Trophy, TrendingUp, Zap, Target, Users, Brain } from "lucide-react";
 import type { TokenAnalysis } from "@shared/schema";
-import { formatScore, formatComponentScore } from "@/lib/utils";
+import { formatScore } from "@/lib/utils";
 
 interface ShareCardProps {
   analysis: TokenAnalysis;
@@ -28,6 +28,9 @@ function getTierStyle(tier: string | null) {
 // Get recommendation style
 function getRecStyle(rec: string | null) {
   const r = rec?.toUpperCase();
+  if (r?.includes("CAUTIOUS")) {
+    return { bg: "bg-amber-500", text: "text-amber-900", label: "CAUTIOUS BUY" };
+  }
   if (r?.includes("BUY") || r?.includes("STRONG")) {
     return { bg: "bg-green-500", text: "text-white", label: "BUY" };
   }
@@ -49,6 +52,52 @@ function getScoreColor(score: number) {
   return "text-red-400";
 }
 
+// Get phase style
+function getPhaseStyle(phase: number | null) {
+  switch (phase) {
+    case 1: return { label: "Stealth", color: "text-purple-400", bg: "bg-purple-500/20" };
+    case 2: return { label: "Expansion", color: "text-green-400", bg: "bg-green-500/20" };
+    case 3: return { label: "Mania", color: "text-amber-400", bg: "bg-amber-500/20" };
+    case 4: return { label: "Distribution", color: "text-orange-400", bg: "bg-orange-500/20" };
+    case 5: return { label: "Dead", color: "text-red-400", bg: "bg-red-500/20" };
+    default: return { label: "Unknown", color: "text-gray-400", bg: "bg-gray-500/20" };
+  }
+}
+
+// Nash Satoshi hexagonal logo SVG component
+function NashSatoshiLogo({ size = 24 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 40 40" width={size} height={size}>
+      {/* Outer hexagon */}
+      <polygon
+        points="20,2 36,11 36,29 20,38 4,29 4,11"
+        fill="none"
+        stroke="url(#shareLogoGradient)"
+        strokeWidth="1.5"
+        opacity="0.9"
+      />
+      {/* Inner hexagon */}
+      <polygon
+        points="20,8 30,14 30,26 20,32 10,26 10,14"
+        fill="url(#shareLogoGradient)"
+        opacity="0.3"
+      />
+      {/* Center circuit node */}
+      <circle cx="20" cy="20" r="4" fill="url(#shareLogoGradient)" />
+      {/* Circuit lines */}
+      <line x1="20" y1="16" x2="20" y2="8" stroke="url(#shareLogoGradient)" strokeWidth="1" />
+      <line x1="23.5" y1="22" x2="30" y2="26" stroke="url(#shareLogoGradient)" strokeWidth="1" />
+      <line x1="16.5" y1="22" x2="10" y2="26" stroke="url(#shareLogoGradient)" strokeWidth="1" />
+      <defs>
+        <linearGradient id="shareLogoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#0ff" />
+          <stop offset="100%" stopColor="#f0f" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
 export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
   ({ analysis }, ref) => {
     const finalScore = parseFloat(analysis.finalScore as string) || 0;
@@ -66,10 +115,15 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
     const tokenType = (analysis.tokenType as string) || 'UTILITY';
     const isMemecoin = tokenType === 'MEMECOIN';
 
+    const narrative = (analysis.narrative as string) || 'Unknown';
+    const phaseValue = analysis.phase;
+    const phase = phaseValue ? parseInt(String(phaseValue)) : null;
+    const phaseStyle = getPhaseStyle(phase);
+
     return (
       <div
         ref={ref}
-        className="w-[600px] h-[400px] bg-gradient-to-br from-[#0a0a0f] via-[#0d0d15] to-[#0a0a0f] p-6 relative overflow-hidden"
+        className="w-[800px] h-[450px] bg-gradient-to-br from-[#0a0a0f] via-[#0d0d15] to-[#0a0a0f] p-6 relative overflow-hidden"
         style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
       >
         {/* Background grid effect */}
@@ -87,11 +141,11 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
         {/* Content */}
         <div className="relative z-10 h-full flex flex-col">
           {/* Header */}
-          <div className="flex items-start justify-between mb-4">
+          <div className="flex items-start justify-between mb-3">
             <div className="flex items-center gap-3">
               {analysis.tokenImage ? (
                 <img
-                  src={analysis.tokenImage}
+                  src={`/api/image-proxy?url=${encodeURIComponent(analysis.tokenImage)}`}
                   alt={analysis.tokenName}
                   className="w-14 h-14 rounded-xl bg-white/10 ring-2 ring-white/20"
                 />
@@ -107,7 +161,7 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className="text-gray-400 uppercase font-mono text-sm">${analysis.tokenSymbol}</span>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isMemecoin ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'}`}>
-                    {isMemecoin ? 'MEMECOIN' : 'UTILITY'}
+                    {isMemecoin ? 'MEME' : 'UTIL'}
                   </span>
                 </div>
               </div>
@@ -119,22 +173,49 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
             </div>
           </div>
 
-          {/* Main Score */}
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-xs uppercase tracking-widest text-gray-500 mb-1">Game Theory Score</div>
-              <div className={`text-7xl font-black ${getScoreColor(finalScore)} drop-shadow-lg`} style={{ textShadow: '0 0 40px currentColor' }}>
-                {formatScore(finalScore)}
+          {/* Main Content Area */}
+          <div className="flex-1 flex gap-6">
+            {/* Left: Score Display */}
+            <div className="flex-1 flex flex-col items-center justify-center">
+              <div className="text-center">
+                <div className="text-xs uppercase tracking-widest text-gray-500 mb-1">Game Theory Score</div>
+                <div className={`text-7xl font-black ${getScoreColor(finalScore)} drop-shadow-lg`} style={{ textShadow: '0 0 40px currentColor' }}>
+                  {formatScore(finalScore)}
+                </div>
+                <div className="text-gray-500 text-sm mt-1">out of 100</div>
+                <div className={`inline-block mt-2 px-3 py-1 rounded-full text-xs font-bold ${recStyle.bg} ${recStyle.text}`}>
+                  {recStyle.label}
+                </div>
               </div>
-              <div className="text-gray-500 text-sm mt-1">out of 100</div>
-              <div className={`inline-block mt-2 px-3 py-1 rounded-full text-xs font-bold ${recStyle.bg} ${recStyle.text}`}>
-                {recStyle.label}
+            </div>
+
+            {/* Right: Narrative & Phase */}
+            <div className="w-48 flex flex-col justify-center gap-3">
+              {/* Narrative */}
+              <div className="bg-white/5 rounded-lg p-3 border border-white/10">
+                <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Narrative</div>
+                <div className="text-sm font-bold text-cyan-400 truncate" title={narrative}>
+                  {narrative}
+                </div>
+              </div>
+
+              {/* Phase */}
+              <div className="bg-white/5 rounded-lg p-3 border border-white/10">
+                <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Phase</div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-lg font-bold ${phaseStyle.color}`}>
+                    {phase || '?'}
+                  </span>
+                  <span className={`text-xs px-2 py-0.5 rounded ${phaseStyle.bg} ${phaseStyle.color} font-medium`}>
+                    {phaseStyle.label}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
 
           {/* Component Scores */}
-          <div className="grid grid-cols-6 gap-2 mb-4">
+          <div className="grid grid-cols-6 gap-3 mb-3 mt-2">
             {[
               { label: "COORD", value: coordinationScore, max: 20, icon: Users },
               { label: "SCHEL", value: schellingScore, max: 10, icon: Target },
@@ -151,28 +232,34 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
                     <Icon className="w-3 h-3 text-gray-500" />
                     <span className="text-[9px] text-gray-500 font-medium">{item.label}</span>
                   </div>
-                  <div className="h-1 bg-white/10 rounded-full overflow-hidden mb-1">
+                  <div className="h-1.5 bg-white/10 rounded-full overflow-hidden mb-1">
                     <div
                       className="h-full bg-gradient-to-r from-purple-500 to-cyan-500 rounded-full"
                       style={{ width: `${Math.min(100, pct)}%` }}
                     />
                   </div>
-                  <div className="text-xs font-bold text-white">{formatComponentScore(item.value)}</div>
+                  <div className="text-xs font-bold text-white">
+                    {Math.round(item.value)}<span className="text-gray-500 font-normal">/{item.max}</span>
+                  </div>
                 </div>
               );
             })}
           </div>
 
-          {/* Footer */}
-          <div className="flex items-center justify-between pt-3 border-t border-white/10">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded bg-gradient-to-br from-purple-500 to-cyan-500 flex items-center justify-center">
-                <span className="text-[10px] font-black text-white">NS</span>
+          {/* Footer - Branding Strip */}
+          <div className="flex items-center justify-center py-2.5 px-4 -mx-6 -mb-6 bg-gradient-to-r from-purple-900/50 via-slate-900/80 to-cyan-900/50 border-t border-white/10">
+            <div className="flex items-center gap-3">
+              {/* Nash Satoshi Logo */}
+              <NashSatoshiLogo size={28} />
+              {/* Branding Text */}
+              <div className="text-sm text-gray-300">
+                <span className="font-bold" style={{ color: '#0ff' }}>NASH</span>
+                <span className="font-bold text-purple-400">SATOSHI</span>
+                <span className="text-gray-500 mx-2">•</span>
+                <span className="text-gray-400">4-LLM Game Theory Consensus</span>
+                <span className="text-gray-500 mx-2">•</span>
+                <span className="text-cyan-400 font-semibold">nashsatoshi.com</span>
               </div>
-              <span className="text-xs text-gray-400 font-medium">Nash Satoshi</span>
-            </div>
-            <div className="text-[10px] text-gray-500">
-              4-LLM Consensus • {analysis.consensusLevel || 'MIXED'}
             </div>
           </div>
         </div>
