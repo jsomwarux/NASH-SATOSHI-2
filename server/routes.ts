@@ -1897,6 +1897,66 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== FEEDBACK ENDPOINTS ====================
+
+  // Submit feedback or report an issue
+  app.post("/api/feedback", optionalAuth, async (req: Request, res: Response) => {
+    try {
+      const { email, subject, message, type, tokenSymbol, analysisId } = req.body;
+
+      // Validate required fields
+      if (!email || !subject || !message) {
+        return res.status(400).json({ message: "Email, subject, and message are required" });
+      }
+
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ message: "Invalid email address" });
+      }
+
+      // Save to database
+      const feedback = await storage.createFeedback({
+        userId: req.userId || null,
+        userEmail: email,
+        type: type || 'feedback',
+        subject,
+        message,
+        tokenSymbol: tokenSymbol || null,
+        analysisId: analysisId || null,
+        status: 'new',
+      });
+
+      // Also send email notification
+      const emailSubject = type === 'issue'
+        ? `[Issue Report] ${tokenSymbol ? `$${tokenSymbol}: ` : ''}${subject}`
+        : `[Feedback] ${subject}`;
+
+      const emailMessage = tokenSymbol
+        ? `Token: $${tokenSymbol}\n${analysisId ? `Analysis ID: ${analysisId}\n` : ''}\n${message}`
+        : message;
+
+      await sendSupportEmail(email, emailSubject, emailMessage);
+
+      console.log(`Feedback saved: ${type} from ${email} - ${subject}`);
+      res.json({ message: "Feedback submitted successfully", id: feedback.id });
+    } catch (error) {
+      console.error("Error submitting feedback:", error);
+      res.status(500).json({ message: "Failed to submit feedback" });
+    }
+  });
+
+  // Get all feedback (admin only)
+  app.get("/api/feedback", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const feedback = await storage.getFeedback(100);
+      res.json(feedback);
+    } catch (error) {
+      console.error("Error fetching feedback:", error);
+      res.status(500).json({ message: "Failed to fetch feedback" });
+    }
+  });
+
   return httpServer;
 }
 

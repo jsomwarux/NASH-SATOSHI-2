@@ -10,6 +10,7 @@ import {
   userDailyVotes,
   priceSnapshots,
   performanceMetrics,
+  userFeedback,
   SUBSCRIPTION_TIERS,
   type UserSubscription,
   type InsertUserSubscription,
@@ -25,6 +26,8 @@ import {
   type InsertPriceSnapshot,
   type PerformanceMetrics,
   type InsertPerformanceMetrics,
+  type UserFeedback,
+  type InsertUserFeedback,
 } from "@shared/schema";
 
 // ==================== HELPERS ====================
@@ -220,6 +223,10 @@ export interface IStorage {
   getTokensWithBuyRecommendation(): Promise<{ tokenId: string; score: number; firstAnalysisDate: Date }[]>;
   getLatestPerformanceMetrics(): Promise<PerformanceMetrics | null>;
   savePerformanceMetrics(data: InsertPerformanceMetrics): Promise<PerformanceMetrics>;
+
+  // Feedback methods
+  createFeedback(data: InsertUserFeedback): Promise<UserFeedback>;
+  getFeedback(limit?: number): Promise<UserFeedback[]>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -1549,6 +1556,30 @@ export class PostgresStorage implements IStorage {
       return result[0];
     });
   }
+
+  // ==================== FEEDBACK METHODS ====================
+
+  async createFeedback(data: InsertUserFeedback): Promise<UserFeedback> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .insert(userFeedback)
+        .values(data as any)
+        .returning();
+      return result[0];
+    });
+  }
+
+  async getFeedback(limit: number = 100): Promise<UserFeedback[]> {
+    return withRetry(async () => {
+      const db = getDb();
+      return db
+        .select()
+        .from(userFeedback)
+        .orderBy(desc(userFeedback.createdAt))
+        .limit(limit);
+    });
+  }
 }
 
 // In-memory fallback for when DATABASE_URL is not set
@@ -1980,6 +2011,14 @@ export class MemStorage implements IStorage {
 
   async savePerformanceMetrics(_data: InsertPerformanceMetrics): Promise<PerformanceMetrics> {
     throw new Error("Performance tracking not available in memory storage");
+  }
+
+  async createFeedback(_data: InsertUserFeedback): Promise<UserFeedback> {
+    throw new Error("Feedback not available in memory storage");
+  }
+
+  async getFeedback(_limit?: number): Promise<UserFeedback[]> {
+    return [];
   }
 }
 

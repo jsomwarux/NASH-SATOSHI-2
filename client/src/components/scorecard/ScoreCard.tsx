@@ -35,6 +35,7 @@ import {
   RefreshCw,
   Calculator,
   ExternalLink,
+  Flag,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,6 +47,7 @@ import { Button } from "@/components/ui/button";
 import { ShareModal } from "./ShareModal";
 import { ModelAnalysisModal } from "./ModelAnalysisModal";
 import { ScoringMethodologyModal } from "@/components/common/ScoringMethodologyModal";
+import { FeedbackModal } from "@/components/common/FeedbackModal";
 import { useTokenPerformance } from "@/hooks/usePerformance";
 import type { TokenAnalysis, ModelScores, ModelAnalyses, TokenStats } from "@shared/schema";
 import { formatScore, formatComponentScore, formatModifier } from "@/lib/utils";
@@ -807,6 +809,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
   const [loadingStartTime] = useState(Date.now());
   const [showShareModal, setShowShareModal] = useState(false);
   const [showMethodologyModal, setShowMethodologyModal] = useState(false);
+  const [showReportIssueModal, setShowReportIssueModal] = useState(false);
   const [selectedModel, setSelectedModel] = useState<'gpt' | 'claude' | 'gemini' | 'grok' | null>(null);
 
   // Fetch token performance data
@@ -2408,14 +2411,22 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         )}
       </div>
 
-      {/* Footer with timestamp */}
+      {/* Footer with timestamp and report link */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5, delay: 0.6 }}
-        className="text-center text-xs text-muted-foreground pt-4"
+        className="flex items-center justify-center gap-3 text-xs text-muted-foreground pt-4"
       >
-        Analysis completed {formatDate(analysis.updatedAt)}
+        <span>Analysis completed {formatDate(analysis.updatedAt)}</span>
+        <span className="text-muted-foreground/30">|</span>
+        <button
+          onClick={() => setShowReportIssueModal(true)}
+          className="flex items-center gap-1 text-muted-foreground/70 hover:text-amber-400 transition-colors"
+        >
+          <Flag className="w-3 h-3" />
+          Report Issue
+        </button>
       </motion.div>
 
       {/* Share Modal */}
@@ -2448,6 +2459,15 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
       <ScoringMethodologyModal
         isOpen={showMethodologyModal}
         onClose={() => setShowMethodologyModal(false)}
+      />
+
+      {/* Report Issue Modal */}
+      <FeedbackModal
+        isOpen={showReportIssueModal}
+        onClose={() => setShowReportIssueModal(false)}
+        type="issue"
+        tokenSymbol={analysis.tokenSymbol}
+        analysisId={analysis.id}
       />
     </div>
   );

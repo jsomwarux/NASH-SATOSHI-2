@@ -319,10 +319,20 @@ export default function Leaderboard() {
           </motion.div>
         )}
 
-        {/* Disclaimer */}
-        <p className="text-[10px] text-muted-foreground text-center mb-8 font-mono">
-          Past performance does not guarantee future results. Returns require 7+ days of price history.
-        </p>
+        {/* Reanalysis Schedule & Disclaimer */}
+        <div className="text-center mb-8 space-y-1">
+          <p className="text-[10px] text-muted-foreground font-mono">
+            <span className="text-primary/70">REANALYSIS:</span>{" "}
+            Top 25 weekly{" "}
+            <span className="text-muted-foreground/50">|</span>{" "}
+            Top 50 bi-weekly{" "}
+            <span className="text-muted-foreground/50">|</span>{" "}
+            Top 100 monthly
+          </p>
+          <p className="text-[10px] text-muted-foreground font-mono">
+            Past performance does not guarantee future results. Returns require 7+ days of price history.
+          </p>
+        </div>
 
         {/* Search and Filters */}
         <motion.div

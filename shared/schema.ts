@@ -681,3 +681,29 @@ export interface TokenPerformance {
   firstAnalysisDate: string | null;
   latestAnalysisDate: string | null;
 }
+
+// ==================== USER FEEDBACK ====================
+// Feedback and issue reports from users
+
+export const userFeedback = pgTable("user_feedback", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id"), // Optional - can submit anonymously
+  userEmail: text("user_email"), // For follow-up
+  type: text("type").notNull(), // 'feedback' | 'issue'
+  subject: text("subject").notNull(),
+  message: text("message").notNull(),
+  tokenSymbol: text("token_symbol"), // For token-specific reports
+  analysisId: integer("analysis_id"), // Link to specific analysis
+  status: text("status").default("new"), // new, reviewed, resolved
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertUserFeedbackSchema = createInsertSchema(userFeedback).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const selectUserFeedbackSchema = createSelectSchema(userFeedback);
+
+export type InsertUserFeedback = z.infer<typeof insertUserFeedbackSchema>;
+export type UserFeedback = typeof userFeedback.$inferSelect;

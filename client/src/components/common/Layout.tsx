@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { BarChart3, Home, Vote, Terminal, Cpu, Wifi, Shield, Loader2, Crown, User, LogOut, CreditCard, ChevronDown, AlertTriangle, HelpCircle } from "lucide-react";
+import { BarChart3, Home, Vote, Terminal, Cpu, Wifi, Shield, Loader2, Crown, User, LogOut, CreditCard, ChevronDown, AlertTriangle, HelpCircle, MessageCircle } from "lucide-react";
 import { CyberBackground } from "../CyberBackground";
 import { useAnalysisTracker } from "@/contexts/AnalysisTrackerContext";
 import { useSubscriptionStatus, useCreateBillingPortal } from "@/hooks/useSubscription";
 import { useAuth } from "@/contexts/AuthContext";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { SupportModal } from "@/components/common/SupportModal";
+import { FeedbackModal } from "@/components/common/FeedbackModal";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -26,6 +27,7 @@ export function Layout({ children }: LayoutProps) {
   const [location] = useLocation();
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const { trackedAnalyses } = useAnalysisTracker();
   const { data: subscriptionStatus } = useSubscriptionStatus();
   const { user, signOut, isConfigured } = useAuth();
@@ -201,6 +203,13 @@ export function Layout({ children }: LayoutProps) {
                           {createPortal.isPending ? "Loading..." : "Manage Billing"}
                         </DropdownMenuItem>
                       )}
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        onClick={() => setShowFeedbackModal(true)}
+                      >
+                        <MessageCircle className="w-4 h-4 mr-2" />
+                        Feedback
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         className="cursor-pointer text-red-400 focus:text-red-400"
@@ -378,6 +387,12 @@ export function Layout({ children }: LayoutProps) {
       <SupportModal
         isOpen={showSupportModal}
         onClose={() => setShowSupportModal(false)}
+      />
+
+      {/* Feedback Modal */}
+      <FeedbackModal
+        isOpen={showFeedbackModal}
+        onClose={() => setShowFeedbackModal(false)}
       />
     </div>
   );

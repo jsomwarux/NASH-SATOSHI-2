@@ -4,7 +4,58 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-13 Part 2 - Verbose Enum Field Parsing (Latest)
+## Session: 2026-01-13 Part 3 - Feedback System & Reanalysis Schedule (Latest)
+
+### Summary
+Added a user feedback system with two entry points: a "Feedback" button in the user dropdown menu and a "Report Issue" link on each scorecard. Also added a reanalysis schedule notice to the Rankings page.
+
+### Changes Made
+
+#### 1. Reanalysis Schedule Notice (Rankings Page)
+- Added notice below stats cards: "REANALYSIS: Top 25 weekly | Top 50 bi-weekly | Top 100 monthly"
+- Styled consistently with existing disclaimer text
+
+#### 2. User Feedback System
+- **Database**: New `user_feedback` table to store submissions
+  - Fields: id, user_id, user_email, type, subject, message, token_symbol, analysis_id, status, created_at
+  - Migration: `migrations/0005_add_user_feedback.sql`
+- **API Endpoints**:
+  - `POST /api/feedback` - Submit feedback/issue (stores in DB + sends email)
+  - `GET /api/feedback` - List all feedback (admin only)
+- **FeedbackModal Component**: New modal for feedback/issue submission
+  - Toggle between "Feedback" and "Report Issue" modes
+  - Pre-fills token info when opened from scorecard
+  - Sends notification email via Resend
+
+#### 3. Feedback Entry Points
+- **User Menu**: "Feedback" option added below "Manage Billing" in user dropdown
+- **ScoreCard Footer**: "Report Issue" link with flag icon
+  - Pre-fills token symbol and analysis ID
+  - Frictionless reporting while viewing analysis
+
+### Files Modified
+- `shared/schema.ts` - Added userFeedback table and types
+- `server/storage.ts` - Added createFeedback and getFeedback methods
+- `server/routes.ts` - Added /api/feedback endpoints
+- `client/src/components/common/FeedbackModal.tsx` - New component
+- `client/src/components/common/Layout.tsx` - Added Feedback to user menu
+- `client/src/components/scorecard/ScoreCard.tsx` - Added Report Issue link
+- `client/src/pages/Leaderboard.tsx` - Added reanalysis schedule notice
+- `migrations/0005_add_user_feedback.sql` - New migration
+
+### How to View Feedback
+1. **Database**: Query `user_feedback` table directly
+2. **Email**: Submissions are emailed to SUPPORT_EMAIL (nashsatoshi@gmail.com by default)
+3. **Admin API**: `GET /api/feedback` returns all feedback (requires admin auth)
+
+### Database Migration Required
+```sql
+-- Run migrations/0005_add_user_feedback.sql
+```
+
+---
+
+## Session: 2026-01-13 Part 2 - Verbose Enum Field Parsing
 
 ### Summary
 Enhanced parsing logic for enum fields (community_status, account_quality, kol_notable_accounts) to handle verbose responses from the X Research node. The node sometimes returns full sentences instead of expected single-value categories, and this update extracts the correct value using keyword-based matching.
