@@ -1032,23 +1032,32 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
           <CardContent className="p-6 md:p-8">
             <div className="flex flex-col lg:flex-row gap-6">
               {/* Left: Token Info */}
-              <div className="flex items-start gap-4">
+              <div className="flex items-start gap-4 min-w-0 lg:max-w-[40%]">
                 {analysis.tokenImage ? (
                   <img
                     src={analysis.tokenImage}
                     alt={analysis.tokenName}
-                    className="w-14 h-14 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl bg-secondary"
+                    className="w-14 h-14 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl bg-secondary flex-shrink-0"
                   />
                 ) : (
-                  <div className="w-14 h-14 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
+                  <div className="w-14 h-14 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center flex-shrink-0">
                     <span className="font-bold text-lg sm:text-2xl">
                       {analysis.tokenSymbol.slice(0, 2).toUpperCase()}
                     </span>
                   </div>
                 )}
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h1 className="text-xl sm:text-2xl font-bold">{analysis.tokenName}</h1>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <h1 className="text-xl sm:text-2xl font-bold truncate max-w-[200px] sm:max-w-[280px] cursor-help">{analysis.tokenName}</h1>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-xs">
+                          <p className="font-semibold">{analysis.tokenName}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                     {analysis.chain && (
                       <Badge variant="outline" className="font-mono text-xs">
                         {analysis.chain}
@@ -1189,7 +1198,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
               </div>
 
               {/* Right: Market Data */}
-              <div className="grid grid-cols-2 gap-4 lg:w-56">
+              <div className="grid grid-cols-2 gap-4 lg:w-56 flex-shrink-0">
                 <div>
                   <div className="text-xs text-muted-foreground">Price</div>
                   <div className="text-lg font-mono font-medium">
@@ -2152,8 +2161,8 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                 <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Notable KOLs</div>
                 {(() => {
                   const kols = analysis.xTopKols as string;
-                  const kolRecency = analysis.kolMentionRecency as string;
                   // Handle missing or empty KOL data gracefully
+                  // Parser now normalizes to "None identified" but keep backward compatibility
                   const isEmpty = !kols
                     || kols.trim() === ''
                     || kols.toLowerCase().includes('n/a')
@@ -2163,17 +2172,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   if (isEmpty) {
                     return <div className="text-sm text-muted-foreground">None identified</div>;
                   }
-                  return (
-                    <div>
-                      <div className="text-sm text-sky-400">{kols}</div>
-                      {/* Only show recency if KOL data exists and recency is available */}
-                      {kolRecency && kolRecency.trim() !== '' && !kolRecency.toLowerCase().includes('n/a') && (
-                        <div className="text-xs text-muted-foreground mt-1">
-                          Mentions: {kolRecency}
-                        </div>
-                      )}
-                    </div>
-                  );
+                  return <div className="text-sm text-sky-400">{kols}</div>;
                 })()}
               </div>
 

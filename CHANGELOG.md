@@ -4,7 +4,72 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-13 - Support Contact, Auth Improvements, UX Fixes & Narrative Normalization (Latest)
+## Session: 2026-01-13 Part 2 - Verbose Enum Field Parsing (Latest)
+
+### Summary
+Enhanced parsing logic for enum fields (community_status, account_quality, kol_notable_accounts) to handle verbose responses from the X Research node. The node sometimes returns full sentences instead of expected single-value categories, and this update extracts the correct value using keyword-based matching.
+
+### Changes Made
+
+#### 1. Enhanced Community Status Parsing (extractCommunityStatusCategory)
+- Returns "Unknown" instead of raw text when no match found
+- Added keyword-based matching for verbose responses:
+  - "very active" → "Very Active"
+  - "moderately active" or "moderate" → "Moderate"
+  - "active" (but not "very active" or "moderately active" or "inactive") → "Active"
+  - "low" or "minimal" → "Low"
+  - "dead" or "no activity" or "inactive" → "Dead"
+
+#### 2. Enhanced Account Quality Parsing (extractAccountQualityCategory)
+- Returns "Unknown" instead of raw text when no match found
+- Added keyword-based matching for verbose responses:
+  - "builder" or "researcher" or "developer" or "technical" → "Builders/Researchers"
+  - "trader" or "degen" → "Traders/Degens"
+  - "mixed" → "Mixed Quality"
+  - "promoter" or "shill" → "Promoters/Shills"
+  - "bot" or "spam" → "Bots/Spam"
+
+#### 3. New KOL Value Normalization (normalizeKolValue)
+- New function to normalize KOL (Key Opinion Leader) field values
+- Returns "None identified" for empty, null, or placeholder values:
+  - Empty string, null, undefined
+  - "None identified", "No value available for this output"
+  - "None", "N/A", "NA", "None known"
+  - Text containing: "none found", "no notable", "no kol", "not identified", "could not identify", "unable to identify"
+- Applied to xTopKols field in both parser sections
+
+#### 4. Removed KOL Mention Recency Display
+- Removed `kolMentionRecency` reference from Notable KOLs UI in ScoreCard
+- Field removed from pipeline output; UI element hidden
+
+#### 5. Fixed Scorecard Hero Layout for Long Token Names
+- Long token names (e.g., "THREAT RESEARCH & HISTORY TRAIL") no longer break the Price/FDV layout
+- Left section constrained to `lg:max-w-[40%]` with `min-w-0` for proper flex behavior
+- Token name truncates with ellipsis at `max-w-[200px]` (mobile) / `max-w-[280px]` (desktop)
+- **Full name tooltip**: Hover over truncated name to see full project name in a tooltip
+- Added `cursor-help` visual hint that more info is available
+- Token image marked as `flex-shrink-0` to prevent shrinking
+- Right market data section marked as `flex-shrink-0` to prevent squishing
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/gumloop-parser.ts` | Enhanced extractCommunityStatusCategory, extractAccountQualityCategory functions; Added normalizeKolValue function; Updated xTopKols parsing to use normalization |
+| `client/src/components/scorecard/ScoreCard.tsx` | Removed kolMentionRecency display from Notable KOLs section |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript compiles successfully
+
+### Current State
+- Verbose community_status responses correctly mapped to clean category values
+- Verbose account_quality responses correctly mapped to clean category values
+- KOL field shows "None identified" instead of blank for empty/placeholder values
+- All TypeScript compiles successfully
+- Backward compatible with existing analyses
+
+---
+
+## Session: 2026-01-13 - Support Contact, Auth Improvements, UX Fixes & Narrative Normalization
 
 ### Summary
 Added support/contact feature with email via Resend, forgot password functionality, subscription upgrade/downgrade confirmation modal, improved narrative normalization for hot narratives, fixed scorecard share/download functionality, and various UX improvements including URL change from `/leaderboard` to `/rankings`.

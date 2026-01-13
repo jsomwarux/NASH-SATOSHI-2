@@ -151,44 +151,130 @@ const COMMUNITY_STATUS_CATEGORIES = ["Very Active", "Active", "Moderate", "Low",
 const ACCOUNT_QUALITY_CATEGORIES = ["Builders/Researchers", "Traders/Degens", "Mixed Quality", "Promoters/Shills", "Bots/Spam"];
 
 // Extract valid category from a longer string (e.g., "Active. The community shows..." -> "Active")
+// Handles verbose responses with keyword-based matching
 function extractCommunityStatusCategory(value: string): string {
-  if (!value) return value;
+  if (!value) return "Unknown";
   const cleanValue = cleanText(value);
+  const lowerValue = cleanValue.toLowerCase();
 
-  // Check if the value starts with any valid category
+  // Step 1: Check for exact match with any valid category
   for (const category of COMMUNITY_STATUS_CATEGORIES) {
-    if (cleanValue.toLowerCase().startsWith(category.toLowerCase())) {
+    if (lowerValue === category.toLowerCase()) {
       return category;
     }
   }
 
-  // Check if any category is contained in the value (fallback)
+  // Step 2: Check if value starts with any valid category
   for (const category of COMMUNITY_STATUS_CATEGORIES) {
-    if (cleanValue.toLowerCase().includes(category.toLowerCase())) {
+    if (lowerValue.startsWith(category.toLowerCase())) {
       return category;
     }
   }
 
-  return cleanValue;
+  // Step 3: Keyword-based matching for verbose responses
+  // Order matters: check "very active" before "active", "moderately active" before "active"
+  if (lowerValue.includes("very active")) {
+    return "Very Active";
+  }
+  if (lowerValue.includes("moderately active") || lowerValue.includes("moderate")) {
+    return "Moderate";
+  }
+  // Check "active" only if not "very active" or "moderately active" (already handled above)
+  if (lowerValue.includes("active") && !lowerValue.includes("inactive")) {
+    return "Active";
+  }
+  if (lowerValue.includes("low") || lowerValue.includes("minimal")) {
+    return "Low";
+  }
+  if (lowerValue.includes("dead") || lowerValue.includes("no activity") || lowerValue.includes("inactive")) {
+    return "Dead";
+  }
+
+  // Step 4: Final fallback - check if any category is contained in the value
+  for (const category of COMMUNITY_STATUS_CATEGORIES) {
+    if (lowerValue.includes(category.toLowerCase())) {
+      return category;
+    }
+  }
+
+  // Return "Unknown" if no match found
+  return "Unknown";
 }
 
 // Extract valid category from account quality string
+// Handles verbose responses with keyword-based matching
 function extractAccountQualityCategory(value: string): string {
-  if (!value) return value;
+  if (!value) return "Unknown";
   const cleanValue = cleanText(value);
+  const lowerValue = cleanValue.toLowerCase();
 
-  // Check if the value starts with any valid category
+  // Step 1: Check for exact match with any valid category
   for (const category of ACCOUNT_QUALITY_CATEGORIES) {
-    if (cleanValue.toLowerCase().startsWith(category.toLowerCase())) {
+    if (lowerValue === category.toLowerCase()) {
       return category;
     }
   }
 
-  // Check if any category is contained in the value (fallback)
+  // Step 2: Check if value starts with any valid category
   for (const category of ACCOUNT_QUALITY_CATEGORIES) {
-    if (cleanValue.toLowerCase().includes(category.toLowerCase())) {
+    if (lowerValue.startsWith(category.toLowerCase())) {
       return category;
     }
+  }
+
+  // Step 3: Keyword-based matching for verbose responses
+  if (lowerValue.includes("builder") || lowerValue.includes("researcher") ||
+      lowerValue.includes("developer") || lowerValue.includes("technical")) {
+    return "Builders/Researchers";
+  }
+  if (lowerValue.includes("trader") || lowerValue.includes("degen")) {
+    return "Traders/Degens";
+  }
+  if (lowerValue.includes("mixed")) {
+    return "Mixed Quality";
+  }
+  if (lowerValue.includes("promoter") || lowerValue.includes("shill")) {
+    return "Promoters/Shills";
+  }
+  if (lowerValue.includes("bot") || lowerValue.includes("spam")) {
+    return "Bots/Spam";
+  }
+
+  // Step 4: Final fallback - check if any category is contained in the value
+  for (const category of ACCOUNT_QUALITY_CATEGORIES) {
+    if (lowerValue.includes(category.toLowerCase())) {
+      return category;
+    }
+  }
+
+  // Return "Unknown" if no match found
+  return "Unknown";
+}
+
+// Normalize KOL (Key Opinion Leader) value
+// Returns "None identified" for empty/null/placeholder values
+function normalizeKolValue(value: string | null | undefined): string {
+  if (!value) return "None identified";
+
+  const cleanValue = cleanText(value);
+  const lowerValue = cleanValue.toLowerCase();
+
+  // Check for various "none" or empty indicators
+  if (!cleanValue ||
+      cleanValue === "" ||
+      lowerValue === "none identified" ||
+      lowerValue === "no value available for this output" ||
+      lowerValue === "none" ||
+      lowerValue === "n/a" ||
+      lowerValue === "na" ||
+      lowerValue === "none known" ||
+      lowerValue.includes("none found") ||
+      lowerValue.includes("no notable") ||
+      lowerValue.includes("no kol") ||
+      lowerValue.includes("not identified") ||
+      lowerValue.includes("could not identify") ||
+      lowerValue.includes("unable to identify")) {
+    return "None identified";
   }
 
   return cleanValue;
@@ -1268,10 +1354,9 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   const xTopKols = extractField(parseText, 'top_kols')
     || extractField(parseText, 'x_top_kols')
     || extractField(parseText, 'notable_kols');
-  if (xTopKols) {
-    result.xTopKols = stripFieldLabelPrefix(cleanText(xTopKols));
-    console.log(`Parser: Extracted xTopKols: "${result.xTopKols}"`);
-  }
+  // Always normalize KOL value - handles empty, null, and placeholder values
+  result.xTopKols = normalizeKolValue(xTopKols ? stripFieldLabelPrefix(cleanText(xTopKols)) : null);
+  console.log(`Parser: Extracted xTopKols: "${result.xTopKols}"`);
 
   // Community Status - new reliable field with fallback to old long field name
   // Extract just the category if value contains additional text
@@ -2405,10 +2490,9 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   const xTopKols = getString('top_kols')
     || getString('x_top_kols')
     || getString('notable_kols');
-  if (xTopKols) {
-    result.xTopKols = stripFieldLabelPrefix(xTopKols);
-    console.log(`Parser (outputs): Extracted xTopKols: "${result.xTopKols}"`);
-  }
+  // Always normalize KOL value - handles empty, null, and placeholder values
+  result.xTopKols = normalizeKolValue(xTopKols ? stripFieldLabelPrefix(xTopKols) : null);
+  console.log(`Parser (outputs): Extracted xTopKols: "${result.xTopKols}"`);
 
   // Community Status - new reliable field with fallback to old long field name
   // Extract just the category if value contains additional text
