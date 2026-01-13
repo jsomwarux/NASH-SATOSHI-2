@@ -157,7 +157,7 @@ export default function Home() {
                 </span>
               </h1>
               <p className="max-w-2xl mx-auto text-sm sm:text-base md:text-lg text-muted-foreground font-mono leading-relaxed">
-                Curated token rankings powered by a 4-LLM ensemble. Game theory scores you can actually act on.
+                4 AI models cross-checking each other to tell you which tokens have the best risk/reward right now.
               </p>
             </div>
 
