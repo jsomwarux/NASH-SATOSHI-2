@@ -4,7 +4,62 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-13 Part 4 - Beta Free Access Mode (Latest)
+## Session: 2026-01-14 - Enhanced Scoring Methodology Section (Latest)
+
+### Summary
+Enhanced the home page's Game Theory Scoring Engine section to incorporate content from the ScoringMethodologyModal, creating a more comprehensive explanation of our scoring system while maintaining good UI/UX on both desktop and mobile.
+
+### Changes Made
+
+#### 1. New Section Header
+- Changed title from "Game Theory Scoring Engine" to "How Scoring Works"
+- Added intro text: "Our system combines traditional crypto research with proprietary game-theoretic analysis to surface asymmetric opportunities."
+
+#### 2. Four Methodology Pillars (from ScoringMethodologyModal)
+Added a 4-card grid explaining the scoring approach:
+- **Fundamentals** (blue) - Narrative positioning, technology, team credibility, tokenomics, traction, competitive landscape
+- **Game Theory** (purple) - Market coordination dynamics, buyer/seller conditions, sustainability
+- **Multi-Model Consensus** (emerald) - Four AI models deliberate and challenge each other
+- **The Score** (amber) - 0-100 probability-weighted expected value
+
+#### 3. Restructured Detail Section
+Changed from side-by-side layout to two-card grid:
+- **Left Card: Six Scoring Dimensions** - Component scores with progress bars + "TOTAL MAX POINTS: 100" footer
+- **Right Card: Tier Breakdown** - Score ranges (S+ to C) with recommendations + visual score distribution bar
+
+#### 4. Added Score Distribution Visual
+- Color-coded bar showing tier distribution (C red → S+ purple)
+- Proportional widths matching actual score ranges
+
+#### 5. Mobile Responsiveness
+- Pillars: 1 column (mobile) → 2 columns (tablet) → 4 columns (desktop)
+- Score grids stack vertically on mobile
+- Tier descriptions hidden on mobile to save space
+- Responsive text sizes and padding throughout
+
+#### 6. Equal Height Cards Fix
+- Added `items-stretch` to grid and `flex flex-col` to both cards
+- Used `flex-1` on content sections and `mt-auto` on footers
+- Both cards now have equal height with content properly distributed
+- Increased spacing between score items (space-y-5) and progress bar height (h-2.5)
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `client/src/pages/Home.tsx` | Added Users and TrendingUp icons, methodologyPillars data array, replaced entire scoring methodology section with enhanced version |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### Current State
+- Enhanced scoring methodology section live on home page
+- Combines content from both original section and ScoringMethodologyModal
+- Fully responsive on mobile and desktop
+- All TypeScript compiles successfully
+
+---
+
+## Session: 2026-01-13 Part 4 - Beta Free Access Mode
 
 ### Summary
 Converted the platform to free access during beta while preserving all pricing infrastructure for future paid tier implementation. All users now get full platform access with 1 vote/day and no priority votes.

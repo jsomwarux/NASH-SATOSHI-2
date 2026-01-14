@@ -16,6 +16,8 @@ import {
   Eye,
   BarChart3,
   Vote,
+  Users,
+  TrendingUp,
 } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { Button } from "@/components/ui/button";
@@ -90,6 +92,34 @@ const scoringComponents = [
   { label: "VIRALITY", max: 15, desc: "Narrative spread momentum" },
   { label: "ASYMMETRY", max: 25, desc: "Risk/reward profile" },
   { label: "GAME THEORY", max: 15, desc: "Strategic Nash positioning" },
+];
+
+// Methodology pillars for the enhanced scoring section
+const methodologyPillars = [
+  {
+    icon: Target,
+    title: "Fundamentals",
+    description: "Narrative positioning, technology, team credibility, tokenomics structure, traction metrics, and competitive landscape.",
+    color: "blue",
+  },
+  {
+    icon: Users,
+    title: "Game Theory",
+    description: "Market coordination dynamics — assessing whether conditions favor buyers or sellers and how sustainable current positioning is.",
+    color: "purple",
+  },
+  {
+    icon: Brain,
+    title: "Multi-Model Consensus",
+    description: "Every token is independently analyzed by four AI models that deliberate and challenge each other before producing a final score.",
+    color: "emerald",
+  },
+  {
+    icon: TrendingUp,
+    title: "The Score",
+    description: "A single 0-100 score representing probability-weighted expected value — balancing quality, timing, and risk-adjusted upside.",
+    color: "amber",
+  },
 ];
 
 // Typing animation hook
@@ -323,33 +353,73 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Scoring Methodology */}
+      {/* Scoring Methodology - Enhanced Section */}
       <section className="py-20 border-t border-primary/10 relative">
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-accent/5 to-transparent" />
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+          {/* Section Header */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-12"
+          >
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded border border-primary/20 bg-primary/5 text-primary text-xs font-mono tracking-wider mb-6">
+              <CircuitBoard className="w-3 h-3" />
+              METHODOLOGY
+            </div>
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-display font-bold mb-4">
+              <span className="text-glow-cyan">How Scoring</span>{" "}
+              <span className="text-muted-foreground">Works</span>
+            </h2>
+            <p className="text-muted-foreground max-w-2xl mx-auto font-mono text-sm leading-relaxed">
+              Our system combines <span className="text-foreground">traditional crypto research</span> with
+              proprietary <span className="text-foreground">game-theoretic analysis</span> to surface
+              asymmetric opportunities.
+            </p>
+          </motion.div>
+
+          {/* Four Methodology Pillars */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-16">
+            {methodologyPillars.map((pillar, i) => (
+              <motion.div
+                key={pillar.title}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.1 }}
+                viewport={{ once: true }}
+                className={`cyber-card p-5 sm:p-6 rounded border border-${pillar.color}-500/30 bg-${pillar.color}-500/5 hover:bg-${pillar.color}-500/10 transition-all`}
+              >
+                <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-${pillar.color}-500/20 border border-${pillar.color}-500/30 flex items-center justify-center mb-4`}>
+                  <pillar.icon className={`w-5 h-5 sm:w-6 sm:h-6 text-${pillar.color}-400`} />
+                </div>
+                <h3 className={`text-sm sm:text-base font-mono font-bold mb-2 text-${pillar.color}-400`}>{pillar.title}</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">{pillar.description}</p>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Score Components + Tier Breakdown Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-stretch">
+            {/* Left: Component Scores */}
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
+              className="cyber-card p-6 sm:p-8 rounded border border-white/10 flex flex-col"
             >
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded border border-primary/20 bg-primary/5 text-primary text-xs font-mono tracking-wider mb-6">
-                <CircuitBoard className="w-3 h-3" />
-                METHODOLOGY
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center">
+                  <BarChart3 className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-mono font-bold text-sm sm:text-base">Six Scoring Dimensions</h3>
+                  <p className="text-xs text-muted-foreground">Each analyzed by all 4 AI models</p>
+                </div>
               </div>
-              <h2 className="text-3xl md:text-4xl font-display font-bold mb-6">
-                <span className="text-glow-cyan">Game Theory</span>
-                <br />
-                <span className="text-muted-foreground">Scoring Engine</span>
-              </h2>
-              <p className="text-muted-foreground mb-8 leading-relaxed font-mono text-sm">
-                {">"} Our scoring system evaluates tokens across six key dimensions.
-                Each component is analyzed by all four AI models, and the consensus
-                determines the final score.
-              </p>
 
-              <div className="space-y-4">
+              <div className="space-y-5 flex-1">
                 {scoringComponents.map((item, i) => (
                   <motion.div
                     key={item.label}
@@ -357,47 +427,54 @@ export default function Home() {
                     whileInView={{ opacity: 1, x: 0 }}
                     transition={{ delay: i * 0.05 }}
                     viewport={{ once: true }}
-                    className="flex items-center gap-2 sm:gap-4"
+                    className="flex items-center gap-3 sm:gap-4"
                   >
-                    <div className="w-10 sm:w-16 text-right flex-shrink-0">
+                    <div className="w-10 sm:w-14 text-right flex-shrink-0">
                       <span className="font-mono text-[10px] sm:text-xs text-primary">0-{item.max}</span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="h-2 bg-white/5 rounded-full overflow-hidden border border-white/10">
+                      <div className="h-2.5 bg-white/5 rounded-full overflow-hidden border border-white/10">
                         <motion.div
                           initial={{ width: 0 }}
-                          whileInView={{ width: `${(item.max / 20) * 100}%` }}
+                          whileInView={{ width: `${(item.max / 25) * 100}%` }}
                           transition={{ duration: 0.8, delay: i * 0.1 }}
                           viewport={{ once: true }}
                           className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
                         />
                       </div>
                     </div>
-                    <div className="w-24 sm:w-36 flex-shrink-0">
+                    <div className="w-24 sm:w-32 flex-shrink-0">
                       <div className="font-mono text-[10px] sm:text-xs font-bold tracking-wider truncate">{item.label}</div>
-                      <div className="text-[8px] sm:text-[9px] text-muted-foreground truncate">{item.desc}</div>
+                      <div className="text-[8px] sm:text-[10px] text-muted-foreground truncate">{item.desc}</div>
                     </div>
                   </motion.div>
                 ))}
               </div>
+
+              {/* Total Score Sum */}
+              <div className="mt-auto pt-6 border-t border-white/10 flex items-center justify-between">
+                <span className="font-mono text-xs text-muted-foreground">TOTAL MAX POINTS</span>
+                <span className="font-mono text-lg font-bold text-primary">100</span>
+              </div>
             </motion.div>
 
+            {/* Right: Tier Breakdown */}
             <motion.div
               initial={{ opacity: 0, x: 20 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
-              className="cyber-card p-8 rounded border border-primary/20"
+              className="cyber-card p-6 sm:p-8 rounded border border-primary/20 flex flex-col"
             >
-              <div className="text-center mb-8">
-                <div className="text-7xl font-bold font-mono text-glow-cyan mb-2">
+              <div className="text-center mb-6">
+                <div className="text-5xl sm:text-6xl lg:text-7xl font-bold font-mono text-glow-cyan mb-2">
                   0-100
                 </div>
-                <div className="text-muted-foreground font-mono text-sm tracking-wider">
-                  FINAL_GAME_THEORY_SCORE
+                <div className="text-muted-foreground font-mono text-xs sm:text-sm tracking-wider">
+                  FINAL CONSENSUS SCORE
                 </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2 flex-1">
                 {[
                   { range: "85-100", tier: "S+", color: "purple", label: "STRONG BUY", desc: "Top-tier asymmetry" },
                   { range: "70-84", tier: "S", color: "green", label: "BUY", desc: "Favorable setup" },
@@ -407,23 +484,59 @@ export default function Home() {
                 ].map((item) => (
                   <div
                     key={item.tier}
-                    className={`flex items-center gap-3 p-3 rounded border bg-${item.color}-500/5 border-${item.color}-500/20`}
+                    className={`flex items-center gap-3 p-2.5 sm:p-3 rounded border bg-${item.color}-500/5 border-${item.color}-500/20`}
                   >
                     <div className={`px-2 py-1 rounded font-mono font-bold text-xs bg-${item.color}-500/20 text-${item.color}-400 border border-${item.color}-500/30`}>
                       {item.tier}
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <div className="font-mono text-xs">{item.range}</div>
                     </div>
                     <div className="text-right">
                       <div className={`font-mono text-xs font-bold text-${item.color}-400`}>{item.label}</div>
-                      <div className="text-[9px] text-muted-foreground">{item.desc}</div>
+                      <div className="text-[9px] text-muted-foreground hidden sm:block">{item.desc}</div>
                     </div>
                   </div>
                 ))}
               </div>
+
+              {/* Score Distribution Visual */}
+              <div className="mt-auto pt-6 border-t border-primary/10">
+                <div className="text-xs font-mono text-muted-foreground mb-3 flex items-center gap-2">
+                  <Sparkles className="w-3.5 h-3.5 text-primary" />
+                  Score Distribution
+                </div>
+                <div className="flex gap-1 h-3 rounded-full overflow-hidden">
+                  <div className="flex-[39] bg-red-500/60" title="0-39: C Tier" />
+                  <div className="flex-[15] bg-yellow-500/60" title="40-54: B Tier" />
+                  <div className="flex-[15] bg-emerald-500/60" title="55-69: A Tier" />
+                  <div className="flex-[15] bg-green-500/60" title="70-84: S Tier" />
+                  <div className="flex-[16] bg-purple-500/60" title="85+: S+ Tier" />
+                </div>
+                <div className="flex justify-between mt-2 text-[10px] text-muted-foreground font-mono">
+                  <span>0</span>
+                  <span className="text-red-400">C</span>
+                  <span className="text-yellow-400">B</span>
+                  <span className="text-emerald-400">A</span>
+                  <span className="text-green-400">S</span>
+                  <span className="text-purple-400">S+</span>
+                  <span>100</span>
+                </div>
+              </div>
             </motion.div>
           </div>
+
+          {/* Bottom Note */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="mt-8 text-center"
+          >
+            <p className="text-xs text-muted-foreground font-mono">
+              Scores are updated with each new analysis run. Past performance does not guarantee future results.
+            </p>
+          </motion.div>
         </div>
       </section>
 
