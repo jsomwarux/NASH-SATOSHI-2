@@ -43,10 +43,18 @@ Changed from side-by-side layout to two-card grid:
 - Both cards now have equal height with content properly distributed
 - Increased spacing between score items (space-y-5) and progress bar height (h-2.5)
 
+#### 7. Removed Pricing References for Beta Mode
+- **Home.tsx**: Replaced "VIEW PRICING" button with "VOTE FOR TOKENS" in CTA section
+- **AuthModal.tsx**:
+  - Changed "FREE ACCOUNT INCLUDES" to "FREE BETA ACCESS INCLUDES"
+  - Changed "top 10 ranked tokens" to "all ranked tokens"
+  - Removed "Want the full rankings? View plans" CTA entirely
+
 ### Files Modified
 | File | Changes |
 |------|---------|
-| `client/src/pages/Home.tsx` | Added Users and TrendingUp icons, methodologyPillars data array, replaced entire scoring methodology section with enhanced version |
+| `client/src/pages/Home.tsx` | Added Users and TrendingUp icons, methodologyPillars data array, replaced entire scoring methodology section with enhanced version, replaced VIEW PRICING with VOTE FOR TOKENS |
+| `client/src/components/auth/AuthModal.tsx` | Updated for beta mode - removed pricing CTA, updated benefits to reflect full access |
 
 ### Commands Run
 - `npx tsc --noEmit` - TypeScript check passed

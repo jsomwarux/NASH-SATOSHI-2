@@ -169,15 +169,15 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
               )}
 
               {/* Free Account Benefits */}
-              <div className="p-4 rounded border border-primary/30 bg-primary/5 mb-4">
+              <div className="p-4 rounded border border-primary/30 bg-primary/5">
                 <div className="flex items-center gap-2 mb-3">
                   <Zap className="w-5 h-5 text-primary" />
-                  <span className="font-mono text-primary font-bold text-sm">FREE ACCOUNT INCLUDES</span>
+                  <span className="font-mono text-primary font-bold text-sm">FREE BETA ACCESS INCLUDES</span>
                 </div>
                 <div className="space-y-2 text-xs">
                   <div className="flex items-center gap-2">
                     <Trophy className="w-3.5 h-3.5 text-primary" />
-                    <span className="text-muted-foreground">Access to <span className="text-white">top 10 ranked tokens</span></span>
+                    <span className="text-muted-foreground">Access to <span className="text-white">all ranked tokens</span></span>
                   </div>
                   <div className="flex items-center gap-2">
                     <FileText className="w-3.5 h-3.5 text-primary" />
@@ -188,14 +188,6 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'signin', promptMessa
                     <span className="text-muted-foreground">1 vote per day for new tokens</span>
                   </div>
                 </div>
-              </div>
-
-              {/* Upgrade CTA */}
-              <div className="flex items-center justify-between p-3 rounded border border-white/10 bg-white/5 text-xs">
-                <span className="text-muted-foreground">Want the full rankings?</span>
-                <Link href="/pricing" onClick={onClose} className="inline-flex items-center gap-1 text-primary hover:underline font-medium">
-                  View plans <ArrowRight className="w-3 h-3" />
-                </Link>
               </div>
             </div>
           )}

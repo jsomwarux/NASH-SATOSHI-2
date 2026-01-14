@@ -570,9 +570,10 @@ export default function Home() {
                   <ArrowRight className="w-4 h-4" />
                 </Button>
               </Link>
-              <Link href="/pricing">
-                <Button size="lg" variant="outline" className="font-mono text-sm gap-2">
-                  VIEW PRICING
+              <Link href="/vote">
+                <Button size="lg" variant="outline" className="font-mono text-sm gap-2 border-accent/50 text-accent hover:bg-accent/10">
+                  <Vote className="w-4 h-4" />
+                  VOTE FOR TOKENS
                 </Button>
               </Link>
             </div>
