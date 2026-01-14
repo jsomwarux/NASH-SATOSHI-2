@@ -52,11 +52,11 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // Required for React dev
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://www.googletagmanager.com", "https://www.google-analytics.com"], // Required for React dev + Google Analytics
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         imgSrc: ["'self'", "data:", "https:", "blob:"],
-        connectSrc: ["'self'", "https://api.coingecko.com", "https://pro-api.coingecko.com", "https://*.supabase.co", "wss://*.supabase.co"],
+        connectSrc: ["'self'", "https://api.coingecko.com", "https://pro-api.coingecko.com", "https://*.supabase.co", "wss://*.supabase.co", "https://www.google-analytics.com", "https://analytics.google.com", "https://region1.google-analytics.com"],
       },
     },
     crossOriginEmbedderPolicy: false, // Required for external images
