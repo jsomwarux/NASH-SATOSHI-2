@@ -972,7 +972,7 @@ export async function registerRoutes(
   // Admin: Get full leaderboard (no access limits)
   app.get("/api/admin/leaderboard", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const limit = parseInt(req.query.limit as string) || 100;
+      const limit = parseInt(req.query.limit as string) || 10000;
       const offset = parseInt(req.query.offset as string) || 0;
       const sortBy = (req.query.sortBy as string) || "score7d";
       const order = (req.query.order as "asc" | "desc") || "desc";
@@ -1214,7 +1214,7 @@ export async function registerRoutes(
   app.get("/api/leaderboard", optionalAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.userId;
-      const requestedLimit = parseInt(req.query.limit as string) || 100;
+      const requestedLimit = parseInt(req.query.limit as string) || 10000;
       const requestedOffset = parseInt(req.query.offset as string) || 0;
       const sortBy = (req.query.sortBy as string) || "score7d";
       const order = (req.query.order as "asc" | "desc") || "desc";
@@ -1777,6 +1777,17 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error getting recently analyzed requests:", error);
       res.status(500).json({ message: "Failed to get recently analyzed requests" });
+    }
+  });
+
+  // Get yesterday's top voted token
+  app.get("/api/vote/yesterday-top", async (req: Request, res: Response) => {
+    try {
+      const result = await storage.getYesterdayTopVote();
+      res.json(result);
+    } catch (error) {
+      console.error("Error getting yesterday's top vote:", error);
+      res.status(500).json({ message: "Failed to get yesterday's top vote" });
     }
   });
 
@@ -2376,6 +2387,19 @@ async function processGumloopCompletion(
   await publishAnalysisComplete(analysisId);
   await invalidateCache(CACHE_KEYS.ANALYSIS(analysisId));
   await invalidateCache(CACHE_KEYS.LEADERBOARD);
+
+  // Update vote request if this token was voted for
+  if (existingAnalysis?.tokenId) {
+    const voteRequest = await storage.getVoteRequestByTokenId(existingAnalysis.tokenId);
+    if (voteRequest && voteRequest.status === "pending") {
+      await storage.updateVoteRequest(voteRequest.id, {
+        status: "analyzed",
+        analyzedAt: new Date(),
+        analysisId: analysisId,
+      });
+      console.log(`Analysis ${analysisId}: Updated vote request ${voteRequest.id} to analyzed`);
+    }
+  }
 
   console.log(`Analysis ${analysisId}: Completed successfully`);
 }

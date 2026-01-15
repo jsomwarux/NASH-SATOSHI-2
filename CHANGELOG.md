@@ -4,7 +4,58 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-14 - Enhanced Scoring Methodology Section (Latest)
+## Session: 2026-01-15 - Yesterday's Top Voted Token in Admin Vote Queue (Latest)
+
+### Summary
+Added the ability to see and run analysis on the top voted token from the previous day in the admin voting queue page. This helps admins identify which token won the daily voting and quickly run analysis on it.
+
+### Changes Made
+
+#### 1. New Storage Method (server/storage.ts)
+- Added `getESTYesterdayRange()` helper function to calculate yesterday's date range in EST
+- Added `getYesterdayTopVote()` method that:
+  - First tries to find votes from yesterday's individual vote records (`token_votes` table)
+  - Falls back to the top pending request by accumulated vote count (`token_vote_requests` table)
+  - This handles cases where votes were added without individual vote records
+
+#### 2. Updated IStorage Interface
+- Added `getYesterdayTopVote()` method signature to the interface
+- Added in-memory stub implementation for MemStorage
+
+#### 3. New API Endpoint (server/routes.ts)
+- Added `GET /api/vote/yesterday-top` endpoint that returns yesterday's top voted token with vote breakdown
+
+#### 4. Client API (client/src/lib/api.ts)
+- Added `YesterdayTopVote` interface type
+- Added `getYesterdayTopVote()` function to fetch from the new endpoint
+
+#### 5. Admin Vote Queue UI (client/src/pages/Admin.tsx)
+- Added "Yesterday's Top Voted" card at the top of the Vote Queue tab
+- Shows the token with the most votes from the previous day
+- Displays token info (name, symbol, image), total vote score, and vote breakdown
+- If not yet analyzed: Shows "Run Analysis" button (navigates to analyze tab with token pre-selected)
+- If already analyzed: Shows "Analyzed" badge linking to the scorecard
+- Shows "No votes recorded yesterday" message when no votes exist
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/storage.ts` | Added `getESTYesterdayRange()` helper, `getYesterdayTopVote()` method in PostgresStorage and MemStorage |
+| `server/routes.ts` | Added `/api/vote/yesterday-top` endpoint |
+| `client/src/lib/api.ts` | Added `YesterdayTopVote` type and `getYesterdayTopVote()` function |
+| `client/src/pages/Admin.tsx` | Added Trophy icon import, yesterday top vote query, and "Yesterday's Top Voted" card section |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### Current State
+- Admin Vote Queue now shows yesterday's winner at the top
+- Admins can quickly run analysis on yesterday's top voted token
+- All existing functionality preserved
+
+---
+
+## Session: 2026-01-14 - Enhanced Scoring Methodology Section
 
 ### Summary
 Enhanced the home page's Game Theory Scoring Engine section to incorporate content from the ScoringMethodologyModal, creating a more comprehensive explanation of our scoring system while maintaining good UI/UX on both desktop and mobile.
@@ -50,11 +101,20 @@ Changed from side-by-side layout to two-card grid:
   - Changed "top 10 ranked tokens" to "all ranked tokens"
   - Removed "Want the full rankings? View plans" CTA entirely
 
+#### 8. Added Google Analytics
+- Added Google Analytics 4 tracking (ID: G-EW1M74J125)
+- Placed gtag script immediately after `<head>` tag in index.html
+- Updated Content Security Policy in server/index.ts to allow GA:
+  - Added `https://www.googletagmanager.com` and `https://www.google-analytics.com` to `scriptSrc`
+  - Added `https://www.google-analytics.com`, `https://analytics.google.com`, `https://region1.google-analytics.com` to `connectSrc`
+
 ### Files Modified
 | File | Changes |
 |------|---------|
 | `client/src/pages/Home.tsx` | Added Users and TrendingUp icons, methodologyPillars data array, replaced entire scoring methodology section with enhanced version, replaced VIEW PRICING with VOTE FOR TOKENS |
 | `client/src/components/auth/AuthModal.tsx` | Updated for beta mode - removed pricing CTA, updated benefits to reflect full access |
+| `client/index.html` | Added Google Analytics gtag script |
+| `server/index.ts` | Updated CSP to allow Google Analytics domains |
 
 ### Commands Run
 - `npx tsc --noEmit` - TypeScript check passed

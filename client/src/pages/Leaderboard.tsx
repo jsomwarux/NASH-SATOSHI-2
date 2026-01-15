@@ -49,7 +49,6 @@ export default function Leaderboard() {
   const { data, isLoading, error } = useLeaderboard({
     sortBy,
     order,
-    limit: 100,
     filters: activeFilters,
   });
 

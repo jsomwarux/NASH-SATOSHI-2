@@ -1,4 +1,4 @@
-import { eq, and, desc, sql, gte, lte, ilike, or, count, isNotNull, inArray } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lte, lt, ilike, or, count, isNotNull, inArray } from "drizzle-orm";
 import { getDb, withRetry } from "./db";
 import {
   userSubscriptions,
@@ -46,6 +46,15 @@ function getESTTodayStart(): Date {
   const estDate = getESTDateString();
   // Midnight EST = 05:00 UTC
   return new Date(`${estDate}T05:00:00.000Z`);
+}
+
+// Get yesterday's start and end times in EST
+function getESTYesterdayRange(): { start: Date; end: Date } {
+  const todayStart = getESTTodayStart();
+  // Yesterday start = today start - 24 hours
+  const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+  // Yesterday end = today start
+  return { start: yesterdayStart, end: todayStart };
 }
 
 // ==================== NARRATIVE NORMALIZATION ====================
@@ -211,6 +220,7 @@ export interface IStorage {
   incrementUserDailyVotes(userId: string, date: string): Promise<void>;
   getTopVoteRequests(limit?: number): Promise<TokenVoteRequest[]>;
   getRecentlyAnalyzedRequests(limit?: number): Promise<TokenVoteRequest[]>;
+  getYesterdayTopVote(): Promise<{ request: TokenVoteRequest; voteCount: number; priorityVoteCount: number; totalScore: number } | null>;
 
   // Performance tracking methods
   createPriceSnapshot(data: InsertPriceSnapshot): Promise<PriceSnapshot>;
@@ -691,7 +701,7 @@ export class PostgresStorage implements IStorage {
   }): Promise<{ items: any[]; total: number }> {
     return withRetry(async () => {
       const db = getDb();
-      const { limit = 100, offset = 0, sortBy = "latestScore", order = "desc", filters } = options;
+      const { limit = 10000, offset = 0, sortBy = "latestScore", order = "desc", filters } = options;
 
     // Build WHERE conditions
     const conditions = [eq(tokenAnalyses.status, "completed")];
@@ -1365,13 +1375,115 @@ export class PostgresStorage implements IStorage {
   async getRecentlyAnalyzedRequests(limit: number = 10): Promise<TokenVoteRequest[]> {
     return withRetry(async () => {
       const db = getDb();
+
+      // Find vote requests where the token has a completed analysis
+      // This handles both:
+      // 1. Vote requests with status='analyzed' (properly updated)
+      // 2. Vote requests where token was analyzed but status wasn't updated
       const result = await db
+        .select({
+          id: tokenVoteRequests.id,
+          tokenId: tokenVoteRequests.tokenId,
+          tokenSymbol: tokenVoteRequests.tokenSymbol,
+          tokenName: tokenVoteRequests.tokenName,
+          tokenImage: tokenVoteRequests.tokenImage,
+          voteCount: tokenVoteRequests.voteCount,
+          priorityVoteCount: tokenVoteRequests.priorityVoteCount,
+          status: tokenVoteRequests.status,
+          createdAt: tokenVoteRequests.createdAt,
+          analyzedAt: sql<Date>`COALESCE(${tokenVoteRequests.analyzedAt}, ${tokenAnalyses.createdAt})`.as('analyzed_at'),
+          analysisId: sql<number>`COALESCE(${tokenVoteRequests.analysisId}, ${tokenAnalyses.id})`.as('analysis_id'),
+        })
+        .from(tokenVoteRequests)
+        .innerJoin(tokenAnalyses, eq(tokenVoteRequests.tokenId, tokenAnalyses.tokenId))
+        .where(eq(tokenAnalyses.status, "completed"))
+        .orderBy(desc(sql`${tokenVoteRequests.voteCount} + (${tokenVoteRequests.priorityVoteCount} * 2)`))
+        .limit(limit);
+
+      // Map to TokenVoteRequest shape
+      return result.map(r => ({
+        id: r.id,
+        tokenId: r.tokenId,
+        tokenSymbol: r.tokenSymbol,
+        tokenName: r.tokenName,
+        tokenImage: r.tokenImage,
+        voteCount: r.voteCount,
+        priorityVoteCount: r.priorityVoteCount,
+        status: "analyzed" as const,
+        createdAt: r.createdAt,
+        analyzedAt: r.analyzedAt,
+        analysisId: r.analysisId,
+      }));
+    });
+  }
+
+  async getYesterdayTopVote(): Promise<{ request: TokenVoteRequest; voteCount: number; priorityVoteCount: number; totalScore: number } | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const { start: yesterdayStart, end: yesterdayEnd } = getESTYesterdayRange();
+
+      // First, try to get yesterday's votes from individual vote records
+      // Regular votes = 1 point, Priority votes = 2 points
+      const yesterdaysVotes = await db
+        .select({
+          tokenVoteRequestId: tokenVotes.tokenVoteRequestId,
+          totalScore: sql<number>`SUM(CASE WHEN ${tokenVotes.isPriorityVote} THEN 2 ELSE 1 END)`.as('total_score'),
+          regularVotes: sql<number>`SUM(CASE WHEN ${tokenVotes.isPriorityVote} THEN 0 ELSE 1 END)`.as('regular_votes'),
+          priorityVotes: sql<number>`SUM(CASE WHEN ${tokenVotes.isPriorityVote} THEN 1 ELSE 0 END)`.as('priority_votes'),
+        })
+        .from(tokenVotes)
+        .where(
+          and(
+            gte(tokenVotes.createdAt, yesterdayStart),
+            lt(tokenVotes.createdAt, yesterdayEnd)
+          )
+        )
+        .groupBy(tokenVotes.tokenVoteRequestId)
+        .orderBy(desc(sql`total_score`))
+        .limit(1);
+
+      // If we found individual vote records from yesterday, use them
+      if (yesterdaysVotes.length > 0) {
+        const topVote = yesterdaysVotes[0];
+        const requests = await db
+          .select()
+          .from(tokenVoteRequests)
+          .where(eq(tokenVoteRequests.id, topVote.tokenVoteRequestId))
+          .limit(1);
+
+        if (requests.length > 0) {
+          return {
+            request: requests[0],
+            voteCount: Number(topVote.regularVotes) || 0,
+            priorityVoteCount: Number(topVote.priorityVotes) || 0,
+            totalScore: Number(topVote.totalScore) || 0,
+          };
+        }
+      }
+
+      // Fallback: Get the top pending request by accumulated vote counts
+      // This handles cases where votes were added without individual vote records
+      const topPendingRequests = await db
         .select()
         .from(tokenVoteRequests)
-        .where(eq(tokenVoteRequests.status, "analyzed"))
-        .orderBy(desc(tokenVoteRequests.analyzedAt))
-        .limit(limit);
-      return result;
+        .where(eq(tokenVoteRequests.status, "pending"))
+        .orderBy(desc(sql`${tokenVoteRequests.voteCount} + (${tokenVoteRequests.priorityVoteCount} * 2)`))
+        .limit(1);
+
+      if (topPendingRequests.length === 0) {
+        return null;
+      }
+
+      const topRequest = topPendingRequests[0];
+      const voteCount = topRequest.voteCount || 0;
+      const priorityVoteCount = topRequest.priorityVoteCount || 0;
+
+      return {
+        request: topRequest,
+        voteCount,
+        priorityVoteCount,
+        totalScore: voteCount + (priorityVoteCount * 2),
+      };
     });
   }
 
@@ -1969,6 +2081,11 @@ export class MemStorage implements IStorage {
       .filter(r => r.status === "analyzed" && r.analyzedAt)
       .sort((a, b) => (b.analyzedAt?.getTime() || 0) - (a.analyzedAt?.getTime() || 0));
     return items.slice(0, limit);
+  }
+
+  async getYesterdayTopVote(): Promise<{ request: TokenVoteRequest; voteCount: number; priorityVoteCount: number; totalScore: number } | null> {
+    // In-memory storage doesn't track vote timestamps, so return null
+    return null;
   }
 
   // ==================== PERFORMANCE TRACKING METHODS (In-Memory Stubs) ====================

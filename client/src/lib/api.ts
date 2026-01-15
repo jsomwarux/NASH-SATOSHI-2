@@ -424,6 +424,19 @@ export async function getRecentlyAnalyzedRequests(limit?: number): Promise<VoteR
   return fetchApi<VoteRequest[]>(url);
 }
 
+// Yesterday's top vote result
+export interface YesterdayTopVote {
+  request: VoteRequest;
+  voteCount: number;
+  priorityVoteCount: number;
+  totalScore: number;
+}
+
+// Get yesterday's top voted token
+export async function getYesterdayTopVote(): Promise<YesterdayTopVote | null> {
+  return fetchApi<YesterdayTopVote | null>("/api/vote/yesterday-top");
+}
+
 // Submit a vote for a token
 export interface SubmitVoteRequest {
   tokenId: string;

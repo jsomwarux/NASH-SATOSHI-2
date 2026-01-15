@@ -20,6 +20,7 @@ import {
   Vote,
   TrendingUp,
   ArrowRight,
+  Trophy,
 } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { TokenSearch } from "@/components/search/TokenSearch";
@@ -48,8 +49,10 @@ import {
   adminRecoverAnalysis,
   getTopVoteRequests,
   getRecentlyAnalyzedRequests,
+  getYesterdayTopVote,
   type AdminAnalyzeRequest,
   type VoteRequest,
+  type YesterdayTopVote,
 } from "@/lib/api";
 import type { TokenSearchResult, TokenAnalysis, LeaderboardFilters } from "@shared/schema";
 
@@ -117,7 +120,6 @@ export default function Admin() {
       const token = await getAccessToken();
       if (!token) throw new Error("No auth token");
       return getAdminLeaderboard({
-        limit: 100,
         sortBy,
         order: sortOrder,
         filters: Object.keys(activeFilters).length > 0 ? activeFilters : undefined,
@@ -142,7 +144,7 @@ export default function Admin() {
     queryFn: async () => {
       const token = await getAccessToken();
       if (!token) throw new Error("No auth token");
-      return getAdminAnalyses({ limit: 100 }, token);
+      return getAdminAnalyses({}, token);
     },
     enabled: !!adminStatus?.isAdmin,
   });
@@ -158,6 +160,13 @@ export default function Admin() {
   const { data: analyzedVotes, isLoading: loadingAnalyzedVotes } = useQuery({
     queryKey: ["adminAnalyzedVotes"],
     queryFn: () => getRecentlyAnalyzedRequests(20),
+    enabled: !!adminStatus?.isAdmin,
+  });
+
+  // Get yesterday's top voted token
+  const { data: yesterdayTop, isLoading: loadingYesterdayTop } = useQuery({
+    queryKey: ["adminYesterdayTop"],
+    queryFn: () => getYesterdayTopVote(),
     enabled: !!adminStatus?.isAdmin,
   });
 
@@ -345,6 +354,80 @@ export default function Admin() {
 
           {/* Vote Queue Tab */}
           <TabsContent value="votes" className="space-y-6">
+            {/* Yesterday's Winner - Most Voted Token */}
+            <Card className="glass-card border-amber-500/30">
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Trophy className="w-5 h-5 text-amber-400" />
+                    Yesterday's Top Voted
+                  </span>
+                  <Badge variant="outline" className="font-mono border-amber-500/30 text-amber-400">
+                    Previous Day Winner
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingYesterdayTop ? (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader2 className="w-6 h-6 animate-spin text-amber-400" />
+                  </div>
+                ) : yesterdayTop ? (
+                  <div className="flex items-center gap-4 p-4 bg-amber-500/10 rounded-lg border border-amber-500/20">
+                    {yesterdayTop.request.tokenImage && (
+                      <img
+                        src={yesterdayTop.request.tokenImage}
+                        alt={yesterdayTop.request.tokenSymbol}
+                        className="w-12 h-12 rounded-full"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-lg font-bold truncate">{yesterdayTop.request.tokenName}</div>
+                      <div className="text-sm text-muted-foreground">${yesterdayTop.request.tokenSymbol.toUpperCase()}</div>
+                    </div>
+                    <div className="text-right mr-4">
+                      <div className="text-2xl font-bold text-amber-400">{yesterdayTop.totalScore}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {yesterdayTop.voteCount} + {yesterdayTop.priorityVoteCount}P votes
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {yesterdayTop.request.status === "analyzed" ? (
+                        <Link href={yesterdayTop.request.analysisId ? `/analyze/${yesterdayTop.request.analysisId}?from=admin` : "#"}>
+                          <Badge className="bg-green-500/20 text-green-400 border border-green-500/30 cursor-pointer hover:bg-green-500/30">
+                            <CheckCircle className="w-3 h-3 mr-1" />
+                            Analyzed
+                          </Badge>
+                        </Link>
+                      ) : (
+                        <Button
+                          onClick={() => {
+                            setSelectedToken({
+                              id: yesterdayTop.request.tokenId,
+                              symbol: yesterdayTop.request.tokenSymbol,
+                              name: yesterdayTop.request.tokenName,
+                              thumb: yesterdayTop.request.tokenImage || undefined,
+                              large: yesterdayTop.request.tokenImage || undefined,
+                            });
+                            setActiveTab("analyze");
+                          }}
+                          className="bg-amber-500 hover:bg-amber-600 text-black"
+                        >
+                          <Play className="w-4 h-4 mr-2" />
+                          Run Analysis
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <Trophy className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p>No votes recorded yesterday</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             <div className="grid md:grid-cols-2 gap-6">
               {/* Pending Vote Requests */}
               <Card className="glass-card">

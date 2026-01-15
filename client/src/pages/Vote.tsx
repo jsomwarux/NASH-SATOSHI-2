@@ -53,10 +53,10 @@ export default function Vote() {
     staleTime: 30000,
   });
 
-  // Get recently analyzed (show last 5 - keeps focus on recent winners)
+  // Get analyzed vote winners (ordered by vote count, top winners first)
   const { data: recentlyAnalyzed, isLoading: loadingRecent } = useQuery({
     queryKey: ["recentlyAnalyzedRequests"],
-    queryFn: () => getRecentlyAnalyzedRequests(5),
+    queryFn: () => getRecentlyAnalyzedRequests(10),
     staleTime: 60000,
   });
 
@@ -300,7 +300,7 @@ export default function Vote() {
             </Card>
           </motion.div>
 
-          {/* Recently Analyzed */}
+          {/* Previous Vote Winners */}
           <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -310,7 +310,7 @@ export default function Vote() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg font-mono">
                   <BarChart3 className="w-5 h-5 text-green-400" />
-                  Recently Analyzed
+                  Previous Vote Winners
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -345,7 +345,7 @@ export default function Vote() {
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
                     <BarChart3 className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p>No recently analyzed tokens yet.</p>
+                    <p>No vote winners analyzed yet.</p>
                   </div>
                 )}
               </CardContent>
