@@ -15,6 +15,8 @@ export interface AggregatedLeaderboardItem {
   // Latest analysis info (primary display)
   latestTier: string;
   latestNarrative: string | null;
+  latestPrimaryNarrative: string | null;
+  latestSubNarrative: string | null;
   latestRecommendation: string | null; // BUY, HOLD, AVOID
   latestAnalysisId: number;
   latestAnalysisDate: string; // ISO date string from API

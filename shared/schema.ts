@@ -241,6 +241,12 @@ export const tokenAnalyses = pgTable("token_analyses", {
   narrativeRank: text("narrative_rank"), // 1st/2nd/3rd/lower
   narrativeAcceleration: text("narrative_acceleration"),
 
+  // Sub-narrative classification (hierarchical narrative support)
+  primaryNarrative: text("primary_narrative"),           // Broad category (e.g., "AI Agents")
+  subNarrative: text("sub_narrative"),                   // Specific classification (e.g., "Agent Payments / x402")
+  subNarrativeCeiling: text("sub_narrative_ceiling"),    // Peak FDV for sub-narrative leader (e.g., "$500M")
+  subNarrativeConsensus: text("sub_narrative_consensus"), // Notes on model agreement
+
   // Project context (thesis)
   thesis: text("thesis"), // 2-3 sentence project description
 
@@ -531,6 +537,8 @@ export interface AggregatedLeaderboardItem {
   analysisCount: number;
   latestTier: string;
   latestNarrative: string | null;
+  latestPrimaryNarrative: string | null;
+  latestSubNarrative: string | null;
   latestAnalysisId: number;
   latestAnalysisDate: string; // ISO date string from API
 }
@@ -812,3 +820,65 @@ export const REFERRAL_TIERS = {
 
 // Minimum verified shares to get priority status
 export const PRIORITY_SHARE_THRESHOLD = 1;
+
+// ==================== AUTOMATED REANALYSIS QUEUE ====================
+// Queue for scheduled token reanalyses
+
+// Reanalysis priority levels
+export const REANALYSIS_PRIORITIES = {
+  TOP_25: 1,   // Weekly (every Monday)
+  TOP_50: 2,   // Bi-weekly (every 2 weeks)
+  TOP_100: 3,  // Monthly (every 4 weeks)
+} as const;
+
+export type ReanalysisPriority = typeof REANALYSIS_PRIORITIES[keyof typeof REANALYSIS_PRIORITIES];
+
+// Queue table for scheduled reanalyses
+export const reanalysisQueue = pgTable("reanalysis_queue", {
+  id: serial("id").primaryKey(),
+
+  // Token being analyzed
+  tokenId: text("token_id").notNull(),
+  tokenSymbol: text("token_symbol").notNull(),
+  tokenName: text("token_name").notNull(),
+  tokenImage: text("token_image"),
+  chain: text("chain"),
+
+  // Queue metadata
+  priority: integer("priority").notNull(), // 1=top25 (weekly), 2=top50 (bi-weekly), 3=top100 (monthly)
+  status: text("status").notNull().default("pending"), // pending, processing, completed, failed
+
+  // Scheduling
+  scheduledAt: timestamp("scheduled_at").notNull(), // When this reanalysis was scheduled to run
+  batchId: text("batch_id"), // Groups items from same scheduling run (e.g., "2026-01-20-week1")
+
+  // Processing tracking
+  startedAt: timestamp("started_at"), // When processing began
+  completedAt: timestamp("completed_at"), // When processing finished
+
+  // Gumloop integration
+  gumloopRunId: text("gumloop_run_id"), // Links to Gumloop for webhook matching
+  analysisId: integer("analysis_id"), // Links to resulting tokenAnalysis record
+
+  // Error handling
+  errorMessage: text("error_message"),
+  retryCount: integer("retry_count").default(0),
+
+  // Timestamps
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertReanalysisQueueSchema = createInsertSchema(reanalysisQueue).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const selectReanalysisQueueSchema = createSelectSchema(reanalysisQueue);
+
+export type InsertReanalysisQueue = z.infer<typeof insertReanalysisQueueSchema>;
+export type ReanalysisQueueItem = typeof reanalysisQueue.$inferSelect;
+
+// Reanalysis queue status type
+export type ReanalysisQueueStatus = "pending" | "processing" | "completed" | "failed";

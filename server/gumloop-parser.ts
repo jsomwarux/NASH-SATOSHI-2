@@ -14,6 +14,12 @@ export interface ParsedGumloopResponse {
   narrativeRank?: string; // 1st/2nd/3rd/lower
   narrativeAcceleration?: string;
 
+  // Sub-narrative classification (hierarchical narrative support)
+  primaryNarrative?: string;       // Broad category (e.g., "AI Agents")
+  subNarrative?: string;           // Specific classification (e.g., "Agent Payments / x402")
+  subNarrativeCeiling?: string;    // Peak FDV for sub-narrative leader (e.g., "$500M")
+  subNarrativeConsensus?: string;  // Notes on model agreement
+
   // Project context (NEW)
   thesis?: string;
   catalyst1?: string;
@@ -379,8 +385,48 @@ const FIELD_ALIASES: Record<string, string> = {
   'narrative': 'narrative',
   'narrative/meta': 'narrative',
   'meta': 'narrative',
-  'primary_narrative': 'narrative',
-  'primary narrative': 'narrative',
+
+  // Primary narrative variations (broad category)
+  'primary_narrative': 'primary_narrative',
+  'primary narrative': 'primary_narrative',
+  'primarynarrative': 'primary_narrative',
+  'broad_narrative': 'primary_narrative',
+  'broad narrative': 'primary_narrative',
+  'narrative_category': 'primary_narrative',
+  'narrative category': 'primary_narrative',
+  'main_narrative': 'primary_narrative',
+  'main narrative': 'primary_narrative',
+
+  // Sub-narrative variations (specific classification)
+  'sub_narrative': 'sub_narrative',
+  'sub narrative': 'sub_narrative',
+  'subnarrative': 'sub_narrative',
+  'specific_narrative': 'sub_narrative',
+  'specific narrative': 'sub_narrative',
+  'narrative_subcategory': 'sub_narrative',
+  'narrative subcategory': 'sub_narrative',
+  'detailed_narrative': 'sub_narrative',
+  'detailed narrative': 'sub_narrative',
+
+  // Sub-narrative ceiling variations (peak FDV for sub-narrative leader)
+  'sub_narrative_ceiling': 'sub_narrative_ceiling',
+  'sub narrative ceiling': 'sub_narrative_ceiling',
+  'subnarrative_ceiling': 'sub_narrative_ceiling',
+  'sub_narrative_peak_fdv': 'sub_narrative_ceiling',
+  'sub narrative peak fdv': 'sub_narrative_ceiling',
+  'narrative_ceiling': 'sub_narrative_ceiling',
+  'narrative ceiling': 'sub_narrative_ceiling',
+  'sub_ceiling': 'sub_narrative_ceiling',
+  'sub ceiling': 'sub_narrative_ceiling',
+
+  // Sub-narrative consensus variations (model agreement notes)
+  'sub_narrative_consensus': 'sub_narrative_consensus',
+  'sub narrative consensus': 'sub_narrative_consensus',
+  'subnarrative_consensus': 'sub_narrative_consensus',
+  'narrative_consensus': 'sub_narrative_consensus',
+  'narrative consensus': 'sub_narrative_consensus',
+  'model_narrative_agreement': 'sub_narrative_consensus',
+  'model narrative agreement': 'sub_narrative_consensus',
 
   // Token type variations
   'token_type': 'token_type',
@@ -2184,6 +2230,31 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
       const summaryNarrativeHeat = getNumberFromMap(summaryMap, 'narrative_heat');
       if (summaryNarrativeHeat !== null) result.narrativeHeat = summaryNarrativeHeat;
 
+      // Sub-narrative fields from OUTPUT SUMMARY
+      const summaryPrimaryNarrative = getStringFromMap(summaryMap, 'primary_narrative');
+      if (summaryPrimaryNarrative && summaryPrimaryNarrative.length > 2 && summaryPrimaryNarrative.length < 100) {
+        result.primaryNarrative = stripFieldLabelPrefix(summaryPrimaryNarrative);
+        console.log(`Parser: Got primary_narrative from OUTPUT SUMMARY: ${result.primaryNarrative}`);
+      }
+
+      const summarySubNarrative = getStringFromMap(summaryMap, 'sub_narrative');
+      if (summarySubNarrative && summarySubNarrative.length > 2 && summarySubNarrative.length < 150) {
+        result.subNarrative = stripFieldLabelPrefix(summarySubNarrative);
+        console.log(`Parser: Got sub_narrative from OUTPUT SUMMARY: ${result.subNarrative}`);
+      }
+
+      const summarySubNarrativeCeiling = getStringFromMap(summaryMap, 'sub_narrative_ceiling');
+      if (summarySubNarrativeCeiling) {
+        result.subNarrativeCeiling = stripFieldLabelPrefix(summarySubNarrativeCeiling);
+        console.log(`Parser: Got sub_narrative_ceiling from OUTPUT SUMMARY: ${result.subNarrativeCeiling}`);
+      }
+
+      const summarySubNarrativeConsensus = getStringFromMap(summaryMap, 'sub_narrative_consensus');
+      if (summarySubNarrativeConsensus) {
+        result.subNarrativeConsensus = stripFieldLabelPrefix(summarySubNarrativeConsensus);
+        console.log(`Parser: Got sub_narrative_consensus from OUTPUT SUMMARY: ${result.subNarrativeConsensus}`);
+      }
+
       const summaryPeakProx = getNumberFromMap(summaryMap, 'peak_proximity_pct');
       if (summaryPeakProx !== null) result.peakProximity = summaryPeakProx;
 
@@ -2274,6 +2345,25 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
       console.log(`Parser: Using narrativeRank "${result.narrativeRank}" as schellingPosition fallback`);
     }
 
+    // SUB-NARRATIVE FALLBACK LOGIC
+    // If sub_narrative is missing but we have narrative, use narrative as sub_narrative
+    if (!result.subNarrative && result.narrative) {
+      result.subNarrative = result.narrative;
+      console.log(`Parser: Using narrative "${result.narrative}" as subNarrative fallback`);
+    }
+
+    // If primary_narrative is missing, derive from sub_narrative (text before "/" or full value)
+    if (!result.primaryNarrative && result.subNarrative) {
+      const slashIndex = result.subNarrative.indexOf('/');
+      if (slashIndex > 0) {
+        result.primaryNarrative = result.subNarrative.substring(0, slashIndex).trim();
+        console.log(`Parser: Derived primaryNarrative "${result.primaryNarrative}" from subNarrative`);
+      } else {
+        result.primaryNarrative = result.subNarrative;
+        console.log(`Parser: Using subNarrative "${result.subNarrative}" as primaryNarrative (no "/" found)`);
+      }
+    }
+
     // Strip any remaining prefixes from key text fields (final safety net)
     if (result.narrative) {
       result.narrative = stripFieldLabelPrefix(result.narrative);
@@ -2284,8 +2374,20 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
     if (result.displaySummary) {
       result.displaySummary = stripFieldLabelPrefix(result.displaySummary);
     }
+    if (result.primaryNarrative) {
+      result.primaryNarrative = stripFieldLabelPrefix(result.primaryNarrative);
+    }
+    if (result.subNarrative) {
+      result.subNarrative = stripFieldLabelPrefix(result.subNarrative);
+    }
+    if (result.subNarrativeCeiling) {
+      result.subNarrativeCeiling = stripFieldLabelPrefix(result.subNarrativeCeiling);
+    }
+    if (result.subNarrativeConsensus) {
+      result.subNarrativeConsensus = stripFieldLabelPrefix(result.subNarrativeConsensus);
+    }
 
-    console.log(`Parser: FINAL - narrative: "${result.narrative}", thesis: "${result.thesis?.substring(0, 50)}...", schellingPosition: "${result.schellingPosition}"`);
+    console.log(`Parser: FINAL - narrative: "${result.narrative}", subNarrative: "${result.subNarrative}", primaryNarrative: "${result.primaryNarrative}", thesis: "${result.thesis?.substring(0, 50)}...", schellingPosition: "${result.schellingPosition}"`);
 
   } catch (error) {
     console.error('Error parsing Gumloop response:', error);
@@ -2432,6 +2534,27 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   const narrativeRank = getString('narrative_rank');
   if (narrativeRank) {
     result.narrativeRank = narrativeRank;
+  }
+
+  // Sub-narrative classification fields
+  const primaryNarrative = getString('primary_narrative');
+  if (primaryNarrative && primaryNarrative.length > 2) {
+    result.primaryNarrative = stripFieldLabelPrefix(primaryNarrative);
+  }
+
+  const subNarrative = getString('sub_narrative');
+  if (subNarrative && subNarrative.length > 2) {
+    result.subNarrative = stripFieldLabelPrefix(subNarrative);
+  }
+
+  const subNarrativeCeiling = getString('sub_narrative_ceiling');
+  if (subNarrativeCeiling) {
+    result.subNarrativeCeiling = stripFieldLabelPrefix(subNarrativeCeiling);
+  }
+
+  const subNarrativeConsensus = getString('sub_narrative_consensus');
+  if (subNarrativeConsensus) {
+    result.subNarrativeConsensus = stripFieldLabelPrefix(subNarrativeConsensus);
   }
 
   // Project context (NEW)
@@ -2886,6 +3009,25 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
     console.log(`parseGumloopOutputs: Using narrativeRank "${result.narrativeRank}" as schellingPosition fallback`);
   }
 
+  // SUB-NARRATIVE FALLBACK LOGIC
+  // If sub_narrative is missing but we have narrative, use narrative as sub_narrative
+  if (!result.subNarrative && result.narrative) {
+    result.subNarrative = result.narrative;
+    console.log(`parseGumloopOutputs: Using narrative "${result.narrative}" as subNarrative fallback`);
+  }
+
+  // If primary_narrative is missing, derive from sub_narrative (text before "/" or full value)
+  if (!result.primaryNarrative && result.subNarrative) {
+    const slashIndex = result.subNarrative.indexOf('/');
+    if (slashIndex > 0) {
+      result.primaryNarrative = result.subNarrative.substring(0, slashIndex).trim();
+      console.log(`parseGumloopOutputs: Derived primaryNarrative "${result.primaryNarrative}" from subNarrative`);
+    } else {
+      result.primaryNarrative = result.subNarrative;
+      console.log(`parseGumloopOutputs: Using subNarrative "${result.subNarrative}" as primaryNarrative (no "/" found)`);
+    }
+  }
+
   // Strip any remaining prefixes from key text fields (final safety net)
   if (result.narrative) {
     result.narrative = stripFieldLabelPrefix(result.narrative);
@@ -2896,8 +3038,20 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   if (result.displaySummary) {
     result.displaySummary = stripFieldLabelPrefix(result.displaySummary);
   }
+  if (result.primaryNarrative) {
+    result.primaryNarrative = stripFieldLabelPrefix(result.primaryNarrative);
+  }
+  if (result.subNarrative) {
+    result.subNarrative = stripFieldLabelPrefix(result.subNarrative);
+  }
+  if (result.subNarrativeCeiling) {
+    result.subNarrativeCeiling = stripFieldLabelPrefix(result.subNarrativeCeiling);
+  }
+  if (result.subNarrativeConsensus) {
+    result.subNarrativeConsensus = stripFieldLabelPrefix(result.subNarrativeConsensus);
+  }
 
-  console.log(`parseGumloopOutputs: FINAL - narrative: "${result.narrative}", thesis: "${result.thesis?.substring(0, 50)}...", schellingPosition: "${result.schellingPosition}"`);
+  console.log(`parseGumloopOutputs: FINAL - narrative: "${result.narrative}", subNarrative: "${result.subNarrative}", primaryNarrative: "${result.primaryNarrative}", thesis: "${result.thesis?.substring(0, 50)}...", schellingPosition: "${result.schellingPosition}"`);
 
   return result;
 }

@@ -8,6 +8,7 @@ import { createServer } from "http";
 import { initStorage } from "./storage";
 import { closeDb } from "./db";
 import { startPriceSnapshotJob, stopPriceSnapshotJob } from "./jobs/priceSnapshots";
+import { startReanalysisQueueJob, stopReanalysisQueueJob } from "./jobs/reanalysisQueue";
 
 const app = express();
 const httpServer = createServer(app);
@@ -211,6 +212,8 @@ app.use((req, res, next) => {
           startGumloopSyncPolling();
           // Start daily price snapshot collection job
           startPriceSnapshotJob();
+          // Start automated reanalysis queue job (schedules Monday midnight + worker every 3 min)
+          startReanalysisQueueJob();
         } catch (err) {
           console.error("Error during analysis recovery:", err);
         }
@@ -226,6 +229,8 @@ app.use((req, res, next) => {
     stopGumloopSyncPolling();
     // Stop price snapshot job
     stopPriceSnapshotJob();
+    // Stop reanalysis queue job
+    stopReanalysisQueueJob();
 
     // Stop accepting new connections
     httpServer.close(async () => {

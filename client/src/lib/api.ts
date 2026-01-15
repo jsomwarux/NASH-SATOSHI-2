@@ -723,3 +723,105 @@ export async function adminRecoverAnalysis(
     }
   );
 }
+
+// ==================== REANALYSIS QUEUE API ====================
+
+export interface ReanalysisQueueStats {
+  pending: number;
+  processing: number;
+  completed: number;
+  failed: number;
+}
+
+export interface ReanalysisQueueItem {
+  id: number;
+  tokenId: string;
+  tokenSymbol: string;
+  tokenName: string;
+  tokenImage: string | null;
+  chain: string | null;
+  priority: number;
+  status: "pending" | "processing" | "completed" | "failed";
+  scheduledAt: string;
+  batchId: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  gumloopRunId: string | null;
+  analysisId: number | null;
+  errorMessage: string | null;
+  retryCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function getReanalysisQueueStats(
+  authToken: string
+): Promise<ReanalysisQueueStats> {
+  return fetchApi<ReanalysisQueueStats>("/api/admin/reanalysis-queue/stats", {
+    authToken,
+  });
+}
+
+export async function getReanalysisQueueItems(
+  authToken: string,
+  options?: { status?: string; limit?: number; offset?: number }
+): Promise<{ items: ReanalysisQueueItem[]; total: number }> {
+  const params = new URLSearchParams();
+  if (options?.status) params.set("status", options.status);
+  if (options?.limit) params.set("limit", options.limit.toString());
+  if (options?.offset) params.set("offset", options.offset.toString());
+
+  const queryString = params.toString();
+  const path = `/api/admin/reanalysis-queue${queryString ? `?${queryString}` : ""}`;
+
+  return fetchApi<{ items: ReanalysisQueueItem[]; total: number }>(path, {
+    authToken,
+  });
+}
+
+export async function triggerReanalysisSchedule(
+  authToken: string
+): Promise<{ message: string }> {
+  return fetchApi<{ message: string }>("/api/admin/reanalysis-queue/schedule", {
+    method: "POST",
+    authToken,
+  });
+}
+
+export async function triggerReanalysisProcess(
+  authToken: string
+): Promise<{ message: string }> {
+  return fetchApi<{ message: string }>("/api/admin/reanalysis-queue/process", {
+    method: "POST",
+    authToken,
+  });
+}
+
+export async function retryReanalysisItem(
+  id: number,
+  authToken: string
+): Promise<{ message: string }> {
+  return fetchApi<{ message: string }>(`/api/admin/reanalysis-queue/${id}/retry`, {
+    method: "POST",
+    authToken,
+  });
+}
+
+export async function deleteReanalysisItem(
+  id: number,
+  authToken: string
+): Promise<{ message: string }> {
+  return fetchApi<{ message: string }>(`/api/admin/reanalysis-queue/${id}`, {
+    method: "DELETE",
+    authToken,
+  });
+}
+
+export async function cleanupReanalysisQueue(
+  authToken: string
+): Promise<{ message: string }> {
+  return fetchApi<{ message: string }>("/api/admin/reanalysis-queue/cleanup", {
+    method: "POST",
+    authToken,
+  });
+}

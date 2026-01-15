@@ -15,8 +15,10 @@ import {
   referralCodes,
   referralVisits,
   prioritySharers,
+  reanalysisQueue,
   SUBSCRIPTION_TIERS,
   PRIORITY_SHARE_THRESHOLD,
+  REANALYSIS_PRIORITIES,
   type UserSubscription,
   type InsertUserSubscription,
   type TokenAnalysis,
@@ -41,6 +43,9 @@ import {
   type InsertReferralVisit,
   type PrioritySharer,
   type InsertPrioritySharer,
+  type ReanalysisQueueItem,
+  type InsertReanalysisQueue,
+  type ReanalysisQueueStatus,
 } from "@shared/schema";
 
 // ==================== HELPERS ====================
@@ -272,6 +277,20 @@ export interface IStorage {
   grantPriorityStatus(userId: string): Promise<PrioritySharer>;
   isPrioritySharer(userId: string): Promise<boolean>;
   updateReferredBy(userId: string, referralCode: string): Promise<void>;
+
+  // Reanalysis queue methods
+  addToReanalysisQueue(data: InsertReanalysisQueue): Promise<ReanalysisQueueItem>;
+  addBatchToReanalysisQueue(items: InsertReanalysisQueue[]): Promise<ReanalysisQueueItem[]>;
+  getReanalysisQueueItem(id: number): Promise<ReanalysisQueueItem | null>;
+  getReanalysisQueueItemByRunId(runId: string): Promise<ReanalysisQueueItem | null>;
+  getPendingReanalysisItems(limit: number): Promise<ReanalysisQueueItem[]>;
+  getProcessingReanalysisCount(): Promise<number>;
+  updateReanalysisQueueItem(id: number, data: Partial<InsertReanalysisQueue>): Promise<ReanalysisQueueItem | null>;
+  isTokenInReanalysisQueue(tokenId: string): Promise<boolean>;
+  getTopTokensForReanalysis(count: number): Promise<{ tokenId: string; tokenSymbol: string; tokenName: string; tokenImage: string | null; chain: string | null; score: number }[]>;
+  getReanalysisQueueStats(): Promise<{ pending: number; processing: number; completed: number; failed: number }>;
+  getReanalysisQueueItems(options: { status?: ReanalysisQueueStatus; limit?: number; offset?: number }): Promise<{ items: ReanalysisQueueItem[]; total: number }>;
+  cleanupOldQueueItems(daysOld: number): Promise<number>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -782,6 +801,8 @@ export class PostgresStorage implements IStorage {
         finalScore: tokenAnalyses.finalScore,
         tier: tokenAnalyses.tier,
         narrative: tokenAnalyses.narrative,
+        primaryNarrative: tokenAnalyses.primaryNarrative,
+        subNarrative: tokenAnalyses.subNarrative,
         recommendation: tokenAnalyses.recommendation,
         id: tokenAnalyses.id,
         createdAt: tokenAnalyses.createdAt,
@@ -811,6 +832,8 @@ export class PostgresStorage implements IStorage {
       confidence: 'high' | 'medium' | 'low';
       latestTier: string;
       latestNarrative: string | null;
+      latestPrimaryNarrative: string | null;
+      latestSubNarrative: string | null;
       latestRecommendation: string | null;
       latestAnalysisId: number;
       latestAnalysisDate: string;
@@ -845,7 +868,9 @@ export class PostgresStorage implements IStorage {
           runs30d: 0,
           confidence: 'low',
           latestTier: row.tier || 'B',
-          latestNarrative: row.narrative,
+          latestNarrative: row.subNarrative || row.narrative, // Prefer subNarrative
+          latestPrimaryNarrative: row.primaryNarrative,
+          latestSubNarrative: row.subNarrative,
           latestRecommendation: row.recommendation,
           latestAnalysisId: row.id,
           latestAnalysisDate: row.createdAt.toISOString(),
@@ -1975,6 +2000,217 @@ export class PostgresStorage implements IStorage {
         .where(eq(userSubscriptions.userId, userId));
     });
   }
+
+  // ==================== REANALYSIS QUEUE METHODS ====================
+
+  async addToReanalysisQueue(data: InsertReanalysisQueue): Promise<ReanalysisQueueItem> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .insert(reanalysisQueue)
+        .values(data)
+        .returning();
+      return result[0];
+    });
+  }
+
+  async addBatchToReanalysisQueue(items: InsertReanalysisQueue[]): Promise<ReanalysisQueueItem[]> {
+    if (items.length === 0) return [];
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .insert(reanalysisQueue)
+        .values(items)
+        .returning();
+      return result;
+    });
+  }
+
+  async getReanalysisQueueItem(id: number): Promise<ReanalysisQueueItem | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(reanalysisQueue)
+        .where(eq(reanalysisQueue.id, id))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async getReanalysisQueueItemByRunId(runId: string): Promise<ReanalysisQueueItem | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(reanalysisQueue)
+        .where(eq(reanalysisQueue.gumloopRunId, runId))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async getPendingReanalysisItems(limit: number): Promise<ReanalysisQueueItem[]> {
+    return withRetry(async () => {
+      const db = getDb();
+      // Get pending items ordered by priority (lower = higher priority) then by created time
+      const result = await db
+        .select()
+        .from(reanalysisQueue)
+        .where(eq(reanalysisQueue.status, "pending"))
+        .orderBy(reanalysisQueue.priority, reanalysisQueue.createdAt)
+        .limit(limit);
+      return result;
+    });
+  }
+
+  async getProcessingReanalysisCount(): Promise<number> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select({ count: count() })
+        .from(reanalysisQueue)
+        .where(eq(reanalysisQueue.status, "processing"));
+      return result[0]?.count || 0;
+    });
+  }
+
+  async updateReanalysisQueueItem(id: number, data: Partial<InsertReanalysisQueue>): Promise<ReanalysisQueueItem | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .update(reanalysisQueue)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(reanalysisQueue.id, id))
+        .returning();
+      return result[0] || null;
+    });
+  }
+
+  async isTokenInReanalysisQueue(tokenId: string): Promise<boolean> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select({ id: reanalysisQueue.id })
+        .from(reanalysisQueue)
+        .where(and(
+          eq(reanalysisQueue.tokenId, tokenId),
+          or(
+            eq(reanalysisQueue.status, "pending"),
+            eq(reanalysisQueue.status, "processing")
+          )
+        ))
+        .limit(1);
+      return result.length > 0;
+    });
+  }
+
+  async getTopTokensForReanalysis(count: number): Promise<{ tokenId: string; tokenSymbol: string; tokenName: string; tokenImage: string | null; chain: string | null; score: number }[]> {
+    return withRetry(async () => {
+      const db = getDb();
+      // Get tokens with most recent completed analysis, ordered by score
+      // Uses a subquery to get the latest analysis per token
+      const result = await db.execute(sql`
+        WITH latest_analyses AS (
+          SELECT DISTINCT ON (token_id)
+            token_id,
+            token_symbol,
+            token_name,
+            token_image,
+            chain,
+            CAST(final_score AS FLOAT) as score
+          FROM token_analyses
+          WHERE status = 'completed'
+          ORDER BY token_id, created_at DESC
+        )
+        SELECT * FROM latest_analyses
+        ORDER BY score DESC
+        LIMIT ${count}
+      `);
+      return (result.rows as any[]).map(row => ({
+        tokenId: row.token_id,
+        tokenSymbol: row.token_symbol,
+        tokenName: row.token_name,
+        tokenImage: row.token_image,
+        chain: row.chain,
+        score: row.score,
+      }));
+    });
+  }
+
+  async getReanalysisQueueStats(): Promise<{ pending: number; processing: number; completed: number; failed: number }> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select({
+          status: reanalysisQueue.status,
+          count: count(),
+        })
+        .from(reanalysisQueue)
+        .groupBy(reanalysisQueue.status);
+
+      const stats = { pending: 0, processing: 0, completed: 0, failed: 0 };
+      for (const row of result) {
+        if (row.status in stats) {
+          stats[row.status as keyof typeof stats] = row.count;
+        }
+      }
+      return stats;
+    });
+  }
+
+  async getReanalysisQueueItems(options: { status?: ReanalysisQueueStatus; limit?: number; offset?: number }): Promise<{ items: ReanalysisQueueItem[]; total: number }> {
+    const { status, limit = 50, offset = 0 } = options;
+    return withRetry(async () => {
+      const db = getDb();
+
+      const conditions = [];
+      if (status) {
+        conditions.push(eq(reanalysisQueue.status, status));
+      }
+
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const [items, totalResult] = await Promise.all([
+        db
+          .select()
+          .from(reanalysisQueue)
+          .where(whereClause)
+          .orderBy(desc(reanalysisQueue.createdAt))
+          .limit(limit)
+          .offset(offset),
+        db
+          .select({ count: count() })
+          .from(reanalysisQueue)
+          .where(whereClause),
+      ]);
+
+      return {
+        items,
+        total: totalResult[0]?.count || 0,
+      };
+    });
+  }
+
+  async cleanupOldQueueItems(daysOld: number): Promise<number> {
+    return withRetry(async () => {
+      const db = getDb();
+      const cutoffDate = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000);
+
+      const result = await db
+        .delete(reanalysisQueue)
+        .where(and(
+          or(
+            eq(reanalysisQueue.status, "completed"),
+            eq(reanalysisQueue.status, "failed")
+          ),
+          lt(reanalysisQueue.createdAt, cutoffDate)
+        ))
+        .returning({ id: reanalysisQueue.id });
+
+      return result.length;
+    });
+  }
 }
 
 // In-memory fallback for when DATABASE_URL is not set
@@ -2489,6 +2725,56 @@ export class MemStorage implements IStorage {
 
   async updateReferredBy(_userId: string, _referralCode: string): Promise<void> {
     // No-op in memory
+  }
+
+  // ==================== REANALYSIS QUEUE METHODS (In-Memory Stubs) ====================
+
+  async addToReanalysisQueue(_data: InsertReanalysisQueue): Promise<ReanalysisQueueItem> {
+    throw new Error("Reanalysis queue not available in memory storage");
+  }
+
+  async addBatchToReanalysisQueue(_items: InsertReanalysisQueue[]): Promise<ReanalysisQueueItem[]> {
+    return [];
+  }
+
+  async getReanalysisQueueItem(_id: number): Promise<ReanalysisQueueItem | null> {
+    return null;
+  }
+
+  async getReanalysisQueueItemByRunId(_runId: string): Promise<ReanalysisQueueItem | null> {
+    return null;
+  }
+
+  async getPendingReanalysisItems(_limit: number): Promise<ReanalysisQueueItem[]> {
+    return [];
+  }
+
+  async getProcessingReanalysisCount(): Promise<number> {
+    return 0;
+  }
+
+  async updateReanalysisQueueItem(_id: number, _data: Partial<InsertReanalysisQueue>): Promise<ReanalysisQueueItem | null> {
+    return null;
+  }
+
+  async isTokenInReanalysisQueue(_tokenId: string): Promise<boolean> {
+    return false;
+  }
+
+  async getTopTokensForReanalysis(_count: number): Promise<{ tokenId: string; tokenSymbol: string; tokenName: string; tokenImage: string | null; chain: string | null; score: number }[]> {
+    return [];
+  }
+
+  async getReanalysisQueueStats(): Promise<{ pending: number; processing: number; completed: number; failed: number }> {
+    return { pending: 0, processing: 0, completed: 0, failed: 0 };
+  }
+
+  async getReanalysisQueueItems(_options: { status?: ReanalysisQueueStatus; limit?: number; offset?: number }): Promise<{ items: ReanalysisQueueItem[]; total: number }> {
+    return { items: [], total: 0 };
+  }
+
+  async cleanupOldQueueItems(_daysOld: number): Promise<number> {
+    return 0;
   }
 }
 

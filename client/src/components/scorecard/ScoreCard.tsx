@@ -1353,10 +1353,18 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
               <Flame className="w-4 h-4" />
               <span className="text-xs uppercase tracking-wide">{isMemecoin ? 'Meta' : 'Narrative'}</span>
             </div>
-            {/* Narrative text with proper containment */}
+            {/* Primary Narrative breadcrumb - show if different from sub-narrative */}
+            {analysis.primaryNarrative &&
+             analysis.primaryNarrative !== analysis.subNarrative &&
+             analysis.primaryNarrative !== analysis.narrative && (
+              <div className="text-xs text-muted-foreground mb-1 font-mono">
+                {analysis.primaryNarrative}
+              </div>
+            )}
+            {/* Sub-Narrative (or narrative) text with proper containment */}
             <div className="w-full overflow-hidden">
               <ExpandableText
-                text={analysis.narrative || (isMemecoin ? "Meme/Social Token" : "Utility/Infrastructure")}
+                text={analysis.subNarrative || analysis.narrative || (isMemecoin ? "Meme/Social Token" : "Utility/Infrastructure")}
                 className="text-sm font-medium"
               />
             </div>
@@ -1978,6 +1986,32 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                         <span className="font-mono text-primary font-medium">
                           {analysis.realisticPeakFdv || '?'}
                         </span>
+                      </div>
+                    )}
+
+                    {/* Sub-Narrative Ceiling - only show if different from realisticPeakFdv */}
+                    {analysis.subNarrativeCeiling &&
+                     analysis.subNarrativeCeiling !== analysis.realisticPeakFdv && (
+                      <div className="mt-2 flex items-center gap-2 text-xs">
+                        <span className="text-muted-foreground">Sub-Narrative Leader Ceiling:</span>
+                        <span className="font-mono text-cyan-400 font-medium">
+                          {analysis.subNarrativeCeiling}
+                        </span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <HelpCircle className="w-3 h-3 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-[280px] cyber-card border-primary/20">
+                            <p className="text-xs">
+                              Estimated peak FDV for the leading token in this sub-narrative category.
+                              {analysis.subNarrativeConsensus && (
+                                <span className="block mt-1 text-muted-foreground">
+                                  {analysis.subNarrativeConsensus}
+                                </span>
+                              )}
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
                       </div>
                     )}
                   </div>

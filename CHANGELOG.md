@@ -4,7 +4,133 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-15 - Priority Queue & Referral System Implementation (Latest)
+## Session: 2026-01-15 - Automated Reanalysis Queue System (Latest)
+
+### Summary
+Implemented an automated reanalysis system that schedules token reanalyses on a weekly basis. Top-ranked tokens get reanalyzed more frequently (weekly/bi-weekly/monthly) and the system respects Gumloop's 4 concurrent run limit. Includes queue management with admin visibility.
+
+### Changes Made
+
+#### 1. Database Schema (shared/schema.ts)
+- Added `reanalysisQueue` table with fields for token info, priority, status, scheduling, Gumloop integration, and error handling
+- Added `REANALYSIS_PRIORITIES` constants for priority levels (TOP_25=1, TOP_50=2, TOP_100=3)
+- Added `ReanalysisQueueItem` and related types
+
+#### 2. Storage Methods (server/storage.ts)
+- Added 12 new queue methods to `IStorage` interface and `PostgresStorage`:
+  - `addToReanalysisQueue`, `addBatchToReanalysisQueue` - Add items to queue
+  - `getReanalysisQueueItem`, `getReanalysisQueueItemByRunId` - Retrieve items
+  - `getPendingReanalysisItems`, `getProcessingReanalysisCount` - Query queue state
+  - `updateReanalysisQueueItem` - Update item status
+  - `isTokenInReanalysisQueue` - Check for duplicates
+  - `getTopTokensForReanalysis` - Get tokens ranked by score for scheduling
+  - `getReanalysisQueueStats`, `getReanalysisQueueItems` - Admin visibility
+  - `cleanupOldQueueItems` - Maintenance
+- Added MemStorage stubs for all methods
+
+#### 3. Reanalysis Queue Job (server/jobs/reanalysisQueue.ts) - NEW FILE
+- **Weekly Scheduler**: Runs Monday at midnight EST
+  - Week 1: Top 100 tokens (monthly)
+  - Week 2: Top 25 tokens (weekly only)
+  - Week 3: Top 50 tokens (bi-weekly)
+  - Week 4: Top 25 tokens (weekly only)
+- **Queue Worker**: Runs every 3 minutes
+  - Checks processing count (max 4 concurrent)
+  - Picks pending items by priority
+  - Triggers Gumloop analysis
+  - Handles retries and stuck items (30-minute timeout)
+- **Completion Handler**: `onAnalysisComplete(analysisId, success)` for webhook integration
+- Manual triggers for testing: `triggerManualSchedule()`, `triggerManualProcess()`
+
+#### 4. Webhook Handler Integration (server/routes.ts)
+- Added import for `onAnalysisComplete`
+- Hooked completion callback into `processGumloopCompletion()` for both success and failure cases
+- Queue items are automatically marked complete/failed and next batch is triggered
+
+#### 5. Admin API Endpoints (server/routes.ts)
+- `GET /api/admin/reanalysis-queue/stats` - Queue statistics
+- `GET /api/admin/reanalysis-queue` - List queue items with filters
+- `POST /api/admin/reanalysis-queue/schedule` - Manual schedule trigger
+- `POST /api/admin/reanalysis-queue/process` - Manual process trigger
+- `POST /api/admin/reanalysis-queue/:id/retry` - Retry failed item
+- `DELETE /api/admin/reanalysis-queue/:id` - Remove queue item
+- `POST /api/admin/reanalysis-queue/cleanup` - Clean old items
+
+#### 6. Server Startup (server/index.ts)
+- Added import and start call for `startReanalysisQueueJob()`
+- Added `stopReanalysisQueueJob()` to graceful shutdown
+
+#### 7. Client API Functions (client/src/lib/api.ts)
+- Added `ReanalysisQueueStats` and `ReanalysisQueueItem` interfaces
+- Added 7 API functions for queue management:
+  - `getReanalysisQueueStats`, `getReanalysisQueueItems`
+  - `triggerReanalysisSchedule`, `triggerReanalysisProcess`
+  - `retryReanalysisItem`, `deleteReanalysisItem`, `cleanupReanalysisQueue`
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `shared/schema.ts` | Added `reanalysisQueue` table and types |
+| `server/storage.ts` | Added 12 queue methods to interface, PostgresStorage, and MemStorage |
+| `server/jobs/reanalysisQueue.ts` | NEW - Full scheduler and worker implementation |
+| `server/routes.ts` | Added import, webhook hooks, and 7 admin endpoints |
+| `server/index.ts` | Added job startup and shutdown |
+| `client/src/lib/api.ts` | Added interfaces and 7 API functions |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### Current State
+- Automated reanalysis queue system fully implemented
+- Weekly scheduler runs Monday at midnight EST
+- Queue worker processes items every 3 minutes
+- Respects 4 concurrent Gumloop run limit
+- Admin API available for monitoring and manual control
+- Rankings page automatically reflects updated scores (no changes needed - uses same database)
+
+### Database Migration Needed
+Run the following to create the new table:
+```sql
+-- Using Drizzle
+npx drizzle-kit push
+
+-- Or manually:
+CREATE TABLE IF NOT EXISTS reanalysis_queue (
+  id SERIAL PRIMARY KEY,
+  token_id TEXT NOT NULL,
+  token_symbol TEXT NOT NULL,
+  token_name TEXT NOT NULL,
+  token_image TEXT,
+  chain TEXT,
+  priority INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  scheduled_at TIMESTAMP NOT NULL,
+  batch_id TEXT,
+  started_at TIMESTAMP,
+  completed_at TIMESTAMP,
+  gumloop_run_id TEXT,
+  analysis_id INTEGER,
+  error_message TEXT,
+  retry_count INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX idx_reanalysis_queue_status ON reanalysis_queue(status);
+CREATE INDEX idx_reanalysis_queue_token ON reanalysis_queue(token_id);
+CREATE INDEX idx_reanalysis_queue_gumloop ON reanalysis_queue(gumloop_run_id);
+```
+
+### How It Works
+1. **Monday midnight EST**: Scheduler determines which tokens to reanalyze based on week of month
+2. **Every 3 minutes**: Worker checks capacity (max 4 concurrent) and triggers pending analyses
+3. **Asynchronously**: Gumloop processes analyses and sends webhooks when complete
+4. **On webhook**: Handler saves results, updates queue status, triggers next batch
+5. **Automatically**: Rankings page shows updated scores (queries same token_analyses table)
+
+---
+
+## Session: 2026-01-15 - Priority Queue & Referral System Implementation
 
 ### Summary
 Implemented a comprehensive sharing and referral system to incentivize users to share the app and invite others during the beta period. Includes Priority Analysis Queue for sharers and a referral tracking system with future reward tiers.

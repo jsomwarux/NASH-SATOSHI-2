@@ -330,6 +330,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
           <TableBody>
             {items.map((item, index) => {
               const cleanedNarrative = cleanNarrative(item.latestNarrative);
+              const cleanedPrimaryNarrative = cleanNarrative(item.latestPrimaryNarrative);
               const gated = isGated(index);
               const isFirstGatedRow = gated && accessLimit !== null && index === accessLimit;
 
@@ -631,7 +632,11 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                             <span className="text-sm truncate max-w-[180px]">{cleanedNarrative}</span>
                           </div>
                         </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-[250px] cyber-card border-primary/20">
+                        <TooltipContent side="top" className="max-w-[300px] cyber-card border-primary/20">
+                          {/* Show primary narrative as breadcrumb if different from sub-narrative */}
+                          {cleanedPrimaryNarrative && cleanedPrimaryNarrative !== cleanedNarrative && (
+                            <p className="text-xs text-muted-foreground mb-1">{cleanedPrimaryNarrative}</p>
+                          )}
                           <p className="text-sm font-mono">{cleanedNarrative}</p>
                         </TooltipContent>
                       </Tooltip>

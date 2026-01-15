@@ -17,6 +17,7 @@ import {
   verifyAndCompleteCreditPurchase,
 } from "./stripe";
 import { CREDIT_PACKS, SUBSCRIPTION_TIERS, type CreditPackId, type SubscriptionTierId } from "@shared/schema";
+import { onAnalysisComplete } from "./jobs/reanalysisQueue";
 
 // ==================== BETA MODE ====================
 // When true, all users get full access (beta_free tier) bypassing paywalls
@@ -1404,6 +1405,129 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== REANALYSIS QUEUE ADMIN ====================
+
+  // Get queue statistics
+  app.get("/api/admin/reanalysis-queue/stats", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const stats = await storage.getReanalysisQueueStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Error getting reanalysis queue stats:", error);
+      res.status(500).json({ message: "Failed to get queue stats" });
+    }
+  });
+
+  // Get queue items
+  app.get("/api/admin/reanalysis-queue", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const status = req.query.status as "pending" | "processing" | "completed" | "failed" | undefined;
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = parseInt(req.query.offset as string) || 0;
+
+      const result = await storage.getReanalysisQueueItems({ status, limit, offset });
+      res.json(result);
+    } catch (error) {
+      console.error("Error getting reanalysis queue items:", error);
+      res.status(500).json({ message: "Failed to get queue items" });
+    }
+  });
+
+  // Manually trigger schedule (add tokens to queue)
+  app.post("/api/admin/reanalysis-queue/schedule", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { triggerManualSchedule } = await import("./jobs/reanalysisQueue");
+      await triggerManualSchedule();
+      res.json({ message: "Schedule triggered successfully" });
+    } catch (error) {
+      console.error("Error triggering reanalysis schedule:", error);
+      res.status(500).json({ message: "Failed to trigger schedule" });
+    }
+  });
+
+  // Manually process queue (run pending items)
+  app.post("/api/admin/reanalysis-queue/process", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { triggerManualProcess } = await import("./jobs/reanalysisQueue");
+      await triggerManualProcess();
+      res.json({ message: "Queue processing triggered" });
+    } catch (error) {
+      console.error("Error triggering queue processing:", error);
+      res.status(500).json({ message: "Failed to trigger processing" });
+    }
+  });
+
+  // Retry a failed queue item
+  app.post("/api/admin/reanalysis-queue/:id/retry", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        res.status(400).json({ message: "Invalid queue item ID" });
+        return;
+      }
+
+      const item = await storage.getReanalysisQueueItem(id);
+      if (!item) {
+        res.status(404).json({ message: "Queue item not found" });
+        return;
+      }
+
+      if (item.status !== "failed") {
+        res.status(400).json({ message: "Can only retry failed items" });
+        return;
+      }
+
+      await storage.updateReanalysisQueueItem(id, {
+        status: "pending",
+        startedAt: null,
+        gumloopRunId: null,
+        analysisId: null,
+        errorMessage: null,
+        retryCount: 0,
+      });
+
+      res.json({ message: "Item reset for retry" });
+    } catch (error) {
+      console.error("Error retrying queue item:", error);
+      res.status(500).json({ message: "Failed to retry item" });
+    }
+  });
+
+  // Delete a queue item
+  app.delete("/api/admin/reanalysis-queue/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        res.status(400).json({ message: "Invalid queue item ID" });
+        return;
+      }
+
+      // For now, we'll mark it as failed to remove from processing
+      // In a full implementation, you'd want to actually delete it
+      await storage.updateReanalysisQueueItem(id, {
+        status: "failed",
+        errorMessage: "Deleted by admin",
+      });
+
+      res.json({ message: "Item deleted" });
+    } catch (error) {
+      console.error("Error deleting queue item:", error);
+      res.status(500).json({ message: "Failed to delete item" });
+    }
+  });
+
+  // Cleanup old items
+  app.post("/api/admin/reanalysis-queue/cleanup", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const { cleanupOldItems } = await import("./jobs/reanalysisQueue");
+      await cleanupOldItems();
+      res.json({ message: "Cleanup completed" });
+    } catch (error) {
+      console.error("Error cleaning up queue:", error);
+      res.status(500).json({ message: "Failed to cleanup queue" });
+    }
+  });
+
   // ==================== FILTER OPTIONS (Public) ====================
   app.get("/api/filters", async (_req: Request, res: Response) => {
     try {
@@ -2399,6 +2523,12 @@ async function processGumloopCompletion(
       errorMessage: "Analysis completed but returned empty or invalid output.",
       displaySummary: "Analysis completed but no valid output was returned.",
     });
+    // Notify reanalysis queue of failure
+    try {
+      await onAnalysisComplete(analysisId, false);
+    } catch (err) {
+      console.warn(`Analysis ${analysisId}: Failed to notify reanalysis queue:`, err);
+    }
     return;
   }
 
@@ -2551,9 +2681,14 @@ async function processGumloopCompletion(
     tokenType: parsed.tokenType || 'UTILITY',
     phase: parsed.phase,
     phaseName: parsed.phaseName,
-    narrative: parsed.narrative,
+    narrative: parsed.subNarrative || parsed.narrative, // Prefer sub_narrative for backward compat
     narrativeHeat: parsed.narrativeHeat?.toString(),
     narrativeRank: parsed.narrativeRank,
+    // Sub-narrative classification fields
+    primaryNarrative: parsed.primaryNarrative,
+    subNarrative: parsed.subNarrative,
+    subNarrativeCeiling: parsed.subNarrativeCeiling,
+    subNarrativeConsensus: parsed.subNarrativeConsensus,
     peakProximity: parsed.peakProximity?.toString(),
     winningSide: parsed.winningSide,
     consensusLevel: parsed.consensusLevel,
@@ -2662,6 +2797,13 @@ async function processGumloopCompletion(
   }
 
   console.log(`Analysis ${analysisId}: Completed successfully`);
+
+  // Notify reanalysis queue if this was a queued item
+  try {
+    await onAnalysisComplete(analysisId, true);
+  } catch (err) {
+    console.warn(`Analysis ${analysisId}: Failed to notify reanalysis queue:`, err);
+  }
 }
 
 // Helper function to charge user on successful analysis completion
