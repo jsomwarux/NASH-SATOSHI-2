@@ -4,7 +4,94 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-15 - Yesterday's Top Voted Token in Admin Vote Queue (Latest)
+## Session: 2026-01-15 - Priority Queue & Referral System Implementation (Latest)
+
+### Summary
+Implemented a comprehensive sharing and referral system to incentivize users to share the app and invite others during the beta period. Includes Priority Analysis Queue for sharers and a referral tracking system with future reward tiers.
+
+### Changes Made
+
+#### 1. Database Schema (shared/schema.ts)
+- Added `userShares` table - tracks user shares with verification status
+- Added `referralCodes` table - unique referral codes per user
+- Added `referralVisits` table - tracks anonymous visits from referral links
+- Added `prioritySharers` table - users who have earned priority status
+- Added `REFERRAL_TIERS` constant with bronze/silver/gold/platinum tiers
+- Added `PRIORITY_SHARE_THRESHOLD` constant (1 verified share)
+
+#### 2. Storage Methods (server/storage.ts)
+- Added sharing methods: `createShare`, `getUserShares`, `getVerifiedShareCount`, `verifyShare`
+- Added referral methods: `getReferralCode`, `createReferralCode`, `trackReferralVisit`, `convertReferralVisit`, `getReferralStats`
+- Added priority methods: `getPrioritySharer`, `grantPriorityStatus`, `isPrioritySharer`, `updateReferredBy`
+
+#### 3. API Endpoints (server/routes.ts)
+- `POST /api/share/twitter` - Generate Twitter share intent and track the share
+- `POST /api/share/verify` - Verify a share was posted (honor system)
+- `GET /api/share/stats` - Get user's sharing statistics
+- `GET /api/referral/code` - Get or create user's unique referral code
+- `POST /api/referral/track` - Track anonymous referral visits
+- `POST /api/referral/convert` - Convert referral when visitor signs up
+- `GET /api/referral/stats` - Get detailed referral statistics with tier progress
+- `GET /api/priority-status` - Check if user has priority sharer status
+
+#### 4. Priority Queue Integration
+- Updated `/api/vote` endpoint to check `isPrioritySharer` status
+- Priority sharers' votes count as priority votes (2x weight in queue)
+- Updated `/api/vote/status` to include `isPrioritySharer` flag
+
+#### 5. Frontend - Referral Tracking (client/src/hooks/useReferralTracking.ts)
+- New hook that handles `?ref=` URL parameter detection
+- Stores referral code in localStorage with timestamp
+- Tracks visits via API
+- Auto-converts referral when user signs up
+
+#### 6. Frontend - Account Page Share & Earn Section
+- Priority Queue status display with verified share progress
+- Twitter share button with verification flow
+- Referral link display with copy button
+- Referral stats: clicks, returning visitors, sign-ups
+- Referral tier progress display (bronze/silver/gold/platinum)
+
+#### 7. Frontend - ShareModal Updates (client/src/components/scorecard/ShareModal.tsx)
+- Integrated share tracking for scorecard shares
+- Added "Verify & Get Priority Status" button after sharing
+- Shows priority unlock success message
+
+#### 8. Client API Functions (client/src/lib/api.ts)
+- Added all sharing and referral API functions with TypeScript types
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `shared/schema.ts` | Added 4 new tables and constants for sharing/referrals |
+| `server/storage.ts` | Added ~20 new methods for sharing, referrals, and priority status |
+| `server/routes.ts` | Added 8 new API endpoints, updated vote endpoints |
+| `client/src/lib/api.ts` | Added sharing and referral API functions |
+| `client/src/hooks/useReferralTracking.ts` | New hook for referral URL tracking |
+| `client/src/components/common/Layout.tsx` | Added referral tracking hook |
+| `client/src/pages/Account.tsx` | Added Share & Earn section |
+| `client/src/components/scorecard/ShareModal.tsx` | Added share tracking and verification |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### Current State
+- Priority queue system fully implemented
+- Users can share on Twitter and verify to get priority status
+- Referral tracking works for both anonymous visitors and sign-ups
+- Referral tier progress displayed on account page
+- All existing functionality preserved
+
+### Database Migration Needed
+Run the following SQL to create the new tables:
+```sql
+-- Run Drizzle push to create tables
+npx drizzle-kit push
+```
+
+---
+
+## Session: 2026-01-15 - Yesterday's Top Voted Token in Admin Vote Queue
 
 ### Summary
 Added the ability to see and run analysis on the top voted token from the previous day in the admin voting queue page. This helps admins identify which token won the daily voting and quickly run analysis on it.

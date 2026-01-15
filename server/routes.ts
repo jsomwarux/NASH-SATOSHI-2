@@ -1720,7 +1720,9 @@ export async function registerRoutes(
       const tierConfig = SUBSCRIPTION_TIERS[effectiveTier] || SUBSCRIPTION_TIERS.free;
 
       const maxVotes = tierConfig.votesPerDay;
-      const hasPriorityVotes = tierConfig.priorityVotes;
+      const hasPriorityFromTier = tierConfig.priorityVotes;
+      const isPrioritySharer = await storage.isPrioritySharer(userId);
+      const hasPriorityVotes = hasPriorityFromTier || isPrioritySharer;
       const votesUsed = await storage.getUserDailyVoteCount(userId, today);
       const votedRequestIds = await storage.getUserVotedRequestIds(userId);
 
@@ -1729,6 +1731,7 @@ export async function registerRoutes(
         votesUsed,
         maxVotes,
         hasPriorityVotes,
+        isPrioritySharer,
         resetTime: getNextMidnightEST(),
         votedRequestIds,
         authenticated: true,
@@ -1875,7 +1878,10 @@ export async function registerRoutes(
       }
 
       // Determine if this is a priority vote
-      const isPriorityVote = tierConfig.priorityVotes;
+      // Priority votes come from: 1) Premium tier users, OR 2) Verified sharers
+      const isPriorityFromTier = tierConfig.priorityVotes;
+      const isPrioritySharer = await storage.isPrioritySharer(userId);
+      const isPriorityVote = isPriorityFromTier || isPrioritySharer;
 
       // Create the vote
       await storage.createVote({
@@ -1894,9 +1900,12 @@ export async function registerRoutes(
       const updatedRequest = await storage.getVoteRequestByTokenId(sanitizedTokenId);
 
       res.json({
-        message: "Vote recorded successfully",
+        message: isPrioritySharer && !isPriorityFromTier
+          ? "Priority vote recorded! (Sharer bonus)"
+          : "Vote recorded successfully",
         voteRequest: updatedRequest,
         isPriorityVote,
+        isPrioritySharer,
         votesRemaining: maxVotes - votesUsed - 1,
       });
     } catch (error) {
@@ -1992,6 +2001,257 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching feedback:", error);
       res.status(500).json({ message: "Failed to fetch feedback" });
+    }
+  });
+
+  // ==================== SHARING & REFERRAL ENDPOINTS ====================
+
+  // Generate a Twitter share intent URL and track the share
+  app.post("/api/share/twitter", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const { text, url, tokenSymbol, analysisId } = req.body;
+
+      if (!text) {
+        return res.status(400).json({ message: "Share text is required" });
+      }
+
+      // Create Twitter intent URL
+      const params = new URLSearchParams();
+      params.set("text", text);
+      if (url) params.set("url", url);
+
+      const twitterIntentUrl = `https://twitter.com/intent/tweet?${params.toString()}`;
+
+      // Track the share attempt
+      const share = await storage.createShare({
+        userId,
+        shareType: tokenSymbol ? "scorecard_twitter" : "twitter",
+        shareUrl: url,
+        tokenSymbol: tokenSymbol || null,
+        analysisId: analysisId || null,
+        verified: false,
+      });
+
+      res.json({
+        shareId: share.id,
+        intentUrl: twitterIntentUrl,
+        message: "Share tracked. Click the intent URL to post on Twitter.",
+      });
+    } catch (error) {
+      console.error("Error creating share:", error);
+      res.status(500).json({ message: "Failed to create share" });
+    }
+  });
+
+  // Verify a share was made (honor system - user clicks to confirm)
+  app.post("/api/share/verify", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const { shareId } = req.body;
+
+      if (!shareId) {
+        return res.status(400).json({ message: "Share ID is required" });
+      }
+
+      // Get the share and verify ownership
+      const shares = await storage.getUserShares(userId);
+      const share = shares.find(s => s.id === shareId);
+
+      if (!share) {
+        return res.status(404).json({ message: "Share not found" });
+      }
+
+      if (share.verified) {
+        return res.status(400).json({ message: "Share already verified" });
+      }
+
+      // Verify the share
+      const verifiedShare = await storage.verifyShare(shareId);
+
+      // Check if user now has priority status
+      const isPriority = await storage.isPrioritySharer(userId);
+
+      res.json({
+        verified: true,
+        isPrioritySharer: isPriority,
+        message: isPriority
+          ? "Share verified! You now have Priority status for the analysis queue."
+          : "Share verified! Keep sharing to earn Priority status.",
+      });
+    } catch (error) {
+      console.error("Error verifying share:", error);
+      res.status(500).json({ message: "Failed to verify share" });
+    }
+  });
+
+  // Get user's sharing stats
+  app.get("/api/share/stats", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!;
+
+      const shares = await storage.getUserShares(userId);
+      const verifiedCount = await storage.getVerifiedShareCount(userId);
+      const isPriority = await storage.isPrioritySharer(userId);
+
+      res.json({
+        totalShares: shares.length,
+        verifiedShares: verifiedCount,
+        isPrioritySharer: isPriority,
+        sharesNeededForPriority: Math.max(0, 1 - verifiedCount), // Need 1 verified share
+      });
+    } catch (error) {
+      console.error("Error fetching share stats:", error);
+      res.status(500).json({ message: "Failed to fetch share stats" });
+    }
+  });
+
+  // Get or create user's referral code
+  app.get("/api/referral/code", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!;
+
+      // Check if user already has a referral code
+      let refCode = await storage.getReferralCode(userId);
+
+      if (!refCode) {
+        // Generate a unique code (first 8 chars of a hash)
+        const crypto = await import("crypto");
+        const code = crypto
+          .createHash("sha256")
+          .update(userId + Date.now().toString())
+          .digest("hex")
+          .substring(0, 8);
+
+        refCode = await storage.createReferralCode(userId, code);
+      }
+
+      // Get referral stats
+      const stats = await storage.getReferralStats(userId);
+
+      res.json({
+        code: refCode.code,
+        referralUrl: `${req.protocol}://${req.get("host")}?ref=${refCode.code}`,
+        stats: {
+          totalVisits: stats.visits,
+          conversions: stats.conversions,
+          returningVisitors: stats.returningVisitors,
+        },
+      });
+    } catch (error) {
+      console.error("Error getting referral code:", error);
+      res.status(500).json({ message: "Failed to get referral code" });
+    }
+  });
+
+  // Track a referral visit (called from frontend when ?ref= param is present)
+  app.post("/api/referral/track", async (req: Request, res: Response) => {
+    try {
+      const { referralCode, visitorId } = req.body;
+
+      if (!referralCode || !visitorId) {
+        return res.status(400).json({ message: "Referral code and visitor ID are required" });
+      }
+
+      // Verify the referral code exists
+      const refCodeRecord = await storage.getReferralCodeByCode(referralCode);
+      if (!refCodeRecord) {
+        return res.status(404).json({ message: "Invalid referral code" });
+      }
+
+      // Check if this visitor already visited
+      const existingVisit = await storage.getReferralVisitByVisitorId(visitorId);
+      if (existingVisit) {
+        // Just update the visit count (visitor returned)
+        return res.json({ tracked: true, returning: true });
+      }
+
+      // Hash the IP for privacy
+      const crypto = await import("crypto");
+      const ip = req.ip || req.socket.remoteAddress || "";
+      const ipHash = crypto.createHash("sha256").update(ip).digest("hex").substring(0, 16);
+
+      // Track the visit
+      await storage.trackReferralVisit({
+        referralCode,
+        visitorId,
+        ipHash,
+        userAgent: req.get("user-agent") || null,
+        landingPage: req.get("referer") || null,
+      });
+
+      res.json({ tracked: true, returning: false });
+    } catch (error) {
+      console.error("Error tracking referral visit:", error);
+      res.status(500).json({ message: "Failed to track referral" });
+    }
+  });
+
+  // Convert a referral (called during sign-up if visitor has referral in localStorage)
+  app.post("/api/referral/convert", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const { visitorId, referralCode } = req.body;
+
+      if (!visitorId || !referralCode) {
+        return res.status(400).json({ message: "Visitor ID and referral code are required" });
+      }
+
+      // Convert the referral visit
+      await storage.convertReferralVisit(visitorId, userId);
+
+      // Update user's subscription with referral info
+      await storage.updateReferredBy(userId, referralCode);
+
+      res.json({ converted: true, message: "Referral attributed successfully" });
+    } catch (error) {
+      console.error("Error converting referral:", error);
+      res.status(500).json({ message: "Failed to convert referral" });
+    }
+  });
+
+  // Get user's referral stats
+  app.get("/api/referral/stats", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const stats = await storage.getReferralStats(userId);
+      const refCode = await storage.getReferralCode(userId);
+
+      res.json({
+        hasReferralCode: !!refCode,
+        code: refCode?.code || null,
+        totalVisits: stats.visits,
+        conversions: stats.conversions,
+        returningVisitors: stats.returningVisitors,
+        // Referral tier progress
+        tierProgress: {
+          bronze: { required: 3, current: stats.conversions, unlocked: stats.conversions >= 3 },
+          silver: { required: 10, current: stats.conversions, unlocked: stats.conversions >= 10 },
+          gold: { required: 25, current: stats.conversions, unlocked: stats.conversions >= 25 },
+          platinum: { required: 50, current: stats.conversions, unlocked: stats.conversions >= 50 },
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching referral stats:", error);
+      res.status(500).json({ message: "Failed to fetch referral stats" });
+    }
+  });
+
+  // Check if user is a priority sharer
+  app.get("/api/priority-status", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const isPriority = await storage.isPrioritySharer(userId);
+      const prioritySharer = await storage.getPrioritySharer(userId);
+
+      res.json({
+        isPrioritySharer: isPriority,
+        verifiedShareCount: prioritySharer?.verifiedShareCount || 0,
+        priorityGrantedAt: prioritySharer?.priorityGrantedAt || null,
+      });
+    } catch (error) {
+      console.error("Error checking priority status:", error);
+      res.status(500).json({ message: "Failed to check priority status" });
     }
   });
 

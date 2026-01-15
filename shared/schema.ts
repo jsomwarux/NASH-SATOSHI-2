@@ -723,3 +723,92 @@ export const selectUserFeedbackSchema = createSelectSchema(userFeedback);
 
 export type InsertUserFeedback = z.infer<typeof insertUserFeedbackSchema>;
 export type UserFeedback = typeof userFeedback.$inferSelect;
+
+// ==================== SHARING & REFERRALS ====================
+// Track user shares for priority queue access
+
+export const userShares = pgTable("user_shares", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  shareType: text("share_type").notNull(), // 'twitter', 'scorecard_twitter'
+  shareUrl: text("share_url"), // The URL that was shared
+  tokenSymbol: text("token_symbol"), // If sharing a specific scorecard
+  analysisId: integer("analysis_id"), // If sharing a specific analysis
+  verified: boolean("verified").default(false),
+  verifiedAt: timestamp("verified_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertUserShareSchema = createInsertSchema(userShares).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertUserShare = z.infer<typeof insertUserShareSchema>;
+export type UserShare = typeof userShares.$inferSelect;
+
+// Referral codes - unique codes for each user
+export const referralCodes = pgTable("referral_codes", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().unique(),
+  code: text("code").notNull().unique(), // e.g., "abc123"
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertReferralCodeSchema = createInsertSchema(referralCodes).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertReferralCode = z.infer<typeof insertReferralCodeSchema>;
+export type ReferralCode = typeof referralCodes.$inferSelect;
+
+// Track anonymous visits from referral links
+export const referralVisits = pgTable("referral_visits", {
+  id: serial("id").primaryKey(),
+  referralCode: text("referral_code").notNull(),
+  visitorId: text("visitor_id").notNull(), // Anonymous ID from localStorage
+  ipHash: text("ip_hash"), // Hashed IP for deduplication
+  userAgent: text("user_agent"),
+  landingPage: text("landing_page"),
+  convertedUserId: text("converted_user_id"), // Set when visitor signs up
+  convertedAt: timestamp("converted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertReferralVisitSchema = createInsertSchema(referralVisits).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertReferralVisit = z.infer<typeof insertReferralVisitSchema>;
+export type ReferralVisit = typeof referralVisits.$inferSelect;
+
+// Priority sharer status - users who have verified shares get priority
+export const prioritySharers = pgTable("priority_sharers", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().unique(),
+  verifiedShareCount: integer("verified_share_count").default(0),
+  priorityGrantedAt: timestamp("priority_granted_at").defaultNow().notNull(),
+  priorityExpiresAt: timestamp("priority_expires_at"), // Optional expiry
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertPrioritySharerSchema = createInsertSchema(prioritySharers).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPrioritySharer = z.infer<typeof insertPrioritySharerSchema>;
+export type PrioritySharer = typeof prioritySharers.$inferSelect;
+
+// Referral tier thresholds and rewards (for future paid tiers)
+export const REFERRAL_TIERS = {
+  bronze: { minReferrals: 3, reward: "1 month free Pro" },
+  silver: { minReferrals: 10, reward: "3 months free Pro" },
+  gold: { minReferrals: 25, reward: "6 months free Pro" },
+  platinum: { minReferrals: 50, reward: "1 year free Pro" },
+} as const;
+
+// Minimum verified shares to get priority status
+export const PRIORITY_SHARE_THRESHOLD = 1;

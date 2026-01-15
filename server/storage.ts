@@ -11,7 +11,12 @@ import {
   priceSnapshots,
   performanceMetrics,
   userFeedback,
+  userShares,
+  referralCodes,
+  referralVisits,
+  prioritySharers,
   SUBSCRIPTION_TIERS,
+  PRIORITY_SHARE_THRESHOLD,
   type UserSubscription,
   type InsertUserSubscription,
   type TokenAnalysis,
@@ -28,6 +33,14 @@ import {
   type InsertPerformanceMetrics,
   type UserFeedback,
   type InsertUserFeedback,
+  type UserShare,
+  type InsertUserShare,
+  type ReferralCode,
+  type InsertReferralCode,
+  type ReferralVisit,
+  type InsertReferralVisit,
+  type PrioritySharer,
+  type InsertPrioritySharer,
 } from "@shared/schema";
 
 // ==================== HELPERS ====================
@@ -237,6 +250,28 @@ export interface IStorage {
   // Feedback methods
   createFeedback(data: InsertUserFeedback): Promise<UserFeedback>;
   getFeedback(limit?: number): Promise<UserFeedback[]>;
+
+  // Sharing methods
+  createShare(data: InsertUserShare): Promise<UserShare>;
+  getUserShares(userId: string): Promise<UserShare[]>;
+  getVerifiedShareCount(userId: string): Promise<number>;
+  verifyShare(shareId: number): Promise<UserShare | null>;
+
+  // Referral methods
+  getReferralCode(userId: string): Promise<ReferralCode | null>;
+  createReferralCode(userId: string, code: string): Promise<ReferralCode>;
+  getReferralCodeByCode(code: string): Promise<ReferralCode | null>;
+  trackReferralVisit(data: InsertReferralVisit): Promise<ReferralVisit>;
+  getReferralVisitByVisitorId(visitorId: string): Promise<ReferralVisit | null>;
+  convertReferralVisit(visitorId: string, userId: string): Promise<void>;
+  getReferralStats(userId: string): Promise<{ visits: number; conversions: number; returningVisitors: number }>;
+  getUserByReferralCode(code: string): Promise<string | null>;
+
+  // Priority sharer methods
+  getPrioritySharer(userId: string): Promise<PrioritySharer | null>;
+  grantPriorityStatus(userId: string): Promise<PrioritySharer>;
+  isPrioritySharer(userId: string): Promise<boolean>;
+  updateReferredBy(userId: string, referralCode: string): Promise<void>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -1692,6 +1727,254 @@ export class PostgresStorage implements IStorage {
         .limit(limit);
     });
   }
+
+  // ==================== SHARING METHODS ====================
+
+  async createShare(data: InsertUserShare): Promise<UserShare> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .insert(userShares)
+        .values(data as any)
+        .returning();
+      return result[0];
+    });
+  }
+
+  async getUserShares(userId: string): Promise<UserShare[]> {
+    return withRetry(async () => {
+      const db = getDb();
+      return db
+        .select()
+        .from(userShares)
+        .where(eq(userShares.userId, userId))
+        .orderBy(desc(userShares.createdAt));
+    });
+  }
+
+  async getVerifiedShareCount(userId: string): Promise<number> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select({ count: count() })
+        .from(userShares)
+        .where(and(eq(userShares.userId, userId), eq(userShares.verified, true)));
+      return result[0]?.count || 0;
+    });
+  }
+
+  async verifyShare(shareId: number): Promise<UserShare | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .update(userShares)
+        .set({ verified: true, verifiedAt: new Date() })
+        .where(eq(userShares.id, shareId))
+        .returning();
+
+      if (result[0]) {
+        // Check if user now qualifies for priority status
+        const verifiedCount = await this.getVerifiedShareCount(result[0].userId);
+        if (verifiedCount >= PRIORITY_SHARE_THRESHOLD) {
+          await this.grantPriorityStatus(result[0].userId);
+        }
+      }
+
+      return result[0] || null;
+    });
+  }
+
+  // ==================== REFERRAL METHODS ====================
+
+  async getReferralCode(userId: string): Promise<ReferralCode | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(referralCodes)
+        .where(eq(referralCodes.userId, userId))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async createReferralCode(userId: string, code: string): Promise<ReferralCode> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .insert(referralCodes)
+        .values({ userId, code })
+        .returning();
+      return result[0];
+    });
+  }
+
+  async getReferralCodeByCode(code: string): Promise<ReferralCode | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(referralCodes)
+        .where(eq(referralCodes.code, code))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async trackReferralVisit(data: InsertReferralVisit): Promise<ReferralVisit> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .insert(referralVisits)
+        .values(data as any)
+        .returning();
+      return result[0];
+    });
+  }
+
+  async getReferralVisitByVisitorId(visitorId: string): Promise<ReferralVisit | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(referralVisits)
+        .where(eq(referralVisits.visitorId, visitorId))
+        .orderBy(desc(referralVisits.createdAt))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async convertReferralVisit(visitorId: string, userId: string): Promise<void> {
+    return withRetry(async () => {
+      const db = getDb();
+      await db
+        .update(referralVisits)
+        .set({ convertedUserId: userId, convertedAt: new Date() })
+        .where(and(
+          eq(referralVisits.visitorId, visitorId),
+          sql`${referralVisits.convertedUserId} IS NULL`
+        ));
+    });
+  }
+
+  async getReferralStats(userId: string): Promise<{ visits: number; conversions: number; returningVisitors: number }> {
+    return withRetry(async () => {
+      const db = getDb();
+
+      // Get user's referral code
+      const refCode = await this.getReferralCode(userId);
+      if (!refCode) {
+        return { visits: 0, conversions: 0, returningVisitors: 0 };
+      }
+
+      // Count total visits
+      const visitsResult = await db
+        .select({ count: count() })
+        .from(referralVisits)
+        .where(eq(referralVisits.referralCode, refCode.code));
+
+      // Count conversions
+      const conversionsResult = await db
+        .select({ count: count() })
+        .from(referralVisits)
+        .where(and(
+          eq(referralVisits.referralCode, refCode.code),
+          isNotNull(referralVisits.convertedUserId)
+        ));
+
+      // Count unique visitors who visited more than once
+      const returningResult = await db
+        .select({ visitorId: referralVisits.visitorId, visitCount: count() })
+        .from(referralVisits)
+        .where(eq(referralVisits.referralCode, refCode.code))
+        .groupBy(referralVisits.visitorId)
+        .having(sql`count(*) > 1`);
+
+      return {
+        visits: visitsResult[0]?.count || 0,
+        conversions: conversionsResult[0]?.count || 0,
+        returningVisitors: returningResult.length,
+      };
+    });
+  }
+
+  async getUserByReferralCode(code: string): Promise<string | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select({ userId: referralCodes.userId })
+        .from(referralCodes)
+        .where(eq(referralCodes.code, code))
+        .limit(1);
+      return result[0]?.userId || null;
+    });
+  }
+
+  // ==================== PRIORITY SHARER METHODS ====================
+
+  async getPrioritySharer(userId: string): Promise<PrioritySharer | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(prioritySharers)
+        .where(eq(prioritySharers.userId, userId))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async grantPriorityStatus(userId: string): Promise<PrioritySharer> {
+    return withRetry(async () => {
+      const db = getDb();
+      const verifiedCount = await this.getVerifiedShareCount(userId);
+
+      // Upsert priority status
+      const result = await db
+        .insert(prioritySharers)
+        .values({
+          userId,
+          verifiedShareCount: verifiedCount,
+          priorityGrantedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: [prioritySharers.userId],
+          set: { verifiedShareCount: verifiedCount },
+        })
+        .returning();
+
+      return result[0];
+    });
+  }
+
+  async isPrioritySharer(userId: string): Promise<boolean> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(prioritySharers)
+        .where(and(
+          eq(prioritySharers.userId, userId),
+          or(
+            sql`${prioritySharers.priorityExpiresAt} IS NULL`,
+            gte(prioritySharers.priorityExpiresAt, new Date())
+          )
+        ))
+        .limit(1);
+      return result.length > 0;
+    });
+  }
+
+  async updateReferredBy(userId: string, referralCode: string): Promise<void> {
+    return withRetry(async () => {
+      const db = getDb();
+      await db
+        .update(userSubscriptions)
+        .set({ referredBy: referralCode })
+        .where(eq(userSubscriptions.userId, userId));
+    });
+  }
 }
 
 // In-memory fallback for when DATABASE_URL is not set
@@ -2136,6 +2419,76 @@ export class MemStorage implements IStorage {
 
   async getFeedback(_limit?: number): Promise<UserFeedback[]> {
     return [];
+  }
+
+  // ==================== SHARING METHODS (In-Memory Stubs) ====================
+
+  async createShare(_data: InsertUserShare): Promise<UserShare> {
+    throw new Error("Sharing not available in memory storage");
+  }
+
+  async getUserShares(_userId: string): Promise<UserShare[]> {
+    return [];
+  }
+
+  async getVerifiedShareCount(_userId: string): Promise<number> {
+    return 0;
+  }
+
+  async verifyShare(_shareId: number): Promise<UserShare | null> {
+    return null;
+  }
+
+  // ==================== REFERRAL METHODS (In-Memory Stubs) ====================
+
+  async getReferralCode(_userId: string): Promise<ReferralCode | null> {
+    return null;
+  }
+
+  async createReferralCode(_userId: string, _code: string): Promise<ReferralCode> {
+    throw new Error("Referrals not available in memory storage");
+  }
+
+  async getReferralCodeByCode(_code: string): Promise<ReferralCode | null> {
+    return null;
+  }
+
+  async trackReferralVisit(_data: InsertReferralVisit): Promise<ReferralVisit> {
+    throw new Error("Referrals not available in memory storage");
+  }
+
+  async getReferralVisitByVisitorId(_visitorId: string): Promise<ReferralVisit | null> {
+    return null;
+  }
+
+  async convertReferralVisit(_visitorId: string, _userId: string): Promise<void> {
+    // No-op in memory
+  }
+
+  async getReferralStats(_userId: string): Promise<{ visits: number; conversions: number; returningVisitors: number }> {
+    return { visits: 0, conversions: 0, returningVisitors: 0 };
+  }
+
+  async getUserByReferralCode(_code: string): Promise<string | null> {
+    return null;
+  }
+
+  // ==================== PRIORITY SHARER METHODS (In-Memory Stubs) ====================
+
+  async getPrioritySharer(_userId: string): Promise<PrioritySharer | null> {
+    return null;
+  }
+
+  async grantPriorityStatus(_userId: string): Promise<PrioritySharer> {
+    throw new Error("Priority status not available in memory storage");
+  }
+
+  async isPrioritySharer(_userId: string): Promise<boolean> {
+    return false;
+  }
+
+  async updateReferredBy(_userId: string, _referralCode: string): Promise<void> {
+    // No-op in memory
   }
 }
 

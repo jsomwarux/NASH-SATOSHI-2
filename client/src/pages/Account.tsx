@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -16,6 +17,12 @@ import {
   LogOut,
   RefreshCw,
   Rocket,
+  Share2,
+  Users,
+  Copy,
+  Twitter,
+  Gift,
+  Zap,
 } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { Button } from "@/components/ui/button";
@@ -28,16 +35,123 @@ import {
   useCreateBillingPortal,
   useSyncSubscription,
 } from "@/hooks/useSubscription";
-import { SUBSCRIPTION_TIERS } from "@shared/schema";
+import {
+  getReferralCode,
+  getReferralStats,
+  getShareStats,
+  createTwitterShare,
+  verifyShare,
+} from "@/lib/api";
+import { SUBSCRIPTION_TIERS, REFERRAL_TIERS } from "@shared/schema";
 
 export default function Account() {
-  const { user, signOut, isConfigured } = useAuth();
+  const { user, signOut, isConfigured, getAccessToken } = useAuth();
   const [location, navigate] = useLocation();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { data: status, isLoading } = useSubscriptionStatus();
   const createPortal = useCreateBillingPortal();
   const syncSubscription = useSyncSubscription();
   const [syncProcessed, setSyncProcessed] = useState(false);
+  const [pendingShareId, setPendingShareId] = useState<number | null>(null);
+
+  // Fetch referral code and stats
+  const { data: referralData, isLoading: loadingReferral } = useQuery({
+    queryKey: ["referralCode"],
+    queryFn: async () => {
+      const token = await getAccessToken();
+      if (!token) return null;
+      return getReferralCode(token);
+    },
+    enabled: !!user,
+  });
+
+  const { data: referralStats } = useQuery({
+    queryKey: ["referralStats"],
+    queryFn: async () => {
+      const token = await getAccessToken();
+      if (!token) return null;
+      return getReferralStats(token);
+    },
+    enabled: !!user,
+  });
+
+  const { data: shareStats } = useQuery({
+    queryKey: ["shareStats"],
+    queryFn: async () => {
+      const token = await getAccessToken();
+      if (!token) return null;
+      return getShareStats(token);
+    },
+    enabled: !!user,
+  });
+
+  // Handle share to Twitter - must open window synchronously to avoid popup blocker
+  const handleShareToTwitter = async () => {
+    const shareText = `The first-ever crypto game theory rankings. It has GPT-5.2, Opus 4.5, Gemini 3 Pro, and Grok 4 work together and cross check each other with a focus on game theory positioning to produce an overall score for each coin. Check it out.`;
+    const shareUrl = referralData?.referralUrl || window.location.origin;
+
+    // Build Twitter intent URL
+    const params = new URLSearchParams();
+    params.set("text", shareText);
+    params.set("url", shareUrl);
+    const twitterIntentUrl = `https://twitter.com/intent/tweet?${params.toString()}`;
+
+    // Open Twitter window FIRST (synchronously) to avoid popup blocker
+    window.open(twitterIntentUrl, "_blank", "width=550,height=420");
+
+    // Then track the share in the background
+    try {
+      const token = await getAccessToken();
+      if (token) {
+        const result = await createTwitterShare({ text: shareText, url: shareUrl }, token);
+        setPendingShareId(result.shareId);
+      }
+    } catch (error) {
+      console.error("Failed to track share:", error);
+    }
+  };
+
+  // Verify share mutation
+  const verifyMutation = useMutation({
+    mutationFn: async (shareId: number) => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Not authenticated");
+      return verifyShare(shareId, token);
+    },
+    onSuccess: (data) => {
+      setPendingShareId(null);
+      queryClient.invalidateQueries({ queryKey: ["shareStats"] });
+      toast({
+        title: data.isPrioritySharer ? "Priority Status Unlocked!" : "Share Verified!",
+        description: data.message,
+      });
+    },
+  });
+
+  const copyReferralLink = () => {
+    if (referralData?.referralUrl) {
+      navigator.clipboard.writeText(referralData.referralUrl);
+      toast({
+        title: "Copied!",
+        description: "Referral link copied to clipboard",
+      });
+    }
+  };
+
+  // Handle hash scrolling on mount (for deep links like #priority-queue)
+  useEffect(() => {
+    if (window.location.hash) {
+      const id = window.location.hash.slice(1);
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        const element = document.getElementById(id);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth" });
+        }
+      }, 100);
+    }
+  }, []);
 
   // Sync subscription when returning from billing portal
   useEffect(() => {
@@ -410,11 +524,199 @@ export default function Account() {
           )}
         </motion.div>
 
-        {/* Sign Out */}
+        {/* Share & Earn Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
+          className="mb-6 p-6 rounded-lg border border-purple-500/20 bg-purple-500/5 cyber-card"
+        >
+          <h2 className="text-sm font-mono font-bold text-purple-400 tracking-wider mb-4 flex items-center gap-2">
+            <Share2 className="w-4 h-4" />
+            SHARE & EARN
+          </h2>
+
+          <div className="space-y-6">
+            {/* Priority Status */}
+            <div id="priority-queue" className="p-4 rounded bg-black/30 border border-white/5 scroll-mt-24">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-amber-400" />
+                  <span className="font-mono font-bold">Priority Analysis Queue</span>
+                </div>
+                {shareStats?.isPrioritySharer ? (
+                  <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">
+                    <CheckCircle className="w-3 h-3 mr-1" />
+                    ACTIVE
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    LOCKED
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground font-mono mb-3">
+                {shareStats?.isPrioritySharer
+                  ? "Your votes count as Priority votes - your token requests jump the queue!"
+                  : "Share on Twitter to unlock Priority status. Your votes will count 2x in the analysis queue."}
+              </p>
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center justify-between text-xs font-mono mb-1">
+                    <span className="text-muted-foreground">Verified Shares</span>
+                    <span>{shareStats?.verifiedShares || 0} / 1</span>
+                  </div>
+                  <Progress
+                    value={Math.min(100, (shareStats?.verifiedShares || 0) * 100)}
+                    className="h-2"
+                  />
+                </div>
+                {!shareStats?.isPrioritySharer && (
+                  <Button
+                    size="sm"
+                    onClick={handleShareToTwitter}
+                    className="bg-[#1DA1F2] hover:bg-[#1a8cd8] font-mono"
+                  >
+                    <Twitter className="w-4 h-4 mr-2" />
+                    Share
+                  </Button>
+                )}
+              </div>
+              {pendingShareId && (
+                <div className="mt-3 p-3 rounded bg-blue-500/10 border border-blue-500/30">
+                  <p className="text-xs text-blue-400 font-mono mb-2">
+                    Posted your tweet? Click below to verify and unlock Priority status:
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => verifyMutation.mutate(pendingShareId)}
+                    disabled={verifyMutation.isPending}
+                    className="border-blue-500/30 text-blue-400"
+                  >
+                    {verifyMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    ) : (
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                    )}
+                    I Posted It
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Referral Program */}
+            <div id="referral-program" className="p-4 rounded bg-black/30 border border-white/5 scroll-mt-24">
+              <div className="flex items-center gap-2 mb-3">
+                <Users className="w-5 h-5 text-green-400" />
+                <span className="font-mono font-bold">Referral Program</span>
+                <Badge variant="outline" className="text-xs text-muted-foreground ml-auto">
+                  BETA
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground font-mono mb-4">
+                Invite friends and earn rewards when we launch paid tiers. Track your referrals below.
+              </p>
+
+              {/* Referral Link */}
+              {loadingReferral ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : referralData ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={referralData.referralUrl}
+                      className="flex-1 px-3 py-2 bg-black/50 border border-white/10 rounded font-mono text-xs text-muted-foreground"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={copyReferralLink}
+                      className="font-mono"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                  </div>
+
+                  {/* Referral Stats */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="text-center p-3 rounded bg-black/30">
+                      <p className="text-lg font-bold font-mono text-green-400">
+                        {referralData.stats.totalVisits}
+                      </p>
+                      <p className="text-xs text-muted-foreground font-mono">Clicks</p>
+                    </div>
+                    <div className="text-center p-3 rounded bg-black/30">
+                      <p className="text-lg font-bold font-mono text-blue-400">
+                        {referralData.stats.returningVisitors}
+                      </p>
+                      <p className="text-xs text-muted-foreground font-mono">Returning</p>
+                    </div>
+                    <div className="text-center p-3 rounded bg-black/30">
+                      <p className="text-lg font-bold font-mono text-purple-400">
+                        {referralData.stats.conversions}
+                      </p>
+                      <p className="text-xs text-muted-foreground font-mono">Sign-ups</p>
+                    </div>
+                  </div>
+
+                  {/* Tier Progress */}
+                  {referralStats && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground font-mono">REWARD TIERS (when paid plans launch)</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {Object.entries(REFERRAL_TIERS).map(([tier, config]) => {
+                          const progress = referralStats.tierProgress[tier as keyof typeof REFERRAL_TIERS];
+                          const isUnlocked = progress?.unlocked;
+                          return (
+                            <div
+                              key={tier}
+                              className={`p-2 rounded border ${
+                                isUnlocked
+                                  ? "border-green-500/30 bg-green-500/10"
+                                  : "border-white/5 bg-black/30"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-mono font-bold capitalize">
+                                  {tier}
+                                </span>
+                                {isUnlocked && (
+                                  <CheckCircle className="w-3 h-3 text-green-400" />
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                {config.minReferrals} referrals = {config.reward}
+                              </p>
+                              <Progress
+                                value={Math.min(100, (progress?.current || 0) / config.minReferrals * 100)}
+                                className="h-1 mt-1"
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground font-mono text-center py-4">
+                  Unable to load referral data
+                </p>
+              )}
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Sign Out */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
           className="p-6 rounded-lg border border-red-500/20 bg-red-500/5"
         >
           <div className="flex items-center justify-between">

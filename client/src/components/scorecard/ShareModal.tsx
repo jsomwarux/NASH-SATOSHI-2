@@ -1,9 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { toPng } from "html-to-image";
-import { X, Download, Share2, Copy, Check, Loader2 } from "lucide-react";
+import { X, Download, Share2, Copy, Check, Loader2, Zap } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { ShareCard } from "./ShareCard";
+import { useAuth } from "@/contexts/AuthContext";
+import { createTwitterShare, verifyShare } from "@/lib/api";
 import type { TokenAnalysis } from "@shared/schema";
 import { formatScore } from "@/lib/utils";
 
@@ -19,7 +21,12 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageUploaded, setImageUploaded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [pendingShareId, setPendingShareId] = useState<number | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [shareVerified, setShareVerified] = useState(false);
+  const [isPriorityUnlocked, setIsPriorityUnlocked] = useState(false);
   const shareCardRef = useRef<HTMLDivElement>(null);
+  const { user, getAccessToken } = useAuth();
 
   const finalScore = parseFloat(analysis.finalScore as string) || 0;
   const shareUrl = `${window.location.origin}/analyze/${analysis.id}`;
@@ -175,10 +182,51 @@ Analyzed by 4-LLM ensemble for unbiased scoring 🤖
 
 ${shareUrl}`;
 
+    // Track the share for priority queue (if user is authenticated)
+    if (user) {
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          const shareResult = await createTwitterShare({
+            text: shareText,
+            url: shareUrl,
+            tokenSymbol: analysis.tokenSymbol,
+            analysisId: analysis.id,
+          }, token);
+          setPendingShareId(shareResult.shareId);
+        }
+      } catch (error) {
+        console.error("Failed to track share:", error);
+      }
+    }
+
     // Open Twitter intent
     const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
     window.open(twitterUrl, "_blank", "width=550,height=420");
-  }, [analysis, finalScore, shareUrl, imageUploaded, imageUrl, uploadImage, generateImage]);
+  }, [analysis, finalScore, shareUrl, imageUploaded, imageUrl, uploadImage, generateImage, user, getAccessToken]);
+
+  // Verify share was posted
+  const handleVerifyShare = useCallback(async () => {
+    if (!pendingShareId) return;
+
+    setIsVerifying(true);
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+
+      const result = await verifyShare(pendingShareId, token);
+      setShareVerified(true);
+      setPendingShareId(null);
+
+      if (result.isPrioritySharer) {
+        setIsPriorityUnlocked(true);
+      }
+    } catch (error) {
+      console.error("Failed to verify share:", error);
+    } finally {
+      setIsVerifying(false);
+    }
+  }, [pendingShareId, getAccessToken]);
 
   // Generate image when modal opens
   useEffect(() => {
@@ -296,11 +344,43 @@ ${shareUrl}`;
             </div>
           </div>
 
-          {/* Footer */}
-          <div className="px-6 py-3 bg-secondary/30 border-t border-primary/10 text-center">
-            <p className="text-xs text-muted-foreground">
-              Share your analysis and help others make informed decisions
-            </p>
+          {/* Footer - Share Verification */}
+          <div className="px-6 py-4 bg-secondary/30 border-t border-primary/10">
+            {isPriorityUnlocked ? (
+              <div className="flex items-center justify-center gap-2 text-amber-400">
+                <Zap className="w-4 h-4" />
+                <span className="text-sm font-medium">Priority Queue Unlocked! Your votes now count 2x</span>
+              </div>
+            ) : shareVerified ? (
+              <div className="flex items-center justify-center gap-2 text-green-400">
+                <Check className="w-4 h-4" />
+                <span className="text-sm">Share verified! Thanks for spreading the word</span>
+              </div>
+            ) : pendingShareId && user ? (
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                <span className="text-xs text-muted-foreground">Posted your tweet?</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleVerifyShare}
+                  disabled={isVerifying}
+                  className="border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+                >
+                  {isVerifying ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  ) : (
+                    <Zap className="w-4 h-4 mr-2" />
+                  )}
+                  Verify & Get Priority Status
+                </Button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground text-center">
+                {user
+                  ? "Share to X to unlock Priority Queue status for your votes"
+                  : "Share your analysis and help others make informed decisions"}
+              </p>
+            )}
           </div>
         </motion.div>
       </motion.div>

@@ -6,6 +6,7 @@ import { CyberBackground } from "../CyberBackground";
 import { useAnalysisTracker } from "@/contexts/AnalysisTrackerContext";
 import { useSubscriptionStatus, useCreateBillingPortal } from "@/hooks/useSubscription";
 import { useAuth } from "@/contexts/AuthContext";
+import { useReferralTracking } from "@/hooks/useReferralTracking";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { SupportModal } from "@/components/common/SupportModal";
 import { FeedbackModal } from "@/components/common/FeedbackModal";
@@ -32,6 +33,9 @@ export function Layout({ children }: LayoutProps) {
   const { data: subscriptionStatus } = useSubscriptionStatus();
   const { user, signOut, isConfigured } = useAuth();
   const createPortal = useCreateBillingPortal();
+
+  // Track referrals from URL parameters
+  useReferralTracking();
 
   const handleSignOut = async () => {
     await signOut();

@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database, Crown, Flame, Award, Sparkles, Lock, TrendingUp, Rocket } from "lucide-react";
+import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database, Crown, Flame, Award, Sparkles, Lock, TrendingUp, Rocket, Zap, Users } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { LeaderboardTable } from "@/components/leaderboard/LeaderboardTable";
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,11 @@ export default function Leaderboard() {
   // Beta banner dismissal state (persisted to localStorage)
   const [showBetaBanner, setShowBetaBanner] = useState(() => {
     return localStorage.getItem('beta-banner-dismissed') !== 'true';
+  });
+
+  // Promo banner dismissal state (persisted to localStorage)
+  const [showPromoBanner, setShowPromoBanner] = useState(() => {
+    return localStorage.getItem('promo-banner-dismissed') !== 'true';
   });
 
   // Build filter options with search
@@ -347,6 +352,36 @@ export default function Leaderboard() {
                 <div className="text-lg font-bold font-mono text-muted-foreground">—</div>
               )}
             </div>
+          </motion.div>
+        )}
+
+        {/* Priority Queue & Referral Promo - Dismissible */}
+        {showPromoBanner && (
+          <motion.div
+            initial={{ opacity: 0, y: -5 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 flex items-center justify-between gap-3 px-4 py-2.5 rounded border border-purple-500/20 bg-purple-500/5"
+          >
+            <div className="flex items-center gap-4 text-xs font-mono flex-wrap">
+              <Link href="/account#priority-queue" className="flex items-center gap-1.5 text-amber-400 hover:text-amber-300 transition-colors">
+                <Zap className="w-3.5 h-3.5" />
+                <span>Share to get <span className="font-bold">2x vote weight</span></span>
+              </Link>
+              <span className="text-muted-foreground/30 hidden sm:inline">|</span>
+              <Link href="/account#referral-program" className="flex items-center gap-1.5 text-green-400 hover:text-green-300 transition-colors">
+                <Users className="w-3.5 h-3.5" />
+                <span>Refer friends for <span className="font-bold">free Pro access</span></span>
+              </Link>
+            </div>
+            <button
+              onClick={() => {
+                setShowPromoBanner(false);
+                localStorage.setItem('promo-banner-dismissed', 'true');
+              }}
+              className="text-muted-foreground hover:text-white flex-shrink-0 p-1"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </motion.div>
         )}
 

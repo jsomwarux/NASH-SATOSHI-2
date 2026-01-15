@@ -463,6 +463,126 @@ export async function submitVote(
   });
 }
 
+// ==================== SHARING & REFERRAL API ====================
+
+// Share types
+export interface ShareTwitterRequest {
+  text: string;
+  url?: string;
+  tokenSymbol?: string;
+  analysisId?: number;
+}
+
+export interface ShareTwitterResponse {
+  shareId: number;
+  intentUrl: string;
+  message: string;
+}
+
+export async function createTwitterShare(
+  data: ShareTwitterRequest,
+  authToken: string
+): Promise<ShareTwitterResponse> {
+  return fetchApi<ShareTwitterResponse>("/api/share/twitter", {
+    method: "POST",
+    body: JSON.stringify(data),
+    authToken,
+  });
+}
+
+export interface VerifyShareResponse {
+  verified: boolean;
+  isPrioritySharer: boolean;
+  message: string;
+}
+
+export async function verifyShare(
+  shareId: number,
+  authToken: string
+): Promise<VerifyShareResponse> {
+  return fetchApi<VerifyShareResponse>("/api/share/verify", {
+    method: "POST",
+    body: JSON.stringify({ shareId }),
+    authToken,
+  });
+}
+
+export interface ShareStats {
+  totalShares: number;
+  verifiedShares: number;
+  isPrioritySharer: boolean;
+  sharesNeededForPriority: number;
+}
+
+export async function getShareStats(authToken: string): Promise<ShareStats> {
+  return fetchApi<ShareStats>("/api/share/stats", { authToken });
+}
+
+// Referral types
+export interface ReferralCodeResponse {
+  code: string;
+  referralUrl: string;
+  stats: {
+    totalVisits: number;
+    conversions: number;
+    returningVisitors: number;
+  };
+}
+
+export async function getReferralCode(authToken: string): Promise<ReferralCodeResponse> {
+  return fetchApi<ReferralCodeResponse>("/api/referral/code", { authToken });
+}
+
+export interface ReferralStats {
+  hasReferralCode: boolean;
+  code: string | null;
+  totalVisits: number;
+  conversions: number;
+  returningVisitors: number;
+  tierProgress: {
+    bronze: { required: number; current: number; unlocked: boolean };
+    silver: { required: number; current: number; unlocked: boolean };
+    gold: { required: number; current: number; unlocked: boolean };
+    platinum: { required: number; current: number; unlocked: boolean };
+  };
+}
+
+export async function getReferralStats(authToken: string): Promise<ReferralStats> {
+  return fetchApi<ReferralStats>("/api/referral/stats", { authToken });
+}
+
+export async function trackReferralVisit(
+  referralCode: string,
+  visitorId: string
+): Promise<{ tracked: boolean; returning: boolean }> {
+  return fetchApi<{ tracked: boolean; returning: boolean }>("/api/referral/track", {
+    method: "POST",
+    body: JSON.stringify({ referralCode, visitorId }),
+  });
+}
+
+export async function convertReferral(
+  visitorId: string,
+  referralCode: string,
+  authToken: string
+): Promise<{ converted: boolean; message: string }> {
+  return fetchApi<{ converted: boolean; message: string }>("/api/referral/convert", {
+    method: "POST",
+    body: JSON.stringify({ visitorId, referralCode }),
+    authToken,
+  });
+}
+
+export interface PriorityStatus {
+  isPrioritySharer: boolean;
+  verifiedShareCount: number;
+  priorityGrantedAt: string | null;
+}
+
+export async function getPriorityStatus(authToken: string): Promise<PriorityStatus> {
+  return fetchApi<PriorityStatus>("/api/priority-status", { authToken });
+}
+
 // ==================== ADMIN API ====================
 
 export interface AdminStatus {
