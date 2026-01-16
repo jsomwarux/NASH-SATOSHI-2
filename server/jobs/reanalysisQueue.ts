@@ -295,14 +295,25 @@ async function triggerGumloopAnalysis(
     if (!gumloopResponse.ok) {
       const errorText = await gumloopResponse.text();
       console.error(`[ReanalysisQueue] Gumloop API error for ${item.tokenSymbol}: ${gumloopResponse.status}`);
+      console.error(`[ReanalysisQueue] Gumloop error details: ${errorText}`);
+      console.error(`[ReanalysisQueue] Request params - user_id: ${gumloopUserId}, saved_item_id: ${gumloopPipelineId}`);
+
+      // Try to parse error for more details
+      let errorDetail = errorText;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorDetail = errorJson.message || errorJson.error || errorJson.detail || errorText;
+      } catch {
+        // Keep raw text if not JSON
+      }
 
       await storage.updateAnalysis(analysis.id, {
         status: "failed",
         errorCode: "API_ERROR",
-        errorMessage: `Gumloop API error: ${gumloopResponse.status}`,
+        errorMessage: `Gumloop API error: ${gumloopResponse.status} - ${errorDetail}`,
       });
 
-      return { success: false, error: `Gumloop API error: ${gumloopResponse.status} - ${errorText}` };
+      return { success: false, error: `Gumloop API error: ${gumloopResponse.status} - ${errorDetail}` };
     }
 
     const gumloopData = await gumloopResponse.json();

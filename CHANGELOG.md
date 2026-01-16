@@ -4,7 +4,108 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-15 - Automated Reanalysis Queue System (Latest)
+## Session: 2026-01-15 - Sub-Narrative Classification Support (Latest)
+
+### Summary
+Added support for hierarchical narrative classification. Tokens are now classified with both a broad `primary_narrative` (e.g., "AI Agents") and a specific `sub_narrative` (e.g., "Agent Payments / x402"). Also includes `sub_narrative_ceiling` for estimated peak FDV of the sub-narrative leader, displayed in the Upside Assessment section.
+
+### Changes Made
+
+#### 1. Database Schema (shared/schema.ts)
+- Added 4 new columns to `tokenAnalyses` table:
+  - `primaryNarrative` - Broad category (e.g., "AI Agents", "DeFi", "Privacy")
+  - `subNarrative` - Specific classification (e.g., "Agent Payments / x402")
+  - `subNarrativeCeiling` - Peak FDV estimate for sub-narrative leader (e.g., "$500M")
+  - `subNarrativeConsensus` - Notes on model agreement for classification
+- Updated `AggregatedLeaderboardItem` interface with `latestPrimaryNarrative` and `latestSubNarrative`
+
+#### 2. Migration (migrations/0007_add_sub_narrative_support.sql)
+- Adds 4 new columns to token_analyses
+- Backfills existing `narrative` → `sub_narrative` for old records
+- Creates partial indexes for narrative filtering
+
+#### 3. Parser Updates (server/gumloop-parser.ts)
+- Added fields to `ParsedGumloopResponse` interface
+- Added ~35 field aliases in `FIELD_ALIASES` map for flexible parsing
+- Added fallback logic in both `parseGumloopResponse` and `parseGumloopOutputs`:
+  - If `sub_narrative` missing → use `narrative`
+  - If `primary_narrative` missing → derive from `sub_narrative` (text before "/" or full value)
+
+#### 4. Routes Updates (server/routes.ts)
+- Updated `processGumloopCompletion` to map new fields to database
+- `narrative` field now prefers `subNarrative` for backwards compatibility
+
+#### 5. Storage Updates (server/storage.ts)
+- Added `primaryNarrative` and `subNarrative` to `getLeaderboard` SELECT query
+- Updated tokenMap type and initialization to include new fields
+- `latestNarrative` now uses `subNarrative || narrative`
+
+#### 6. Frontend - LeaderboardTable (client/src/components/leaderboard/LeaderboardTable.tsx)
+- Narrative column now displays sub-narrative (more specific)
+- Tooltip shows hierarchy: primary narrative as smaller breadcrumb above full sub-narrative
+
+#### 7. Frontend - ScoreCard (client/src/components/scorecard/ScoreCard.tsx)
+- Narrative section shows primary narrative as breadcrumb when different from sub
+- Upside Assessment section shows "Sub-Narrative Leader Ceiling" with help tooltip
+  - Only displays when ceiling differs from `realisticPeakFdv`
+  - Tooltip includes `subNarrativeConsensus` when available
+
+#### 8. Types (client/src/types/leaderboard.ts)
+- Added `latestPrimaryNarrative` and `latestSubNarrative` to `AggregatedLeaderboardItem`
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `shared/schema.ts` | Added 4 columns to tokenAnalyses, updated AggregatedLeaderboardItem |
+| `migrations/0007_add_sub_narrative_support.sql` | NEW - Migration for new columns |
+| `server/gumloop-parser.ts` | Added interface fields, ~35 aliases, fallback logic |
+| `server/routes.ts` | Added field mapping in processGumloopCompletion |
+| `server/storage.ts` | Updated getLeaderboard query and aggregation |
+| `client/src/components/leaderboard/LeaderboardTable.tsx` | Updated tooltip to show hierarchy |
+| `client/src/components/scorecard/ScoreCard.tsx` | Added breadcrumb + ceiling display |
+| `client/src/types/leaderboard.ts` | Added new fields to interface |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### Current State
+- Sub-narrative support fully implemented
+- Backwards compatible - old analyses display existing `narrative` field
+- New analyses will populate all 4 new fields when Gumloop pipeline provides them
+- Parser derives missing fields automatically (primary from sub, sub from narrative)
+
+### Database Migration Needed
+Run in Supabase SQL Editor:
+```sql
+ALTER TABLE "token_analyses"
+  ADD COLUMN IF NOT EXISTS "primary_narrative" text;
+
+ALTER TABLE "token_analyses"
+  ADD COLUMN IF NOT EXISTS "sub_narrative" text;
+
+ALTER TABLE "token_analyses"
+  ADD COLUMN IF NOT EXISTS "sub_narrative_ceiling" text;
+
+ALTER TABLE "token_analyses"
+  ADD COLUMN IF NOT EXISTS "sub_narrative_consensus" text;
+
+UPDATE "token_analyses"
+SET "sub_narrative" = "narrative"
+WHERE "narrative" IS NOT NULL
+  AND "sub_narrative" IS NULL;
+
+CREATE INDEX IF NOT EXISTS "idx_token_analyses_primary_narrative"
+  ON "token_analyses" ("primary_narrative")
+  WHERE "status" = 'completed';
+
+CREATE INDEX IF NOT EXISTS "idx_token_analyses_sub_narrative"
+  ON "token_analyses" ("sub_narrative")
+  WHERE "status" = 'completed';
+```
+
+---
+
+## Session: 2026-01-15 - Automated Reanalysis Queue System
 
 ### Summary
 Implemented an automated reanalysis system that schedules token reanalyses on a weekly basis. Top-ranked tokens get reanalyzed more frequently (weekly/bi-weekly/monthly) and the system respects Gumloop's 4 concurrent run limit. Includes queue management with admin visibility.

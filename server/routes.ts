@@ -924,16 +924,33 @@ export async function registerRoutes(
 
       if (!gumloopResponse.ok) {
         const errorText = await gumloopResponse.text();
-        console.error(`Admin: Gumloop API error: ${gumloopResponse.status} - ${errorText}`);
+        console.error(`Admin: Gumloop API error: ${gumloopResponse.status}`);
+        console.error(`Admin: Gumloop error details: ${errorText}`);
+        console.error(`Admin: Request params - user_id: ${gumloopUserId}, saved_item_id: ${gumloopPipelineId}`);
+
+        // Try to parse error for more details
+        let errorDetail = errorText;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorDetail = errorJson.message || errorJson.error || errorJson.detail || errorText;
+        } catch {
+          // Keep raw text if not JSON
+        }
 
         // Mark analysis as failed
         await storage.updateAnalysis(analysis.id, {
           status: "failed",
           errorCode: "API_ERROR",
-          errorMessage: `Gumloop API error: ${gumloopResponse.status}`,
+          errorMessage: `Gumloop API error: ${gumloopResponse.status} - ${errorDetail}`,
         });
 
-        res.status(502).json({ message: `Gumloop API error: ${gumloopResponse.status}` });
+        res.status(502).json({
+          message: `Gumloop API error: ${gumloopResponse.status}`,
+          detail: errorDetail,
+          hint: gumloopResponse.status === 403
+            ? "Check that GUMLOOP_API_KEY, GUMLOOP_USER_ID, and GUMLOOP_PIPELINE_ID are correct and the API key has access to this pipeline."
+            : undefined
+        });
         return;
       }
 
