@@ -1,4 +1,4 @@
-import { forwardRef } from "react";
+import { forwardRef, useState } from "react";
 import { Trophy, TrendingUp, Zap, Target, Users, Brain } from "lucide-react";
 import type { TokenAnalysis } from "@shared/schema";
 import { formatScore } from "@/lib/utils";
@@ -100,6 +100,7 @@ function NashSatoshiLogo({ size = 24 }: { size?: number }) {
 
 export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
   ({ analysis }, ref) => {
+    const [imageError, setImageError] = useState(false);
     const finalScore = parseFloat(analysis.finalScore as string) || 0;
     const tierStyle = getTierStyle(analysis.tier);
     const recStyle = getRecStyle(analysis.recommendation);
@@ -119,6 +120,9 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
     const phaseValue = analysis.phase;
     const phase = phaseValue ? parseInt(String(phaseValue)) : null;
     const phaseStyle = getPhaseStyle(phase);
+
+    // Check if we should show the image or fallback to initials
+    const showImage = analysis.tokenImage && !imageError;
 
     return (
       <div
@@ -143,11 +147,13 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
           {/* Header */}
           <div className="flex items-start justify-between mb-3">
             <div className="flex items-center gap-3">
-              {analysis.tokenImage ? (
+              {showImage ? (
                 <img
-                  src={`/api/image-proxy?url=${encodeURIComponent(analysis.tokenImage)}`}
+                  src={`/api/image-proxy?url=${encodeURIComponent(analysis.tokenImage!)}`}
                   alt={analysis.tokenName}
                   className="w-14 h-14 rounded-xl bg-white/10 ring-2 ring-white/20"
+                  crossOrigin="anonymous"
+                  onError={() => setImageError(true)}
                 />
               ) : (
                 <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-purple-500 to-cyan-500 flex items-center justify-center ring-2 ring-white/20">

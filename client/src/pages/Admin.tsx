@@ -21,9 +21,11 @@ import {
   TrendingUp,
   ArrowRight,
   Trophy,
+  ExternalLink,
+  Coins,
+  Rocket,
 } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
-import { TokenSearch } from "@/components/search/TokenSearch";
 import { LeaderboardTable } from "@/components/leaderboard/LeaderboardTable";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,6 +39,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   getAdminStatus,
@@ -47,14 +57,19 @@ import {
   adminCollectPerformance,
   adminReprocessAnalysis,
   adminRecoverAnalysis,
+  adminRecoverAnalysisWithRun,
   getTopVoteRequests,
   getRecentlyAnalyzedRequests,
   getYesterdayTopVote,
+  getDexscreenerToken,
+  getDexscreenerChains,
   type AdminAnalyzeRequest,
   type VoteRequest,
   type YesterdayTopVote,
+  type DexscreenerTokenInfo,
+  type AnalysisSource,
 } from "@/lib/api";
-import type { TokenSearchResult, TokenAnalysis, LeaderboardFilters } from "@shared/schema";
+import type { TokenAnalysis, LeaderboardFilters } from "@shared/schema";
 
 function getTierColor(tier: string | null): string {
   switch (tier?.toUpperCase()) {
@@ -79,16 +94,98 @@ function getStatusColor(status: string): { bg: string; text: string } {
 
 type SortField = "latestScore" | "scoreTrend" | "latestAnalysis" | "tier" | "tokenType" | "asymmetryScore" | "upsideTier";
 
+// Supported chains for CoinGecko (mapped to platform IDs)
+const COINGECKO_CHAINS = [
+  { id: 'ethereum', name: 'Ethereum' },
+  { id: 'solana', name: 'Solana' },
+  { id: 'base', name: 'Base' },
+  { id: 'arbitrum-one', name: 'Arbitrum' },
+  { id: 'polygon-pos', name: 'Polygon' },
+  { id: 'binance-smart-chain', name: 'BSC' },
+  { id: 'optimistic-ethereum', name: 'Optimism' },
+  { id: 'avalanche', name: 'Avalanche' },
+];
+
+// Supported chains for Dexscreener
+const DEXSCREENER_CHAINS = [
+  { id: 'ethereum', name: 'Ethereum' },
+  { id: 'solana', name: 'Solana' },
+  { id: 'base', name: 'Base' },
+  { id: 'arbitrum', name: 'Arbitrum' },
+  { id: 'polygon', name: 'Polygon' },
+  { id: 'bsc', name: 'BSC' },
+  { id: 'optimism', name: 'Optimism' },
+  { id: 'avalanche', name: 'Avalanche' },
+  { id: 'sui', name: 'Sui' },
+  { id: 'ton', name: 'TON' },
+  { id: 'blast', name: 'Blast' },
+  { id: 'mantle', name: 'Mantle' },
+  { id: 'linea', name: 'Linea' },
+  { id: 'scroll', name: 'Scroll' },
+  { id: 'zksync', name: 'zkSync' },
+];
+
+interface TokenInputState {
+  contractAddress: string;
+  chain: string;
+  tokenInfo: {
+    symbol: string;
+    name: string;
+    imageUrl?: string;
+    fdv?: number;
+  } | null;
+  isLookingUp: boolean;
+  lookupError: string | null;
+}
+
 export default function Admin() {
   const { user, getAccessToken } = useAuth();
   const queryClient = useQueryClient();
-  const [selectedToken, setSelectedToken] = useState<TokenSearchResult | null>(null);
   const [activeTab, setActiveTab] = useState("analyze");
   const [sortBy, setSortBy] = useState<SortField>("latestScore");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [filters, setFilters] = useState<LeaderboardFilters>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+
+  // CoinGecko input state (for established coins)
+  const [cgInput, setCgInput] = useState<TokenInputState>({
+    contractAddress: '',
+    chain: 'ethereum',
+    tokenInfo: null,
+    isLookingUp: false,
+    lookupError: null,
+  });
+
+  // Dexscreener input state (for new launches)
+  const [dexInput, setDexInput] = useState<TokenInputState>({
+    contractAddress: '',
+    chain: 'solana',
+    tokenInfo: null,
+    isLookingUp: false,
+    lookupError: null,
+  });
+
+  // Recovery with run ID modal state
+  const [recoveryModal, setRecoveryModal] = useState<{
+    isOpen: boolean;
+    analysisId: number | null;
+    tokenSymbol: string;
+    runId: string;
+  }>({
+    isOpen: false,
+    analysisId: null,
+    tokenSymbol: '',
+    runId: '',
+  });
+
+  // Token to analyze from vote queue (hint for admin)
+  const [pendingVoteToken, setPendingVoteToken] = useState<{
+    tokenId: string;
+    tokenSymbol: string;
+    tokenName: string;
+    tokenImage: string | null;
+  } | null>(null);
 
   // Build active filters
   const activeFilters = useMemo(() => ({
@@ -182,12 +279,82 @@ export default function Admin() {
       if (!token) throw new Error("Authentication required");
       return adminStartAnalysis(data, token);
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["adminAnalyses"] });
       queryClient.invalidateQueries({ queryKey: ["adminLeaderboard"] });
-      setSelectedToken(null);
+      // Clear the appropriate input based on source
+      if (variables.source === 'coingecko') {
+        setCgInput(prev => ({ ...prev, contractAddress: '', tokenInfo: null, lookupError: null }));
+      } else {
+        setDexInput(prev => ({ ...prev, contractAddress: '', tokenInfo: null, lookupError: null }));
+      }
+      // Clear the pending vote token banner
+      setPendingVoteToken(null);
     },
   });
+
+  // Lookup token on Dexscreener
+  const handleDexscreenerLookup = async () => {
+    if (!dexInput.contractAddress || !dexInput.chain) return;
+
+    setDexInput(prev => ({ ...prev, isLookingUp: true, lookupError: null, tokenInfo: null }));
+
+    try {
+      const result = await getDexscreenerToken(dexInput.contractAddress, dexInput.chain);
+      if (result.found && result.token) {
+        setDexInput(prev => ({
+          ...prev,
+          isLookingUp: false,
+          tokenInfo: {
+            symbol: result.token!.symbol,
+            name: result.token!.name,
+            imageUrl: result.token!.imageUrl || undefined,
+            fdv: result.token!.fdv || undefined,
+          },
+        }));
+      } else {
+        setDexInput(prev => ({
+          ...prev,
+          isLookingUp: false,
+          lookupError: result.message || 'Token not found on Dexscreener',
+        }));
+      }
+    } catch (error) {
+      setDexInput(prev => ({
+        ...prev,
+        isLookingUp: false,
+        lookupError: error instanceof Error ? error.message : 'Lookup failed',
+      }));
+    }
+  };
+
+  // Start CoinGecko analysis
+  const handleStartCgAnalysis = async () => {
+    if (!cgInput.contractAddress || !cgInput.chain) return;
+
+    await startAnalysisMutation.mutateAsync({
+      contractAddress: cgInput.contractAddress,
+      chain: cgInput.chain,
+      tokenSymbol: cgInput.tokenInfo?.symbol,
+      tokenName: cgInput.tokenInfo?.name,
+      tokenImage: cgInput.tokenInfo?.imageUrl,
+      source: 'coingecko',
+    });
+  };
+
+  // Start Dexscreener analysis
+  const handleStartDexAnalysis = async () => {
+    if (!dexInput.contractAddress || !dexInput.chain) return;
+
+    await startAnalysisMutation.mutateAsync({
+      contractAddress: dexInput.contractAddress,
+      chain: dexInput.chain,
+      tokenSymbol: dexInput.tokenInfo?.symbol,
+      tokenName: dexInput.tokenInfo?.name,
+      tokenImage: dexInput.tokenInfo?.imageUrl,
+      source: 'dexscreener',
+    });
+  };
 
   // Sync Gumloop mutation
   const syncMutation = useMutation({
@@ -251,20 +418,19 @@ export default function Admin() {
     },
   });
 
-  const handleTokenSelect = (token: TokenSearchResult) => {
-    setSelectedToken(token);
-  };
-
-  const handleStartAnalysis = async () => {
-    if (!selectedToken) return;
-
-    await startAnalysisMutation.mutateAsync({
-      tokenId: selectedToken.id,
-      tokenSymbol: selectedToken.symbol,
-      tokenName: selectedToken.name,
-      tokenImage: selectedToken.large || selectedToken.thumb,
-    });
-  };
+  // Recover with custom run ID mutation
+  const recoverWithRunMutation = useMutation({
+    mutationFn: async ({ analysisId, runId }: { analysisId: number; runId: string }) => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Authentication required");
+      return adminRecoverAnalysisWithRun(analysisId, runId, token);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["adminAnalyses"] });
+      queryClient.invalidateQueries({ queryKey: ["adminLeaderboard"] });
+      setRecoveryModal({ isOpen: false, analysisId: null, tokenSymbol: '', runId: '' });
+    },
+  });
 
   // Not logged in
   if (!user) {
@@ -402,19 +568,19 @@ export default function Admin() {
                       ) : (
                         <Button
                           onClick={() => {
-                            setSelectedToken({
-                              id: yesterdayTop.request.tokenId,
-                              symbol: yesterdayTop.request.tokenSymbol,
-                              name: yesterdayTop.request.tokenName,
-                              thumb: yesterdayTop.request.tokenImage || undefined,
-                              large: yesterdayTop.request.tokenImage || undefined,
+                            // Set the token info and switch to analyze tab
+                            setPendingVoteToken({
+                              tokenId: yesterdayTop.request.tokenId,
+                              tokenSymbol: yesterdayTop.request.tokenSymbol,
+                              tokenName: yesterdayTop.request.tokenName,
+                              tokenImage: yesterdayTop.request.tokenImage,
                             });
                             setActiveTab("analyze");
                           }}
                           className="bg-amber-500 hover:bg-amber-600 text-black"
                         >
                           <Play className="w-4 h-4 mr-2" />
-                          Run Analysis
+                          Analyze
                         </Button>
                       )}
                     </div>
@@ -477,12 +643,12 @@ export default function Admin() {
                           <Button
                             size="sm"
                             onClick={() => {
-                              setSelectedToken({
-                                id: request.tokenId,
-                                symbol: request.tokenSymbol,
-                                name: request.tokenName,
-                                thumb: request.tokenImage || undefined,
-                                large: request.tokenImage || undefined,
+                              // Set the token info and switch to analyze tab
+                              setPendingVoteToken({
+                                tokenId: request.tokenId,
+                                tokenSymbol: request.tokenSymbol,
+                                tokenName: request.tokenName,
+                                tokenImage: request.tokenImage,
                               });
                               setActiveTab("analyze");
                             }}
@@ -590,73 +756,274 @@ export default function Admin() {
 
           {/* Run Analysis Tab */}
           <TabsContent value="analyze" className="space-y-6">
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Search className="w-5 h-5" />
-                  Search & Analyze Token
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <TokenSearch
-                  onSelect={handleTokenSelect}
-                />
-
-                {selectedToken && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="p-4 rounded-lg bg-secondary/30 border border-white/10"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        {selectedToken.thumb && (
-                          <img
-                            src={selectedToken.thumb}
-                            alt={selectedToken.name}
-                            className="w-10 h-10 rounded-full"
-                          />
-                        )}
-                        <div>
-                          <div className="font-medium">{selectedToken.name}</div>
-                          <div className="text-sm text-muted-foreground uppercase">
-                            ${selectedToken.symbol}
-                          </div>
-                        </div>
+            {/* Pending Vote Token Banner */}
+            {pendingVoteToken && (
+              <Card className="glass-card border-amber-500/30 bg-amber-500/5">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-4">
+                    {pendingVoteToken.tokenImage && (
+                      <img
+                        src={pendingVoteToken.tokenImage}
+                        alt={pendingVoteToken.tokenSymbol}
+                        className="w-10 h-10 rounded-full"
+                      />
+                    )}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <Trophy className="w-4 h-4 text-amber-400" />
+                        <span className="text-sm text-amber-400 font-medium">From Vote Queue</span>
                       </div>
+                      <div className="text-lg font-bold">{pendingVoteToken.tokenName}</div>
+                      <div className="text-sm text-muted-foreground">
+                        ${pendingVoteToken.tokenSymbol.toUpperCase()} • CoinGecko ID: {pendingVoteToken.tokenId}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 items-end">
+                      <p className="text-xs text-muted-foreground">
+                        Look up the contract address for this token
+                      </p>
                       <Button
-                        onClick={handleStartAnalysis}
-                        disabled={startAnalysisMutation.isPending}
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setPendingVoteToken(null)}
+                        className="text-muted-foreground hover:text-foreground"
                       >
-                        {startAnalysisMutation.isPending ? (
-                          <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            Starting...
-                          </>
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Two-column layout for input sources */}
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* CoinGecko Source - Established Coins */}
+              <Card className="glass-card border-blue-500/30">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Coins className="w-5 h-5 text-blue-400" />
+                    Established Coins
+                    <Badge variant="outline" className="ml-auto text-blue-400 border-blue-500/30">
+                      CoinGecko
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    For tokens listed on CoinGecko. Use contract address for accurate lookup.
+                  </p>
+
+                  {/* Chain Selection */}
+                  <div>
+                    <label className="text-xs font-mono text-muted-foreground mb-1 block">CHAIN</label>
+                    <Select
+                      value={cgInput.chain}
+                      onValueChange={(value) => setCgInput(prev => ({ ...prev, chain: value, tokenInfo: null }))}
+                    >
+                      <SelectTrigger className="bg-background/50 border-blue-500/20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {COINGECKO_CHAINS.map(chain => (
+                          <SelectItem key={chain.id} value={chain.id}>{chain.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Contract Address Input */}
+                  <div>
+                    <label className="text-xs font-mono text-muted-foreground mb-1 block">CONTRACT ADDRESS</label>
+                    <Input
+                      placeholder="0x... or base58..."
+                      value={cgInput.contractAddress}
+                      onChange={(e) => setCgInput(prev => ({ ...prev, contractAddress: e.target.value, tokenInfo: null }))}
+                      className="font-mono text-sm bg-background/50 border-blue-500/20"
+                    />
+                  </div>
+
+                  {/* Start Analysis Button */}
+                  <Button
+                    onClick={handleStartCgAnalysis}
+                    disabled={!cgInput.contractAddress || startAnalysisMutation.isPending}
+                    className="w-full bg-blue-600 hover:bg-blue-700"
+                  >
+                    {startAnalysisMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Starting...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 mr-2" />
+                        Analyze via CoinGecko
+                      </>
+                    )}
+                  </Button>
+
+                  {/* Success/Error Messages */}
+                  {startAnalysisMutation.isSuccess && startAnalysisMutation.data.source === 'coingecko' && (
+                    <div className="p-3 rounded bg-green-500/10 border border-green-500/30 text-green-400 text-sm">
+                      <CheckCircle className="w-4 h-4 inline mr-2" />
+                      Analysis started! Run ID: {startAnalysisMutation.data.runId}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Dexscreener Source - New Launches */}
+              <Card className="glass-card border-purple-500/30">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Rocket className="w-5 h-5 text-purple-400" />
+                    New Launches
+                    <Badge variant="outline" className="ml-auto text-purple-400 border-purple-500/30">
+                      Dexscreener
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    For new tokens not yet on CoinGecko. Lookup to verify before analyzing.
+                  </p>
+
+                  {/* Chain Selection */}
+                  <div>
+                    <label className="text-xs font-mono text-muted-foreground mb-1 block">CHAIN</label>
+                    <Select
+                      value={dexInput.chain}
+                      onValueChange={(value) => setDexInput(prev => ({ ...prev, chain: value, tokenInfo: null, lookupError: null }))}
+                    >
+                      <SelectTrigger className="bg-background/50 border-purple-500/20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DEXSCREENER_CHAINS.map(chain => (
+                          <SelectItem key={chain.id} value={chain.id}>{chain.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Contract Address Input */}
+                  <div>
+                    <label className="text-xs font-mono text-muted-foreground mb-1 block">CONTRACT ADDRESS</label>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="0x... or base58..."
+                        value={dexInput.contractAddress}
+                        onChange={(e) => setDexInput(prev => ({ ...prev, contractAddress: e.target.value, tokenInfo: null, lookupError: null }))}
+                        className="font-mono text-sm bg-background/50 border-purple-500/20"
+                      />
+                      <Button
+                        variant="outline"
+                        onClick={handleDexscreenerLookup}
+                        disabled={!dexInput.contractAddress || dexInput.isLookingUp}
+                        className="border-purple-500/30 hover:bg-purple-500/10"
+                      >
+                        {dexInput.isLookingUp ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
                         ) : (
-                          <>
-                            <Play className="w-4 h-4 mr-2" />
-                            Start Analysis
-                          </>
+                          <Search className="w-4 h-4" />
                         )}
                       </Button>
                     </div>
+                  </div>
 
-                    {startAnalysisMutation.isSuccess && (
-                      <div className="mt-3 p-3 rounded bg-green-500/10 border border-green-500/30 text-green-400 text-sm">
-                        <CheckCircle className="w-4 h-4 inline mr-2" />
-                        Analysis started! Run ID: {startAnalysisMutation.data.runId}
-                      </div>
-                    )}
+                  {/* Lookup Error */}
+                  {dexInput.lookupError && (
+                    <div className="p-3 rounded bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                      <XCircle className="w-4 h-4 inline mr-2" />
+                      {dexInput.lookupError}
+                    </div>
+                  )}
 
-                    {startAnalysisMutation.isError && (
-                      <div className="mt-3 p-3 rounded bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-                        <XCircle className="w-4 h-4 inline mr-2" />
-                        Error: {startAnalysisMutation.error?.message || "Failed to start analysis"}
+                  {/* Token Info Preview */}
+                  {dexInput.tokenInfo && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20"
+                    >
+                      <div className="flex items-center gap-3">
+                        {dexInput.tokenInfo.imageUrl && (
+                          <img
+                            src={dexInput.tokenInfo.imageUrl}
+                            alt={dexInput.tokenInfo.symbol}
+                            className="w-10 h-10 rounded-full"
+                          />
+                        )}
+                        <div className="flex-1">
+                          <div className="font-medium">{dexInput.tokenInfo.name}</div>
+                          <div className="text-sm text-muted-foreground">${dexInput.tokenInfo.symbol}</div>
+                        </div>
+                        {dexInput.tokenInfo.fdv && (
+                          <div className="text-right">
+                            <div className="text-xs text-muted-foreground">FDV</div>
+                            <div className="text-sm font-mono">
+                              ${(dexInput.tokenInfo.fdv / 1e6).toFixed(2)}M
+                            </div>
+                          </div>
+                        )}
                       </div>
+                    </motion.div>
+                  )}
+
+                  {/* Start Analysis Button */}
+                  <Button
+                    onClick={handleStartDexAnalysis}
+                    disabled={!dexInput.contractAddress || startAnalysisMutation.isPending}
+                    className="w-full bg-purple-600 hover:bg-purple-700"
+                  >
+                    {startAnalysisMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Starting...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 mr-2" />
+                        Analyze via Dexscreener
+                      </>
                     )}
-                  </motion.div>
-                )}
+                  </Button>
+
+                  {/* Success/Error Messages */}
+                  {startAnalysisMutation.isSuccess && startAnalysisMutation.data.source === 'dexscreener' && (
+                    <div className="p-3 rounded bg-green-500/10 border border-green-500/30 text-green-400 text-sm">
+                      <CheckCircle className="w-4 h-4 inline mr-2" />
+                      Analysis started! Run ID: {startAnalysisMutation.data.runId}
+                    </div>
+                  )}
+
+                  {startAnalysisMutation.isError && (
+                    <div className="p-3 rounded bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                      <XCircle className="w-4 h-4 inline mr-2" />
+                      Error: {startAnalysisMutation.error?.message || "Failed to start analysis"}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Info Card */}
+            <Card className="glass-card border-primary/20">
+              <CardContent className="pt-6">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+                    <AlertTriangle className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-primary mb-1">Contract Address Input</h3>
+                    <ul className="text-sm text-muted-foreground space-y-1">
+                      <li>• Both sources now use contract address instead of ticker symbol</li>
+                      <li>• This avoids confusion when multiple tokens share the same ticker</li>
+                      <li>• Use CoinGecko for established tokens with price history</li>
+                      <li>• Use Dexscreener for new launches not yet indexed by CoinGecko</li>
+                    </ul>
+                  </div>
+                </div>
               </CardContent>
             </Card>
 
@@ -1034,30 +1401,51 @@ export default function Admin() {
                                     </Button>
                                   )}
                                   {analysis.status === "failed" && analysis.gumloopRunId && (
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        recoverMutation.mutate(analysis.id);
-                                      }}
-                                      disabled={recoveringId === analysis.id || recoverMutation.isPending}
-                                      className="h-7 text-xs border-amber-500/50 text-amber-400 hover:bg-amber-500/10"
-                                    >
-                                      {recoveringId === analysis.id ? (
-                                        <>
-                                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                          Recovering
-                                        </>
-                                      ) : (
-                                        <>
-                                          <RefreshCw className="w-3 h-3 mr-1" />
-                                          Recover
-                                        </>
-                                      )}
-                                    </Button>
+                                    <>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          recoverMutation.mutate(analysis.id);
+                                        }}
+                                        disabled={recoveringId === analysis.id || recoverMutation.isPending}
+                                        className="h-7 text-xs border-amber-500/50 text-amber-400 hover:bg-amber-500/10"
+                                      >
+                                        {recoveringId === analysis.id ? (
+                                          <>
+                                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                            Recovering
+                                          </>
+                                        ) : (
+                                          <>
+                                            <RefreshCw className="w-3 h-3 mr-1" />
+                                            Recover
+                                          </>
+                                        )}
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setRecoveryModal({
+                                            isOpen: true,
+                                            analysisId: analysis.id,
+                                            tokenSymbol: analysis.tokenSymbol || 'Unknown',
+                                            runId: '',
+                                          });
+                                        }}
+                                        className="h-7 text-xs border-purple-500/50 text-purple-400 hover:bg-purple-500/10"
+                                      >
+                                        <Scan className="w-3 h-3 mr-1" />
+                                        With Run ID
+                                      </Button>
+                                    </>
                                   )}
                                   {(analysis.status === "pending" || analysis.status === "processing") && analysis.gumloopRunId && (
                                     <Button
@@ -1103,6 +1491,74 @@ export default function Admin() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Recovery with Run ID Modal */}
+      <Dialog open={recoveryModal.isOpen} onOpenChange={(open) => {
+        if (!open) setRecoveryModal({ isOpen: false, analysisId: null, tokenSymbol: '', runId: '' });
+      }}>
+        <DialogContent className="bg-black/95 border-cyan-500/30">
+          <DialogHeader>
+            <DialogTitle className="text-cyan-400">Recover Analysis with Run ID</DialogTitle>
+            <DialogDescription>
+              Enter the Gumloop run ID from your resumed/completed flow to recover the analysis for <span className="text-white font-semibold">{recoveryModal.tokenSymbol}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm text-muted-foreground">Gumloop Run ID</label>
+              <Input
+                placeholder="e.g., fzbdZqj99roBWEdwBk9yBc"
+                value={recoveryModal.runId}
+                onChange={(e) => setRecoveryModal(prev => ({ ...prev, runId: e.target.value }))}
+                className="bg-black/50 border-cyan-500/30 focus:border-cyan-500"
+              />
+              <p className="text-xs text-muted-foreground">
+                Find this in Gumloop's run details or URL for your resumed flow.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRecoveryModal({ isOpen: false, analysisId: null, tokenSymbol: '', runId: '' })}
+              className="border-gray-500/50"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (recoveryModal.analysisId && recoveryModal.runId.trim()) {
+                  recoverWithRunMutation.mutate({
+                    analysisId: recoveryModal.analysisId,
+                    runId: recoveryModal.runId.trim(),
+                  });
+                }
+              }}
+              disabled={!recoveryModal.runId.trim() || recoverWithRunMutation.isPending}
+              className="bg-cyan-600 hover:bg-cyan-700"
+            >
+              {recoverWithRunMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Recovering...
+                </>
+              ) : (
+                "Recover Analysis"
+              )}
+            </Button>
+          </DialogFooter>
+          {recoverWithRunMutation.isError && (
+            <p className="text-sm text-red-400 mt-2">
+              Error: {recoverWithRunMutation.error instanceof Error ? recoverWithRunMutation.error.message : 'Recovery failed'}
+            </p>
+          )}
+          {recoverWithRunMutation.isSuccess && (
+            <p className="text-sm text-green-400 mt-2">
+              Analysis recovered successfully!
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }

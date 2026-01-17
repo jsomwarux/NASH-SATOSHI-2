@@ -157,12 +157,17 @@ async function scheduleWeeklyReanalysis(): Promise<void> {
         continue;
       }
 
+      // Derive source from tokenId prefix (dex_ = dexscreener, otherwise coingecko)
+      const source = token.tokenId.startsWith("dex_") ? "dexscreener" : "coingecko";
+
       queueItems.push({
         tokenId: token.tokenId,
         tokenSymbol: token.tokenSymbol,
         tokenName: token.tokenName,
         tokenImage: token.tokenImage,
         chain: token.chain,
+        contractAddress: token.contractAddress,
+        source,
         priority: getPriorityForRank(rank),
         status: "pending",
         scheduledAt: new Date(),
@@ -279,9 +284,55 @@ async function triggerGumloopAnalysis(
     gumloopUrl.searchParams.set("user_id", gumloopUserId);
     gumloopUrl.searchParams.set("saved_item_id", gumloopPipelineId);
 
+    // Determine source and contract address
+    // If not stored directly, try to extract from tokenId format: dex_{chain}_{address} or cg_{chain}_{address}
+    let source = item.source || "coingecko";
+    let contractAddress = item.contractAddress || "";
+    let chain = item.chain || "";
+
+    if (!contractAddress && item.tokenId) {
+      // Try to extract from tokenId format
+      if (item.tokenId.startsWith("dex_")) {
+        source = "dexscreener";
+        const parts = item.tokenId.split("_");
+        if (parts.length >= 3) {
+          chain = parts[1];
+          contractAddress = parts.slice(2).join("_"); // Handle addresses that might have underscores
+        }
+      } else if (item.tokenId.startsWith("cg_")) {
+        source = "coingecko";
+        const parts = item.tokenId.split("_");
+        if (parts.length >= 3) {
+          chain = parts[1];
+          contractAddress = parts.slice(2).join("_");
+        }
+      }
+    }
+
+    // Validate we have the required data
+    if (!contractAddress || !chain) {
+      console.error(`[ReanalysisQueue] Missing contract address or chain for ${item.tokenSymbol} (tokenId: ${item.tokenId})`);
+      await storage.updateAnalysis(analysis.id, {
+        status: "failed",
+        errorCode: "MISSING_DATA",
+        errorMessage: "Missing contract address or chain - token may need manual reanalysis",
+      });
+      return { success: false, error: "Missing contract address or chain" };
+    }
+
+    // Build pipeline inputs with new format:
+    // 1. "Source" - determines which lookup path to use ("coingecko" or "dexscreener")
+    // 2. "Contract Address" - the token contract address
+    // 3. "Chain" - the blockchain network
     const gumloopPayload = {
-      pipeline_inputs: [{ input_name: "Token Input", value: item.tokenSymbol }],
+      pipeline_inputs: [
+        { input_name: "Source", value: source },
+        { input_name: "Contract Address", value: contractAddress },
+        { input_name: "Chain", value: chain },
+      ],
     };
+
+    console.log(`[ReanalysisQueue] Calling Gumloop for ${item.tokenSymbol} with source=${source}, chain=${chain}`);
 
     const gumloopResponse = await fetch(gumloopUrl.toString(), {
       method: "POST",

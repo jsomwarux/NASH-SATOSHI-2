@@ -40,7 +40,9 @@
       "Bash(/dev/null pkill -9 -f node.*server/index.ts)",
       "Bash(git checkout:*)",
       "Bash(echo:*)",
-      "WebFetch(domain:resend.com)"
+      "WebFetch(domain:resend.com)",
+      "WebFetch(domain:docs.dexscreener.com)",
+      "WebFetch(domain:docs.coingecko.com)"
     ]
   }
 }

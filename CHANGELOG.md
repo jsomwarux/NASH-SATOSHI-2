@@ -4,7 +4,267 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-15 - Sub-Narrative Classification Support (Latest)
+## Session: 2026-01-17 - Fix Narrative Field Showing "primary_narrative:" Prefix (Latest)
+
+### Summary
+Fixed an issue where the Narrative field on scorecards was showing "primary_narrative: AI Agents" instead of just the sub_narrative value "Embodied AI / Egocentric Data Collection". The parser wasn't correctly extracting `sub_narrative` from the `## NARRATIVE:` markdown section in Gumloop output.
+
+### Root Cause
+1. The `## NARRATIVE:` section in Gumloop output contains `primary_narrative:` and `sub_narrative:` fields
+2. The regex patterns for extracting `narrative:` were matching within `primary_narrative:` (substring match)
+3. The `sub_narrative` field wasn't being extracted at all from the NARRATIVE section
+
+### Changes Made
+
+#### 1. New extractNarrativeSectionFields Function (server/gumloop-parser.ts)
+- Added dedicated function to extract `primary_narrative` and `sub_narrative` from `## NARRATIVE:` markdown sections
+- Looks for patterns like `## NARRATIVE:`, `**NARRATIVE:**`, `NARRATIVE SECTION:`
+- Extracts both fields with proper label stripping
+
+#### 2. Fixed Narrative Regex Patterns (server/gumloop-parser.ts)
+- Updated `extractNarrativeField()` patterns to use negative lookbehind `(?<!primary_|sub_)` to avoid matching "narrative:" within "primary_narrative:" or "sub_narrative:"
+- Updated fallback patterns in `parseGumloopOutputs()` with same fix
+
+#### 3. Integrated NARRATIVE Section Extraction (server/gumloop-parser.ts)
+- Added call to `extractNarrativeSectionFields()` in `parseGumloopResponse()` before SUB-NARRATIVE FALLBACK logic
+- Added call to `extractNarrativeSectionFields()` in `parseGumloopOutputs()` when searching text content
+
+#### 4. Updated Reprocess Logic (server/routes.ts)
+- Changed narrative field update logic to prefer `subNarrative` over `narrative`
+- If `parsed.subNarrative` exists, use it for both `narrative` and `subNarrative` fields
+- Ensures reprocessing will properly fix old analyses
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/gumloop-parser.ts` | Added `extractNarrativeSectionFields()`, fixed regex patterns with negative lookbehind |
+| `server/routes.ts` | Updated reprocess endpoint to prefer subNarrative for narrative field |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### Current State
+- New analyses will correctly extract `sub_narrative` from NARRATIVE sections
+- The narrative field on scorecards will show the specific sub_narrative (e.g., "Embodied AI / Egocentric Data Collection") not the primary_narrative with its label prefix
+- Reprocessing existing analyses via Admin panel will now fix the narrative field
+
+### Testing
+User should click "Reprocess" on the VADER analysis in the Admin panel to fix the narrative field. After reprocessing, the scorecard should show "Embodied AI / Egocentric Data Collection" in the Narrative field instead of "primary_narrative: AI Agents".
+
+---
+
+## Session: 2026-01-17 - Vote Page Contract Address Requirement
+
+### Summary
+Updated the Vote page to require contract address input for all token votes. Users can now vote for tokens from both CoinGecko and Dexscreener by entering the token's contract address. This ensures accuracy, especially for Dexscreener tokens where multiple coins can share the same ticker.
+
+### Changes Made
+
+#### 1. New ContractAddressLookup Component (client/src/components/vote/ContractAddressLookup.tsx)
+- New component for looking up tokens by contract address
+- Source selector: CoinGecko or Dexscreener
+- Chain selector with full list of supported chains
+- Contract address input with validation (EVM and Solana formats)
+- Displays token info after lookup (name, symbol, image, FDV, market cap)
+- Vote button integrated into the lookup result
+
+#### 2. Vote Page Update (client/src/pages/Vote.tsx)
+- Replaced `TokenSearch` component with new `ContractAddressLookup`
+- Updated vote mutation to include contractAddress and source
+- Top Voted Tokens list now shows source badge (DEX/CG)
+- Vote buttons disabled for old requests without contract info
+
+#### 3. Vote API Endpoint Update (server/routes.ts)
+- Now requires `contractAddress` and `source` fields
+- Validates contract address format (EVM 0x... and Solana)
+- Validates source must be "coingecko" or "dexscreener"
+- Updated tokenId validation to allow prefixed formats (dex_chain_address, cg_chain_address)
+- Stores chain, contractAddress, source when creating vote requests
+
+#### 4. Database Schema Update (shared/schema.ts)
+- Added 3 new columns to `tokenVoteRequests` table:
+  - `chain` - blockchain network
+  - `contractAddress` - token contract address
+  - `source` - "coingecko" or "dexscreener"
+- Updated `VoteRequest` interface to include new fields
+
+#### 5. API Types Update (client/src/lib/api.ts)
+- Added `lookupDexscreenerToken()` function
+- Added `getDexscreenerChains()` function
+- Added `lookupCoinGeckoByContract()` function
+- Updated `VoteRequest` interface with chain, contractAddress, source
+- Updated `SubmitVoteRequest` to require contractAddress and source
+
+#### 6. Storage Update (server/storage.ts)
+- Updated `getRecentlyAnalyzedRequests()` to include new fields
+- Updated `createVoteRequest()` in MemStorage to include new fields
+
+### Database Migration
+```sql
+ALTER TABLE token_vote_requests ADD COLUMN IF NOT EXISTS chain text;
+ALTER TABLE token_vote_requests ADD COLUMN IF NOT EXISTS contract_address text;
+ALTER TABLE token_vote_requests ADD COLUMN IF NOT EXISTS source text;
+```
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+- Database migration applied via psql
+
+### Current State
+- Vote page requires contract address input for all new votes
+- Users can look up tokens via CoinGecko or Dexscreener
+- Chain selection available for both sources
+- Old vote requests without contract info are displayed but voting is disabled
+- All TypeScript checks pass
+
+---
+
+## Session: 2026-01-17 - Gumloop Input Format Update (Contract Address + Source)
+
+### Summary
+Updated the Gumloop pipeline input format to use a unified contract address approach with an explicit Source selector. This fixes an issue where the CoinGecko path was being triggered even when using Dexscreener source, due to conditional shield nodes not properly detecting empty inputs.
+
+### Changes Made
+
+#### 1. Admin Analysis Endpoint (server/routes.ts)
+- Changed Gumloop pipeline inputs from separate input nodes to unified format:
+  - `Source` - "coingecko" or "dexscreener" (determines which lookup path to use)
+  - `Contract Address` - the token contract address
+  - `Chain` - the blockchain network
+- Removed the old format with separate "Coingecko Contract Address" and "Dexscreener Contract Address" nodes
+
+#### 2. Database Schema (shared/schema.ts)
+- Added 2 new columns to `reanalysisQueue` table:
+  - `contractAddress` - stores the token contract address for reanalysis
+  - `source` - stores "coingecko" or "dexscreener"
+
+#### 3. Storage Updates (server/storage.ts)
+- Updated `getTopTokensForReanalysis()` to include `contractAddress` in query and return type
+- Updated `IStorage` interface and `MemStorage` stub to match
+
+#### 4. Reanalysis Queue Job (server/jobs/reanalysisQueue.ts)
+- Updated `scheduleWeeklyReanalysis()` to include `contractAddress` and derive `source` from tokenId prefix
+- Updated `triggerGumloopAnalysis()` to use new input format
+- Added fallback logic to extract contract address from tokenId format (`dex_{chain}_{address}` or `cg_{chain}_{address}`) for older tokens
+
+#### 5. Recovery with Custom Run ID Feature
+- **New endpoint**: `POST /api/admin/analyze/:id/recover-with-run` - Recover a failed analysis using a different Gumloop run ID (for resumed flows)
+- **New API function**: `adminRecoverAnalysisWithRun()` in `client/src/lib/api.ts`
+- **New UI**: "With Run ID" button on failed analyses in admin panel opens a modal to enter the Gumloop run ID
+- **Use case**: When a Gumloop flow fails and you resume it manually, you get a new run ID - this feature lets you link that successful run to the original analysis
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/routes.ts` | Updated Gumloop pipeline inputs, added recover-with-run endpoint |
+| `shared/schema.ts` | Added `contractAddress` and `source` to reanalysis queue |
+| `server/storage.ts` | Updated `getTopTokensForReanalysis` return type |
+| `server/jobs/reanalysisQueue.ts` | Updated scheduling and Gumloop trigger to use new format |
+| `client/src/lib/api.ts` | Added `adminRecoverAnalysisWithRun` function |
+| `client/src/pages/Admin.tsx` | Added "With Run ID" button and recovery modal |
+| `server/gumloop-parser.ts` | Added missing field label prefixes for sub-narrative fields |
+
+#### 6. Parser Fix - Sub-Narrative Field Labels (server/gumloop-parser.ts)
+- Added missing prefixes to `FIELD_LABEL_PREFIXES` to strip from values:
+  - `primary_narrative:`, `primary narrative:`
+  - `sub_narrative:`, `sub narrative:`
+  - `sub_narrative_ceiling:`, `sub narrative ceiling:`
+  - `sub_narrative_consensus:`, `sub narrative consensus:`
+- This fixes issue where "primary_narrative: AI Agents" was displayed instead of just "AI Agents"
+
+#### 7. Reprocess Endpoint Fix (server/routes.ts)
+- The `/api/admin/analyze/:id/reprocess` endpoint now also updates:
+  - Narrative fields: `narrative`, `subNarrative`, `primaryNarrative`, `subNarrativeCeiling`, `subNarrativeConsensus`
+  - Asymmetry fields: `asymmetryFloor`, `asymmetryCeiling`, `asymmetryScore`
+- Previously it only updated market data and upside fields, so reprocessing wouldn't fix bad data
+
+#### 8. Asymmetry Profile Parser Fix (server/gumloop-parser.ts)
+- Added `extractAsymmetryNumeric()` function to extract just the numeric value from asymmetry floor/ceiling fields
+- These fields were showing full calculation text (e.g., "8.69 (calculated from...)") instead of just the number (e.g., "8.69")
+- Updated both `parseGumloopResponse()` and `parseGumloopOutputs()` to use this cleaner
+
+#### 9. CoinGecko Contract Lookup Fix (server/routes.ts)
+- Fixed CoinGecko analysis using wrong API endpoint
+- Was using `/coins/{tokenId}` which requires a CoinGecko token ID
+- Now uses `/coins/{platform}/contract/{address}` to lookup by contract address
+- Added platform ID mapping for supported chains (ethereum, polygon, arbitrum, base, solana, etc.)
+- This fixes "Could not determine token symbol" error when analyzing via CoinGecko input
+
+#### 10. Vote Queue Analyze Button UX Improvement (client/src/pages/Admin.tsx)
+- Added `pendingVoteToken` state to track which token from the vote queue needs analysis
+- "Analyze" buttons in Yesterday's Top Voted and Pending Requests now:
+  - Store the token info (name, symbol, CoinGecko ID)
+  - Switch to the Analyze tab
+  - Show a banner with the token info so admin knows which token to look up
+- Banner displays: token image, name, symbol, and CoinGecko ID
+- Banner auto-clears after successful analysis or can be dismissed manually
+
+**Note:** The display logic already correctly prefers `subNarrative` over `primaryNarrative`:
+- ScoreCard: Uses `analysis.subNarrative || analysis.narrative` for the Meta/Narrative field
+- LeaderboardTable: Uses `item.latestNarrative` which maps to `subNarrative || narrative`
+- HOT_NARRATIVES: Uses the `narrative` column which stores `subNarrative` when available
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### Database Migration Applied
+- Verified `reanalysis_queue` table has `contract_address` and `source` columns
+- Database schema is in sync with the codebase
+
+### Current State
+- Admin panel now sends unified Gumloop inputs: Source, Contract Address, Chain
+- Reanalysis queue stores and uses contract address for automated reanalyses
+- Backwards compatible - extracts contract address from tokenId for older tokens
+- Failed analyses can be recovered using a custom Gumloop run ID (for resumed flows)
+- Automated reanalysis system verified: all components in place and TypeScript checks pass
+
+### Database Migration Needed
+Run in Supabase SQL Editor:
+```sql
+ALTER TABLE "reanalysis_queue"
+  ADD COLUMN IF NOT EXISTS "contract_address" text;
+
+ALTER TABLE "reanalysis_queue"
+  ADD COLUMN IF NOT EXISTS "source" text;
+```
+
+### Gumloop Flow Configuration (IMPORTANT)
+The Gumloop flow must be configured correctly to receive API inputs:
+
+**Critical:** Input nodes must be at the TOP LEVEL of the flow, NOT inside If-Else shields. Nodes inside shields cannot receive external API inputs.
+
+**Working Architecture:**
+```
+[Source Input] → [Text Pass-through Node] → (output used as condition)
+[Contract Address Input] ──┐                        │
+[Chain Input] ─────────────┼────────────────────────┘
+                           │
+         ┌─────────────────┴─────────────────┐
+         ▼                                   ▼
+┌─────────────────────┐       ┌─────────────────────┐
+│ If-Else Shield #1   │       │ If-Else Shield #2   │
+│ Source=="dexscreener"│      │ Source=="coingecko" │
+│ ┌─────────────────┐ │       │ ┌─────────────────┐ │
+│ │Dexscreener      │ │       │ │CoinGecko        │ │
+│ │Contract Lookup  │ │       │ │Contract Lookup  │ │
+│ └─────────────────┘ │       │ └─────────────────┘ │
+└─────────────────────┘       └─────────────────────┘
+         │                                   │
+         └─────────────┬─────────────────────┘
+                       ▼
+                [Join Paths]
+```
+
+**Key Points:**
+1. Input nodes (`Source`, `Contract Address`, `Chain`) at top level - outside any shields
+2. Use a pass-through/Text node to expose Source value for If-Else conditions
+3. Each lookup node wrapped in its own If-Else shield with appropriate condition
+4. If-Else shield conditions reference the pass-through node's output (not direct inputs)
+5. Both shields connect Contract Address and Chain inputs to their respective lookup nodes
+
+---
+
+## Session: 2026-01-15 - Sub-Narrative Classification Support
 
 ### Summary
 Added support for hierarchical narrative classification. Tokens are now classified with both a broad `primary_narrative` (e.g., "AI Agents") and a specific `sub_narrative` (e.g., "Agent Payments / x402"). Also includes `sub_narrative_ceiling` for estimated peak FDV of the sub-narrative leader, displayed in the Upside Assessment section.

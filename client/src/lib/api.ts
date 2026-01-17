@@ -69,6 +69,61 @@ export async function getTokenDetails(tokenId: string): Promise<TokenDetails> {
   return fetchApi<TokenDetails>(`/api/token/${tokenId}`);
 }
 
+// Dexscreener Token Lookup
+export interface DexscreenerTokenInfo {
+  contractAddress: string;
+  chain: string;
+  symbol: string;
+  name: string;
+  imageUrl: string | null;
+  priceUsd: string | null;
+  marketCap: number | null;
+  fdv: number | null;
+  volume24h: number | null;
+  priceChange24h: number | null;
+  liquidity: number | null;
+  dexUrl: string | null;
+}
+
+export async function lookupDexscreenerToken(
+  contractAddress: string,
+  chain: string
+): Promise<DexscreenerTokenInfo | null> {
+  const data = await fetchApi<{ found: boolean; token?: DexscreenerTokenInfo }>(
+    `/api/dexscreener/token?address=${encodeURIComponent(contractAddress)}&chain=${encodeURIComponent(chain)}`
+  );
+  return data.found ? data.token! : null;
+}
+
+// Get supported Dexscreener chains
+export async function getDexscreenerChains(): Promise<{ id: string; name: string }[]> {
+  const data = await fetchApi<{ chains: { id: string; name: string }[] }>("/api/dexscreener/chains");
+  return data.chains;
+}
+
+// Lookup token by contract address on CoinGecko
+export interface CoinGeckoContractLookupResult {
+  id: string;
+  name: string;
+  symbol: string;
+  thumb: string | null;
+  large: string | null;
+  market_cap_rank: number | null;
+  platform?: string;
+}
+
+export async function lookupCoinGeckoByContract(
+  contractAddress: string
+): Promise<CoinGeckoContractLookupResult | null> {
+  const data = await fetchApi<{ coins: CoinGeckoContractLookupResult[]; foundByContract?: boolean; platform?: string }>(
+    `/api/token/search?q=${encodeURIComponent(contractAddress)}`
+  );
+  if (data.foundByContract && data.coins.length > 0) {
+    return { ...data.coins[0], platform: data.platform };
+  }
+  return null;
+}
+
 // Get Analysis Status (for polling)
 export async function getAnalysisStatus(analysisId: number): Promise<AnalysisStatus> {
   return fetchApi<AnalysisStatus>(`/api/analyze/${analysisId}/status`);
@@ -385,6 +440,9 @@ export interface VoteRequest {
   tokenSymbol: string;
   tokenName: string;
   tokenImage: string | null;
+  chain: string | null;
+  contractAddress: string | null;
+  source: string | null; // "coingecko" or "dexscreener"
   voteCount: number;
   priorityVoteCount: number;
   status: string;
@@ -443,6 +501,9 @@ export interface SubmitVoteRequest {
   tokenSymbol: string;
   tokenName: string;
   tokenImage?: string;
+  chain?: string; // blockchain network
+  contractAddress: string; // required - token contract address
+  source: "coingecko" | "dexscreener"; // required - data source
 }
 
 export interface SubmitVoteResponse {
@@ -594,12 +655,16 @@ export async function getAdminStatus(authToken?: string): Promise<AdminStatus> {
   return fetchApi<AdminStatus>("/api/admin/status", { authToken });
 }
 
+export type AnalysisSource = 'coingecko' | 'dexscreener';
+
 export interface AdminAnalyzeRequest {
-  tokenId: string;
-  tokenSymbol: string;
-  tokenName: string;
+  tokenId?: string;
+  tokenSymbol?: string;
+  tokenName?: string;
   tokenImage?: string;
-  chain?: string;
+  chain: string;
+  contractAddress: string;
+  source: AnalysisSource;
 }
 
 export interface AdminAnalyzeResponse {
@@ -607,6 +672,50 @@ export interface AdminAnalyzeResponse {
   analysisId: number;
   runId: string;
   status: string;
+  source?: AnalysisSource;
+}
+
+// ==================== DEXSCREENER API ====================
+
+export interface DexscreenerTokenInfo {
+  contractAddress: string;
+  chain: string;
+  symbol: string;
+  name: string;
+  imageUrl: string | null;
+  websiteUrl: string | null;
+  twitterUrl: string | null;
+  telegramUrl: string | null;
+  discordUrl: string | null;
+  priceUsd: string | null;
+  marketCap: number | null;
+  fdv: number | null;
+  volume24h: number | null;
+  priceChange24h: number | null;
+  liquidity: number | null;
+  dexUrl: string | null;
+  pairAddress: string | null;
+}
+
+export interface DexscreenerLookupResponse {
+  found: boolean;
+  token?: DexscreenerTokenInfo;
+  message?: string;
+}
+
+export interface DexscreenerChain {
+  id: string;
+  name: string;
+}
+
+// Lookup token on Dexscreener by contract address
+export async function getDexscreenerToken(
+  contractAddress: string,
+  chain: string
+): Promise<DexscreenerLookupResponse> {
+  return fetchApi<DexscreenerLookupResponse>(
+    `/api/dexscreener/token?address=${encodeURIComponent(contractAddress)}&chain=${encodeURIComponent(chain)}`
+  );
 }
 
 export async function adminStartAnalysis(
@@ -720,6 +829,21 @@ export async function adminRecoverAnalysis(
     {
       method: "POST",
       authToken,
+    }
+  );
+}
+
+export async function adminRecoverAnalysisWithRun(
+  analysisId: number,
+  runId: string,
+  authToken: string
+): Promise<{ message: string; gumloopState: string; status: string }> {
+  return fetchApi<{ message: string; gumloopState: string; status: string }>(
+    `/api/admin/analyze/${analysisId}/recover-with-run`,
+    {
+      method: "POST",
+      authToken,
+      body: JSON.stringify({ runId }),
     }
   );
 }

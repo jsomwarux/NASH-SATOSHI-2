@@ -200,6 +200,7 @@ export interface IStorage {
   getStuckAnalysesWithRunId(minAgeMinutes?: number): Promise<TokenAnalysis[]>;
   getAnalysesByTokenId(tokenId: string): Promise<TokenAnalysis[]>;
   getLatestAnalysisByTokenId(tokenId: string): Promise<TokenAnalysis | null>;
+  getLatestAnalysisByContractAddress(contractAddress: string): Promise<TokenAnalysis | null>;
   getAllAnalyses(limit?: number, offset?: number, status?: string): Promise<{ items: TokenAnalysis[]; total: number }>;
 
   // Leaderboard methods
@@ -287,7 +288,7 @@ export interface IStorage {
   getProcessingReanalysisCount(): Promise<number>;
   updateReanalysisQueueItem(id: number, data: Partial<InsertReanalysisQueue>): Promise<ReanalysisQueueItem | null>;
   isTokenInReanalysisQueue(tokenId: string): Promise<boolean>;
-  getTopTokensForReanalysis(count: number): Promise<{ tokenId: string; tokenSymbol: string; tokenName: string; tokenImage: string | null; chain: string | null; score: number }[]>;
+  getTopTokensForReanalysis(count: number): Promise<{ tokenId: string; tokenSymbol: string; tokenName: string; tokenImage: string | null; chain: string | null; contractAddress: string | null; score: number }[]>;
   getReanalysisQueueStats(): Promise<{ pending: number; processing: number; completed: number; failed: number }>;
   getReanalysisQueueItems(options: { status?: ReanalysisQueueStatus; limit?: number; offset?: number }): Promise<{ items: ReanalysisQueueItem[]; total: number }>;
   cleanupOldQueueItems(daysOld: number): Promise<number>;
@@ -703,6 +704,20 @@ export class PostgresStorage implements IStorage {
         .select()
         .from(tokenAnalyses)
         .where(sql`LOWER(${tokenAnalyses.tokenId}) = LOWER(${tokenId})`)
+        .orderBy(desc(tokenAnalyses.createdAt))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async getLatestAnalysisByContractAddress(contractAddress: string): Promise<TokenAnalysis | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      // Use case-insensitive comparison for contract address matching
+      const result = await db
+        .select()
+        .from(tokenAnalyses)
+        .where(sql`LOWER(${tokenAnalyses.contractAddress}) = LOWER(${contractAddress})`)
         .orderBy(desc(tokenAnalyses.createdAt))
         .limit(1);
       return result[0] || null;
@@ -1447,6 +1462,9 @@ export class PostgresStorage implements IStorage {
           tokenSymbol: tokenVoteRequests.tokenSymbol,
           tokenName: tokenVoteRequests.tokenName,
           tokenImage: tokenVoteRequests.tokenImage,
+          chain: tokenVoteRequests.chain,
+          contractAddress: tokenVoteRequests.contractAddress,
+          source: tokenVoteRequests.source,
           voteCount: tokenVoteRequests.voteCount,
           priorityVoteCount: tokenVoteRequests.priorityVoteCount,
           status: tokenVoteRequests.status,
@@ -1467,6 +1485,9 @@ export class PostgresStorage implements IStorage {
         tokenSymbol: r.tokenSymbol,
         tokenName: r.tokenName,
         tokenImage: r.tokenImage,
+        chain: r.chain,
+        contractAddress: r.contractAddress,
+        source: r.source,
         voteCount: r.voteCount,
         priorityVoteCount: r.priorityVoteCount,
         status: "analyzed" as const,
@@ -2105,7 +2126,7 @@ export class PostgresStorage implements IStorage {
     });
   }
 
-  async getTopTokensForReanalysis(count: number): Promise<{ tokenId: string; tokenSymbol: string; tokenName: string; tokenImage: string | null; chain: string | null; score: number }[]> {
+  async getTopTokensForReanalysis(count: number): Promise<{ tokenId: string; tokenSymbol: string; tokenName: string; tokenImage: string | null; chain: string | null; contractAddress: string | null; score: number }[]> {
     return withRetry(async () => {
       const db = getDb();
       // Get tokens with most recent completed analysis, ordered by score
@@ -2118,6 +2139,7 @@ export class PostgresStorage implements IStorage {
             token_name,
             token_image,
             chain,
+            contract_address,
             CAST(final_score AS FLOAT) as score
           FROM token_analyses
           WHERE status = 'completed'
@@ -2133,6 +2155,7 @@ export class PostgresStorage implements IStorage {
         tokenName: row.token_name,
         tokenImage: row.token_image,
         chain: row.chain,
+        contractAddress: row.contract_address,
         score: row.score,
       }));
     });
@@ -2444,6 +2467,13 @@ export class MemStorage implements IStorage {
     return analyses[0] || null;
   }
 
+  async getLatestAnalysisByContractAddress(contractAddress: string): Promise<TokenAnalysis | null> {
+    const analyses = Array.from(this.analyses.values())
+      .filter((a) => a.contractAddress?.toLowerCase() === contractAddress.toLowerCase())
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return analyses[0] || null;
+  }
+
   async getAllAnalyses(limit = 50, offset = 0, status?: string): Promise<{ items: TokenAnalysis[]; total: number }> {
     let analyses = Array.from(this.analyses.values());
     if (status) {
@@ -2516,6 +2546,9 @@ export class MemStorage implements IStorage {
       tokenSymbol: data.tokenSymbol,
       tokenName: data.tokenName,
       tokenImage: data.tokenImage ?? null,
+      chain: data.chain ?? null,
+      contractAddress: data.contractAddress ?? null,
+      source: data.source ?? null,
       voteCount: data.voteCount ?? 0,
       priorityVoteCount: data.priorityVoteCount ?? 0,
       status: data.status ?? "pending",
@@ -2761,7 +2794,7 @@ export class MemStorage implements IStorage {
     return false;
   }
 
-  async getTopTokensForReanalysis(_count: number): Promise<{ tokenId: string; tokenSymbol: string; tokenName: string; tokenImage: string | null; chain: string | null; score: number }[]> {
+  async getTopTokensForReanalysis(_count: number): Promise<{ tokenId: string; tokenSymbol: string; tokenName: string; tokenImage: string | null; chain: string | null; contractAddress: string | null; score: number }[]> {
     return [];
   }
 

@@ -551,6 +551,9 @@ export const tokenVoteRequests = pgTable("token_vote_requests", {
   tokenSymbol: text("token_symbol").notNull(),
   tokenName: text("token_name").notNull(),
   tokenImage: text("token_image"),
+  chain: text("chain"), // blockchain network (e.g., "ethereum", "solana", "base")
+  contractAddress: text("contract_address"), // token contract address
+  source: text("source"), // "coingecko" or "dexscreener"
   voteCount: integer("vote_count").default(0),
   priorityVoteCount: integer("priority_vote_count").default(0), // 2x weight votes from premium users
   status: text("status").default("pending"), // pending, analyzing, analyzed, rejected
@@ -618,6 +621,9 @@ export interface VoteRequest {
   tokenSymbol: string;
   tokenName: string;
   tokenImage?: string;
+  chain?: string; // blockchain network
+  contractAddress?: string; // token contract address
+  source?: string; // "coingecko" or "dexscreener"
 }
 
 // ==================== PERFORMANCE TRACKING ====================
@@ -843,6 +849,8 @@ export const reanalysisQueue = pgTable("reanalysis_queue", {
   tokenName: text("token_name").notNull(),
   tokenImage: text("token_image"),
   chain: text("chain"),
+  contractAddress: text("contract_address"),
+  source: text("source"), // "coingecko" or "dexscreener"
 
   // Queue metadata
   priority: integer("priority").notNull(), // 1=top25 (weekly), 2=top50 (bi-weekly), 3=top100 (monthly)

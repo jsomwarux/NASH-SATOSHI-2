@@ -14,7 +14,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
-import { TokenSearch } from "@/components/search/TokenSearch";
+import { ContractAddressLookup } from "@/components/vote/ContractAddressLookup";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,15 +26,24 @@ import {
   getRecentlyAnalyzedRequests,
   submitVote,
   type VoteRequest,
-  type VoteStatus,
 } from "@/lib/api";
-import type { TokenSearchResult } from "@shared/schema";
+
+// Token lookup result type for contract address lookups
+interface TokenLookupResult {
+  source: "coingecko" | "dexscreener";
+  tokenId: string;
+  symbol: string;
+  name: string;
+  image: string | null;
+  chain: string;
+  contractAddress: string;
+}
 
 export default function Vote() {
   const { user, getAccessToken } = useAuth();
   const queryClient = useQueryClient();
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [pendingToken, setPendingToken] = useState<TokenSearchResult | null>(null);
+  const [pendingToken, setPendingToken] = useState<TokenLookupResult | null>(null);
 
   // Get vote status
   const { data: voteStatus } = useQuery({
@@ -60,17 +69,20 @@ export default function Vote() {
     staleTime: 60000,
   });
 
-  // Submit vote mutation
+  // Submit vote mutation - now requires contract address and source
   const voteMutation = useMutation({
-    mutationFn: async (token: TokenSearchResult) => {
+    mutationFn: async (token: TokenLookupResult) => {
       const authToken = await getAccessToken();
       if (!authToken) throw new Error("Authentication required");
       return submitVote(
         {
-          tokenId: token.id,
+          tokenId: token.tokenId,
           tokenSymbol: token.symbol,
           tokenName: token.name,
-          tokenImage: token.large || token.thumb,
+          tokenImage: token.image || undefined,
+          chain: token.chain,
+          contractAddress: token.contractAddress,
+          source: token.source,
         },
         authToken
       );
@@ -81,7 +93,7 @@ export default function Vote() {
     },
   });
 
-  const handleTokenSelect = async (token: TokenSearchResult) => {
+  const handleTokenSelect = async (token: TokenLookupResult) => {
     if (!user) {
       setPendingToken(token);
       setShowAuthModal(true);
@@ -101,13 +113,22 @@ export default function Vote() {
       return;
     }
 
+    // Existing vote requests may not have contract address info
+    // Only allow voting for requests that have the required fields
+    if (!request.contractAddress || !request.source) {
+      console.error("Vote request missing contract address or source");
+      return;
+    }
+
     try {
       await voteMutation.mutateAsync({
-        id: request.tokenId,
+        tokenId: request.tokenId,
         symbol: request.tokenSymbol,
         name: request.tokenName,
-        thumb: request.tokenImage || undefined,
-        large: request.tokenImage || undefined,
+        image: request.tokenImage,
+        chain: request.chain || "",
+        contractAddress: request.contractAddress,
+        source: request.source as "coingecko" | "dexscreener",
       });
     } catch (err) {
       console.error("Vote failed:", err);
@@ -187,43 +208,48 @@ export default function Vote() {
           )}
         </motion.div>
 
-        {/* Search Section */}
+        {/* Contract Address Lookup Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="max-w-2xl mx-auto mb-12"
+          className="max-w-lg mx-auto mb-12"
         >
-          <div className="relative">
-            <div className="absolute -inset-1 bg-gradient-to-r from-primary/50 to-accent/50 rounded-lg blur opacity-30" />
-            <div className="relative">
-              <TokenSearch
+          <Card className="bg-card/50 border-border/50">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-2 text-lg font-mono">
+                <Search className="w-5 h-5 text-primary" />
+                Lookup Token by Contract
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ContractAddressLookup
                 onSelect={handleTokenSelect}
                 isLoading={voteMutation.isPending}
               />
-            </div>
-          </div>
 
-          {voteMutation.isSuccess && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex items-center justify-center gap-2 mt-4 text-green-400"
-            >
-              <Check className="w-5 h-5" />
-              Vote recorded successfully!
-            </motion.div>
-          )}
+              {voteMutation.isSuccess && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center justify-center gap-2 mt-4 text-green-400"
+                >
+                  <Check className="w-5 h-5" />
+                  Vote recorded successfully!
+                </motion.div>
+              )}
 
-          {voteMutation.isError && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="text-center mt-4 text-red-400 text-sm"
-            >
-              {voteMutation.error instanceof Error ? voteMutation.error.message : "Failed to submit vote"}
-            </motion.div>
-          )}
+              {voteMutation.isError && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-center mt-4 text-red-400 text-sm"
+                >
+                  {voteMutation.error instanceof Error ? voteMutation.error.message : "Failed to submit vote"}
+                </motion.div>
+              )}
+            </CardContent>
+          </Card>
         </motion.div>
 
         {/* Two Column Layout */}
@@ -250,6 +276,7 @@ export default function Vote() {
                   <div className="space-y-3">
                     {topRequests.map((request, index) => {
                       const hasVoted = voteStatus?.votedRequestIds?.includes(request.id);
+                      const hasContractInfo = !!request.contractAddress && !!request.source;
                       return (
                         <div
                           key={request.id}
@@ -267,7 +294,14 @@ export default function Vote() {
                           )}
                           <div className="flex-1 min-w-0">
                             <div className="font-medium truncate">{request.tokenName}</div>
-                            <div className="text-xs text-muted-foreground">${request.tokenSymbol.toUpperCase()}</div>
+                            <div className="text-xs text-muted-foreground flex items-center gap-1">
+                              ${request.tokenSymbol.toUpperCase()}
+                              {request.source && (
+                                <Badge variant="outline" className="text-[8px] px-1 py-0">
+                                  {request.source === "dexscreener" ? "DEX" : "CG"}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                           <div className="text-right">
                             <div className="text-sm font-bold text-primary">{getTotalVotes(request)}</div>
@@ -276,9 +310,10 @@ export default function Vote() {
                           <Button
                             size="sm"
                             variant={hasVoted ? "outline" : "default"}
-                            disabled={hasVoted || voteMutation.isPending || (voteStatus?.votesRemaining || 0) <= 0}
+                            disabled={hasVoted || voteMutation.isPending || (voteStatus?.votesRemaining || 0) <= 0 || !hasContractInfo}
                             onClick={() => handleVoteForRequest(request)}
                             className="w-20"
+                            title={!hasContractInfo ? "This token was submitted before contract address requirement" : undefined}
                           >
                             {hasVoted ? (
                               <Check className="w-4 h-4" />

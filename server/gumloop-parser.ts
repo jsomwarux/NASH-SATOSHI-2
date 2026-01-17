@@ -306,10 +306,42 @@ function cleanTextPreserveStructure(text: string | undefined | null): string {
     .trim();
 }
 
+// Extract just the numeric value from asymmetry floor/ceiling fields
+// These often come with calculation text like "8.69 (calculated from...)" or full formulas
+function extractAsymmetryNumeric(text: string | undefined | null): string {
+  if (!text) return "";
+
+  // Clean the text first
+  const cleaned = cleanText(text);
+
+  // Try to find a decimal number at the start or standalone
+  // Match patterns like: "8.69", "11.00", "8.69/15", etc.
+  const numericMatch = cleaned.match(/^(\d+(?:\.\d+)?)/);
+  if (numericMatch) {
+    return numericMatch[1];
+  }
+
+  // Try to find any decimal number in the text
+  const anyNumericMatch = cleaned.match(/(\d+(?:\.\d+)?)/);
+  if (anyNumericMatch) {
+    return anyNumericMatch[1];
+  }
+
+  return cleaned;
+}
+
 // Strip common field label prefixes from values
 // Many fields come through with their label included (e.g., "narrative: AI Agents")
 const FIELD_LABEL_PREFIXES = [
   'narrative:',
+  'primary_narrative:',
+  'primary narrative:',
+  'sub_narrative:',
+  'sub narrative:',
+  'sub_narrative_ceiling:',
+  'sub narrative ceiling:',
+  'sub_narrative_consensus:',
+  'sub narrative consensus:',
   'thesis:',
   'display_summary:',
   'display summary:',
@@ -1051,17 +1083,17 @@ function extractNarrativeField(text: string): string | null {
   };
 
   // Patterns ordered by specificity (most specific first)
+  // IMPORTANT: Use negative lookbehind (?<!...) to avoid matching "narrative:" within "primary_narrative:" or "sub_narrative:"
   const patterns = [
     // **NARRATIVE:** followed by narrative: value (Gumloop format)
-    /\*\*NARRATIVE:\*\*\s*\n?\s*narrative:\s*([^\n]+)/i,
-    // narrative: value on its own line (not in a table)
-    /(?:^|\n)\s*narrative:\s*([A-Za-z][^\n|]+)/im,
-    // **Narrative**: value or **Narrative:** value
-    /\*\*Narrative\*\*[:\s]+([A-Za-z][^\n*|]+)/i,
-    // Primary Narrative: value
-    /Primary\s*Narrative[:\s]+["']?([A-Za-z][^"'\n|]+)/i,
-    // narrative in quotes: "value" or 'value'
-    /narrative[:\s]+["']([^"']+)["']/i,
+    /\*\*NARRATIVE:\*\*\s*\n?\s*(?<!primary_|sub_)narrative:\s*([^\n]+)/i,
+    // narrative: value on its own line (not in a table) - NOT preceded by primary_ or sub_
+    /(?:^|\n)\s*(?<!primary_|sub_)narrative:\s*([A-Za-z][^\n|]+)/im,
+    // **Narrative**: value or **Narrative:** value - but not Primary Narrative or Sub Narrative
+    /(?<!\bPrimary\s)(?<!\bSub\s)\*\*Narrative\*\*[:\s]+([A-Za-z][^\n*|]+)/i,
+    // Primary Narrative: value - skip this for plain narrative extraction
+    // narrative in quotes: "value" or 'value' - NOT preceded by primary_ or sub_
+    /(?<!primary_|sub_)narrative[:\s]+["']([^"']+)["']/i,
     // thesis as fallback
     /thesis[:\s]+["']([^"']+)["']/i,
   ];
@@ -1080,6 +1112,55 @@ function extractNarrativeField(text: string): string | null {
   }
 
   return null;
+}
+
+// Extract narrative fields from ## NARRATIVE: markdown section
+// Returns { primaryNarrative, subNarrative } when found
+function extractNarrativeSectionFields(text: string): { primaryNarrative?: string; subNarrative?: string } {
+  const result: { primaryNarrative?: string; subNarrative?: string } = {};
+
+  // Look for ## NARRATIVE: or similar markdown headers
+  const narrativeSectionPatterns = [
+    /##\s*NARRATIVE:?\s*\n([\s\S]*?)(?=\n##|\n---|\n\*\*[A-Z]|$)/i,
+    /\*\*NARRATIVE:?\*\*\s*:?\s*\n([\s\S]*?)(?=\n##|\n\*\*[A-Z]|$)/i,
+    /NARRATIVE\s*SECTION:?\s*\n([\s\S]*?)(?=\n##|\n---|\n\*\*[A-Z]|$)/i,
+  ];
+
+  let sectionContent: string | null = null;
+  for (const pattern of narrativeSectionPatterns) {
+    const match = text.match(pattern);
+    if (match && match[1] && match[1].trim().length > 5) {
+      sectionContent = match[1].trim();
+      console.log(`extractNarrativeSectionFields: Found NARRATIVE section (${sectionContent.length} chars)`);
+      break;
+    }
+  }
+
+  if (!sectionContent) {
+    return result;
+  }
+
+  // Extract primary_narrative from section
+  const primaryMatch = sectionContent.match(/primary[_\s]?narrative[:\s]+([^\n]+)/i);
+  if (primaryMatch && primaryMatch[1]) {
+    const value = stripFieldLabelPrefix(primaryMatch[1].trim());
+    if (value && value.length >= 2 && value.length < 100) {
+      result.primaryNarrative = value;
+      console.log(`extractNarrativeSectionFields: Got primary_narrative: "${value}"`);
+    }
+  }
+
+  // Extract sub_narrative from section
+  const subMatch = sectionContent.match(/sub[_\s]?narrative[:\s]+([^\n]+)/i);
+  if (subMatch && subMatch[1]) {
+    const value = stripFieldLabelPrefix(subMatch[1].trim());
+    if (value && value.length >= 2 && value.length < 150) {
+      result.subNarrative = value;
+      console.log(`extractNarrativeSectionFields: Got sub_narrative: "${value}"`);
+    }
+  }
+
+  return result;
 }
 
 // Dedicated final score extraction - avoids picking up individual model scores from tables
@@ -1336,7 +1417,7 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
                          extractField(parseText, 'asymmetry_floor_score') ||
                          extractField(parseText, 'downside_risk');
   if (asymmetryFloor && asymmetryFloor.length > 0) {
-    result.asymmetryFloor = cleanText(asymmetryFloor);
+    result.asymmetryFloor = extractAsymmetryNumeric(asymmetryFloor);
     console.log(`Parser: Extracted asymmetryFloor: "${result.asymmetryFloor}"`);
   }
 
@@ -1344,7 +1425,7 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
                            extractField(parseText, 'asymmetry_ceiling_score') ||
                            extractField(parseText, 'upside_potential');
   if (asymmetryCeiling && asymmetryCeiling.length > 0) {
-    result.asymmetryCeiling = cleanText(asymmetryCeiling);
+    result.asymmetryCeiling = extractAsymmetryNumeric(asymmetryCeiling);
     console.log(`Parser: Extracted asymmetryCeiling: "${result.asymmetryCeiling}"`);
   }
 
@@ -2077,12 +2158,12 @@ function parseLegacyFormat(rawText: string, result: ParsedGumloopResponse): void
     }
   }
   if (!result.asymmetryFloor) {
-    const floorMatch = rawText.match(/(?:Downside|Floor|Risk)[:\s]*(-?\d+%?(?:\s*to\s*-?\d+%?)?)/i);
-    if (floorMatch) result.asymmetryFloor = cleanText(floorMatch[1]);
+    const floorMatch = rawText.match(/(?:Downside|Floor|Risk)[:\s]*(-?\d+(?:\.\d+)?)/i);
+    if (floorMatch) result.asymmetryFloor = floorMatch[1];
   }
   if (!result.asymmetryCeiling) {
-    const ceilingMatch = rawText.match(/(?:Upside|Ceiling|Potential)[:\s]*(\+?\d+%?(?:\s*to\s*\+?\d+%?)?)/i);
-    if (ceilingMatch) result.asymmetryCeiling = cleanText(ceilingMatch[1]);
+    const ceilingMatch = rawText.match(/(?:Upside|Ceiling|Potential)[:\s]*(\+?\d+(?:\.\d+)?)/i);
+    if (ceilingMatch) result.asymmetryCeiling = ceilingMatch[1].replace(/^\+/, '');
   }
 }
 
@@ -2343,6 +2424,20 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
     if (!result.schellingPosition && result.narrativeRank) {
       result.schellingPosition = result.narrativeRank;
       console.log(`Parser: Using narrativeRank "${result.narrativeRank}" as schellingPosition fallback`);
+    }
+
+    // NARRATIVE SECTION EXTRACTION: Try to extract from ## NARRATIVE: markdown section
+    // This handles Gumloop outputs where primary_narrative and sub_narrative are in a dedicated section
+    if (!result.subNarrative || !result.primaryNarrative) {
+      const narrativeSectionFields = extractNarrativeSectionFields(rawText);
+      if (narrativeSectionFields.primaryNarrative && !result.primaryNarrative) {
+        result.primaryNarrative = narrativeSectionFields.primaryNarrative;
+        console.log(`Parser: Got primaryNarrative from NARRATIVE section: "${result.primaryNarrative}"`);
+      }
+      if (narrativeSectionFields.subNarrative && !result.subNarrative) {
+        result.subNarrative = narrativeSectionFields.subNarrative;
+        console.log(`Parser: Got subNarrative from NARRATIVE section: "${result.subNarrative}"`);
+      }
     }
 
     // SUB-NARRATIVE FALLBACK LOGIC
@@ -2770,16 +2865,16 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   const equilibriumType = getString('equilibrium_type');
   if (equilibriumType) result.equilibriumType = equilibriumType;
 
-  // Asymmetry floor/ceiling - try multiple field names
+  // Asymmetry floor/ceiling - try multiple field names and extract just the numeric value
   const asymmetryFloor = getString('asymmetry_floor') || getString('asymmetry_floor_score');
   if (asymmetryFloor) {
-    result.asymmetryFloor = asymmetryFloor;
+    result.asymmetryFloor = extractAsymmetryNumeric(asymmetryFloor);
     console.log(`Parser (outputs): Extracted asymmetryFloor: "${result.asymmetryFloor}"`);
   }
 
   const asymmetryCeiling = getString('asymmetry_ceiling') || getString('asymmetry_ceiling_score');
   if (asymmetryCeiling) {
-    result.asymmetryCeiling = asymmetryCeiling;
+    result.asymmetryCeiling = extractAsymmetryNumeric(asymmetryCeiling);
     console.log(`Parser (outputs): Extracted asymmetryCeiling: "${result.asymmetryCeiling}"`);
   }
 
@@ -2956,7 +3051,7 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   // Let UI show "Summary not available" if no actual summary exists
 
   // FALLBACK: If narrative wasn't found in direct fields, search all text content in outputs
-  if (!result.narrative) {
+  if (!result.narrative || !result.subNarrative || !result.primaryNarrative) {
     // Combine all string values from outputs into one text to search
     const allTextContent: string[] = [];
     for (const [key, value] of Object.entries(outputs)) {
@@ -2975,28 +3070,44 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
     if (allTextContent.length > 0) {
       const combinedText = allTextContent.join('\n');
 
-      // Patterns to extract narrative from text content
-      const narrativePatterns = [
-        // **NARRATIVE:** followed by narrative: value on same or next line
-        /\*\*NARRATIVE:\*\*\s*(?:narrative:\s*)?([^\n*|]+)/i,
-        // narrative: value (simple format)
-        /(?:^|\n)\s*narrative:\s*([^\n|]+)/i,
-        // **Narrative**: value
-        /\*\*Narrative\*\*[:\s]+([^\n|*]+)/i,
-        // | Narrative | value |
-        /\|\s*Narrative\s*\|\s*([^|]+)\|/i,
-      ];
+      // First, try to extract from ## NARRATIVE: section
+      if (!result.subNarrative || !result.primaryNarrative) {
+        const narrativeSectionFields = extractNarrativeSectionFields(combinedText);
+        if (narrativeSectionFields.primaryNarrative && !result.primaryNarrative) {
+          result.primaryNarrative = narrativeSectionFields.primaryNarrative;
+          console.log(`parseGumloopOutputs: Got primaryNarrative from NARRATIVE section: "${result.primaryNarrative}"`);
+        }
+        if (narrativeSectionFields.subNarrative && !result.subNarrative) {
+          result.subNarrative = narrativeSectionFields.subNarrative;
+          console.log(`parseGumloopOutputs: Got subNarrative from NARRATIVE section: "${result.subNarrative}"`);
+        }
+      }
 
-      for (const pattern of narrativePatterns) {
-        const match = combinedText.match(pattern);
-        if (match && match[1]) {
-          const narrative = cleanText(match[1].trim());
-          if (narrative.length > 2 && narrative.length < 100 &&
-              !narrative.includes('AT_RISK') && !narrative.includes('USER') &&
-              !narrative.toLowerCase().includes('unknown')) {
-            result.narrative = narrative;
-            console.log(`parseGumloopOutputs: Found narrative in text content: "${narrative}"`);
-            break;
+      // Patterns to extract narrative from text content
+      // IMPORTANT: Use negative lookbehind to avoid matching "narrative:" within "primary_narrative:" or "sub_narrative:"
+      if (!result.narrative) {
+        const narrativePatterns = [
+          // **NARRATIVE:** followed by narrative: value on same or next line (not primary_narrative or sub_narrative)
+          /\*\*NARRATIVE:\*\*\s*(?!primary_|sub_)(?:narrative:\s*)?([^\n*|]+)/i,
+          // narrative: value (simple format) - NOT preceded by primary_ or sub_
+          /(?:^|\n)\s*(?<!primary_|sub_)narrative:\s*([^\n|]+)/i,
+          // **Narrative**: value (but not Primary Narrative or Sub Narrative)
+          /(?<!\bPrimary\s)(?<!\bSub\s)\*\*Narrative\*\*[:\s]+([^\n|*]+)/i,
+          // | Narrative | value |
+          /\|\s*Narrative\s*\|\s*([^|]+)\|/i,
+        ];
+
+        for (const pattern of narrativePatterns) {
+          const match = combinedText.match(pattern);
+          if (match && match[1]) {
+            const narrative = cleanText(match[1].trim());
+            if (narrative.length > 2 && narrative.length < 100 &&
+                !narrative.includes('AT_RISK') && !narrative.includes('USER') &&
+                !narrative.toLowerCase().includes('unknown')) {
+              result.narrative = stripFieldLabelPrefix(narrative);
+              console.log(`parseGumloopOutputs: Found narrative in text content: "${result.narrative}"`);
+              break;
+            }
           }
         }
       }

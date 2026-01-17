@@ -18,6 +18,7 @@ import {
 } from "./stripe";
 import { CREDIT_PACKS, SUBSCRIPTION_TIERS, type CreditPackId, type SubscriptionTierId } from "@shared/schema";
 import { onAnalysisComplete } from "./jobs/reanalysisQueue";
+import { getTokenByContract as getDexscreenerToken, getSupportedChains as getDexscreenerChains, DEXSCREENER_CHAINS } from "./dexscreener";
 
 // ==================== BETA MODE ====================
 // When true, all users get full access (beta_free tier) bypassing paywalls
@@ -97,6 +98,18 @@ export async function registerRoutes(
         'static.coingecko.com',
         'i.imgur.com',
         'raw.githubusercontent.com',
+        // Dexscreener image domains
+        'cdn.dexscreener.com',
+        'dd.dexscreener.com',
+        'dexscreener.com',
+        'logos.dexscreener.com',
+        // IPFS gateways (commonly used by tokens)
+        'ipfs.io',
+        'cloudflare-ipfs.com',
+        'gateway.pinata.cloud',
+        // Other common token image hosts
+        'arweave.net',
+        's2.coinmarketcap.com',
       ];
 
       const url = new URL(imageUrl);
@@ -225,6 +238,43 @@ export async function registerRoutes(
       console.error("Error searching tokens:", error);
       res.status(500).json({ message: "Failed to search tokens", coins: [] });
     }
+  });
+
+  // ==================== DEXSCREENER TOKEN LOOKUP ====================
+  // Lookup token by contract address on Dexscreener (for new/small cap tokens)
+  app.get("/api/dexscreener/token", async (req: Request, res: Response) => {
+    try {
+      const contractAddress = req.query.address as string;
+      const chain = req.query.chain as string;
+
+      if (!contractAddress || !chain) {
+        res.status(400).json({ message: "address and chain query parameters are required" });
+        return;
+      }
+
+      const tokenInfo = await getDexscreenerToken(contractAddress, chain);
+
+      if (!tokenInfo) {
+        res.status(404).json({
+          message: `Token not found on Dexscreener for ${contractAddress} on ${chain}`,
+          found: false,
+        });
+        return;
+      }
+
+      res.json({
+        found: true,
+        token: tokenInfo,
+      });
+    } catch (error) {
+      console.error("Dexscreener lookup error:", error);
+      res.status(500).json({ message: "Failed to lookup token on Dexscreener" });
+    }
+  });
+
+  // Get supported chains for Dexscreener
+  app.get("/api/dexscreener/chains", (_req: Request, res: Response) => {
+    res.json({ chains: getDexscreenerChains() });
   });
 
   // ==================== TOKEN DETAILS (CoinGecko Proxy) ====================
@@ -799,17 +849,51 @@ export async function registerRoutes(
     }
   });
 
-  // Admin: Trigger a new analysis
+  // Admin: Trigger a new analysis (supports both CoinGecko and Dexscreener sources)
   app.post("/api/admin/analyze", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const { tokenId, tokenSymbol, tokenName, tokenImage, chain } = req.body;
+      const {
+        tokenId,
+        tokenSymbol,
+        tokenName,
+        tokenImage,
+        chain,
+        contractAddress,
+        source = 'coingecko', // 'coingecko' or 'dexscreener'
+      } = req.body;
 
-      if (!tokenId || !tokenSymbol || !tokenName) {
-        res.status(400).json({ message: "tokenId, tokenSymbol, and tokenName are required" });
-        return;
+      // Validate required fields based on source
+      if (source === 'dexscreener') {
+        if (!contractAddress || !chain) {
+          res.status(400).json({ message: "contractAddress and chain are required for Dexscreener source" });
+          return;
+        }
+        // Validate chain is supported
+        if (!DEXSCREENER_CHAINS[chain.toLowerCase()]) {
+          res.status(400).json({
+            message: `Unsupported chain "${chain}". Supported chains: ${Object.keys(DEXSCREENER_CHAINS).join(', ')}`,
+          });
+          return;
+        }
+      } else {
+        // CoinGecko source
+        if (!contractAddress || !chain) {
+          res.status(400).json({ message: "contractAddress and chain are required for CoinGecko source" });
+          return;
+        }
       }
 
-      console.log(`Admin ${req.userEmail}: Starting analysis for ${tokenSymbol} (${tokenId})`);
+      // Generate a tokenId for Dexscreener tokens (they don't have a CoinGecko ID)
+      const effectiveTokenId = source === 'dexscreener'
+        ? `dex_${chain.toLowerCase()}_${contractAddress.toLowerCase()}`
+        : tokenId || `cg_${chain.toLowerCase()}_${contractAddress.toLowerCase()}`;
+
+      // Token symbol and name may need to be fetched if not provided
+      let effectiveSymbol = tokenSymbol;
+      let effectiveName = tokenName;
+      let effectiveImage = tokenImage;
+
+      console.log(`Admin ${req.userEmail}: Starting ${source} analysis for ${contractAddress} on ${chain}`);
 
       // Check Gumloop configuration
       const gumloopApiKey = process.env.GUMLOOP_API_KEY;
@@ -822,17 +906,17 @@ export async function registerRoutes(
       }
 
       // Check for existing pending/processing analysis for this token
-      const existingAnalysis = await storage.getLatestAnalysisByTokenId(tokenId);
+      const existingAnalysis = await storage.getLatestAnalysisByTokenId(effectiveTokenId);
       if (existingAnalysis && (existingAnalysis.status === "pending" || existingAnalysis.status === "processing")) {
         res.status(409).json({
-          message: `Analysis already in progress for ${tokenSymbol}`,
+          message: `Analysis already in progress for ${effectiveSymbol || contractAddress}`,
           analysisId: existingAnalysis.id,
           status: existingAnalysis.status,
         });
         return;
       }
 
-      // Fetch market data from CoinGecko
+      // Fetch market data based on source
       let marketData: {
         currentPrice?: string;
         marketCap?: string;
@@ -843,52 +927,115 @@ export async function registerRoutes(
         categories?: string[];
       } = {};
 
-      try {
-        const cgApiKey = process.env.COINGECKO_API_KEY;
-        const cgApiType = process.env.COINGECKO_API_TYPE || 'demo';
-        const cgBaseUrl = cgApiType === 'pro' ? 'https://pro-api.coingecko.com/api/v3' : 'https://api.coingecko.com/api/v3';
-
-        const headers: Record<string, string> = { 'Accept': 'application/json' };
-        if (cgApiKey) {
-          headers[cgApiType === 'pro' ? 'x-cg-pro-api-key' : 'x-cg-demo-api-key'] = cgApiKey;
+      if (source === 'dexscreener') {
+        // Fetch from Dexscreener
+        try {
+          const dexData = await getDexscreenerToken(contractAddress, chain);
+          if (dexData) {
+            effectiveSymbol = effectiveSymbol || dexData.symbol;
+            effectiveName = effectiveName || dexData.name;
+            effectiveImage = effectiveImage || dexData.imageUrl || undefined;
+            marketData = {
+              currentPrice: dexData.priceUsd || undefined,
+              marketCap: dexData.marketCap?.toString(),
+              fdv: dexData.fdv?.toString(),
+              volume24h: dexData.volume24h?.toString(),
+              priceChange24h: dexData.priceChange24h?.toString(),
+              // Dexscreener doesn't have 7d price change or categories
+            };
+            console.log(`Admin: Fetched Dexscreener data for ${effectiveSymbol} - FDV: $${marketData.fdv}`);
+          } else {
+            console.warn(`Admin: No Dexscreener data found for ${contractAddress} on ${chain}`);
+          }
+        } catch (err) {
+          console.warn(`Admin: Dexscreener fetch error for ${contractAddress}:`, err);
         }
+      } else {
+        // Fetch from CoinGecko using contract address
+        try {
+          const cgApiKey = process.env.COINGECKO_API_KEY;
+          const cgApiType = process.env.COINGECKO_API_TYPE || 'demo';
+          const cgBaseUrl = cgApiType === 'pro' ? 'https://pro-api.coingecko.com/api/v3' : 'https://api.coingecko.com/api/v3';
 
-        const cgResponse = await fetch(
-          `${cgBaseUrl}/coins/${tokenId}?localization=false&tickers=false&community_data=false&developer_data=false`,
-          { headers }
-        );
+          const headers: Record<string, string> = { 'Accept': 'application/json' };
+          if (cgApiKey) {
+            headers[cgApiType === 'pro' ? 'x-cg-pro-api-key' : 'x-cg-demo-api-key'] = cgApiKey;
+          }
 
-        if (cgResponse.ok) {
-          const data = await cgResponse.json();
-          marketData = {
-            currentPrice: data.market_data?.current_price?.usd?.toString(),
-            marketCap: data.market_data?.market_cap?.usd?.toString(),
-            fdv: data.market_data?.fully_diluted_valuation?.usd?.toString(),
-            volume24h: data.market_data?.total_volume?.usd?.toString(),
-            priceChange24h: data.market_data?.price_change_percentage_24h?.toString(),
-            priceChange7d: data.market_data?.price_change_percentage_7d?.toString(),
-            categories: data.categories || [],
+          // Map chain to CoinGecko platform ID
+          const COINGECKO_PLATFORM_IDS: Record<string, string> = {
+            'ethereum': 'ethereum',
+            'polygon': 'polygon-pos',
+            'arbitrum': 'arbitrum-one',
+            'optimism': 'optimistic-ethereum',
+            'base': 'base',
+            'avalanche': 'avalanche',
+            'bsc': 'binance-smart-chain',
+            'fantom': 'fantom',
+            'solana': 'solana',
+            'sui': 'sui',
+            'aptos': 'aptos',
+            'near': 'near-protocol',
+            'tron': 'tron',
           };
-          console.log(`Admin: Fetched market data for ${tokenSymbol} - FDV: $${marketData.fdv}`);
-        } else {
-          console.warn(`Admin: Failed to fetch CoinGecko data for ${tokenId}: ${cgResponse.status}`);
+
+          const platformId = COINGECKO_PLATFORM_IDS[chain.toLowerCase()];
+          if (!platformId) {
+            console.warn(`Admin: Unknown CoinGecko platform for chain "${chain}"`);
+          }
+
+          // Use contract address lookup endpoint
+          const cgResponse = await fetch(
+            `${cgBaseUrl}/coins/${platformId}/contract/${contractAddress}`,
+            { headers }
+          );
+
+          if (cgResponse.ok) {
+            const data = await cgResponse.json();
+            effectiveSymbol = effectiveSymbol || data.symbol?.toUpperCase();
+            effectiveName = effectiveName || data.name;
+            effectiveImage = effectiveImage || data.image?.large || data.image?.small;
+            marketData = {
+              currentPrice: data.market_data?.current_price?.usd?.toString(),
+              marketCap: data.market_data?.market_cap?.usd?.toString(),
+              fdv: data.market_data?.fully_diluted_valuation?.usd?.toString(),
+              volume24h: data.market_data?.total_volume?.usd?.toString(),
+              priceChange24h: data.market_data?.price_change_percentage_24h?.toString(),
+              priceChange7d: data.market_data?.price_change_percentage_7d?.toString(),
+              categories: data.categories || [],
+            };
+            console.log(`Admin: Fetched CoinGecko data for ${effectiveSymbol} - FDV: $${marketData.fdv}`);
+          } else {
+            const errorText = await cgResponse.text();
+            console.warn(`Admin: Failed to fetch CoinGecko data for ${contractAddress} on ${chain}: ${cgResponse.status} - ${errorText}`);
+          }
+        } catch (err) {
+          console.warn(`Admin: CoinGecko fetch error for ${contractAddress}:`, err);
         }
-      } catch (err) {
-        console.warn(`Admin: CoinGecko fetch error for ${tokenId}:`, err);
+      }
+
+      // Ensure we have required token info
+      if (!effectiveSymbol) {
+        res.status(400).json({ message: "Could not determine token symbol. Please provide tokenSymbol." });
+        return;
+      }
+      if (!effectiveName) {
+        effectiveName = effectiveSymbol; // Fallback to symbol
       }
 
       // Create the analysis record with defaults and market data
       const analysis = await storage.createAnalysis({
-        tokenId,
-        tokenSymbol,
-        tokenName,
-        tokenImage: tokenImage || null,
+        tokenId: effectiveTokenId,
+        tokenSymbol: effectiveSymbol,
+        tokenName: effectiveName,
+        tokenImage: effectiveImage || null,
         chain: chain || null,
+        contractAddress: contractAddress || null,
         userId: req.userId!, // Track which admin triggered it
         status: "processing",
         finalScore: "0", // Will be updated when analysis completes
         tier: "?", // Will be updated when analysis completes
-        // Market data from CoinGecko
+        // Market data
         currentPrice: marketData.currentPrice,
         marketCap: marketData.marketCap,
         fdv: marketData.fdv,
@@ -898,20 +1045,29 @@ export async function registerRoutes(
         categories: marketData.categories,
       });
 
-      console.log(`Admin: Created analysis ${analysis.id} for ${tokenSymbol}`);
+      console.log(`Admin: Created analysis ${analysis.id} for ${effectiveSymbol} (source: ${source})`);
 
       // Call Gumloop API to start the pipeline
       const gumloopUrl = new URL("https://api.gumloop.com/api/v1/start_pipeline");
       gumloopUrl.searchParams.set("user_id", gumloopUserId);
       gumloopUrl.searchParams.set("saved_item_id", gumloopPipelineId);
 
+      // Build pipeline inputs
+      // Gumloop has 3 input nodes:
+      // 1. "Source" - determines which lookup path to use ("coingecko" or "dexscreener")
+      // 2. "Contract Address" - the token contract address
+      // 3. "Chain" - the blockchain network
+      const pipelineInputs: { input_name: string; value: string }[] = [
+        { input_name: "Source", value: source },
+        { input_name: "Contract Address", value: contractAddress },
+        { input_name: "Chain", value: chain },
+      ];
+
       const gumloopPayload = {
-        pipeline_inputs: [
-          { input_name: "Token Input", value: tokenSymbol }, // NO $ prefix
-        ],
+        pipeline_inputs: pipelineInputs,
       };
 
-      console.log(`Admin: Calling Gumloop API for ${tokenSymbol}`);
+      console.log(`Admin: Calling Gumloop API for ${effectiveSymbol} with source=${source}, inputs:`, pipelineInputs);
 
       const gumloopResponse = await fetch(gumloopUrl.toString(), {
         method: "POST",
@@ -976,10 +1132,11 @@ export async function registerRoutes(
       console.log(`Admin: Started Gumloop run ${runId} for analysis ${analysis.id}`);
 
       res.json({
-        message: `Analysis started for ${tokenSymbol}`,
+        message: `Analysis started for ${effectiveSymbol}`,
         analysisId: analysis.id,
         runId,
         status: "processing",
+        source,
       });
     } catch (error) {
       console.error("Admin analyze error:", error);
@@ -1112,7 +1269,27 @@ export async function registerRoutes(
           if (parsed.upsideMultiple) updates.upsideMultiple = parsed.upsideMultiple;
           if (parsed.upsideTier) updates.upsideTier = parsed.upsideTier;
 
+          // Update narrative fields (re-parsed with fixed label stripping)
+          // IMPORTANT: Prefer subNarrative for the narrative field (more specific classification)
+          // subNarrative comes from the ## NARRATIVE: section with proper parsing
+          if (parsed.subNarrative) {
+            updates.narrative = parsed.subNarrative;
+            updates.subNarrative = parsed.subNarrative;
+          } else if (parsed.narrative) {
+            updates.narrative = parsed.narrative;
+          }
+          if (parsed.primaryNarrative) updates.primaryNarrative = parsed.primaryNarrative;
+          if (parsed.subNarrativeCeiling) updates.subNarrativeCeiling = parsed.subNarrativeCeiling;
+          if (parsed.subNarrativeConsensus) updates.subNarrativeConsensus = parsed.subNarrativeConsensus;
+
+          // Update asymmetry fields (re-parsed to extract just numeric values)
+          if (parsed.asymmetryFloor) updates.asymmetryFloor = parsed.asymmetryFloor;
+          if (parsed.asymmetryCeiling) updates.asymmetryCeiling = parsed.asymmetryCeiling;
+          if (parsed.asymmetryScore) updates.asymmetryScore = parsed.asymmetryScore?.toString();
+
           console.log(`Admin: Re-parsed upside fields - multiple: ${updates.upsideMultiple}, tier: ${updates.upsideTier}`);
+          console.log(`Admin: Re-parsed narrative fields - narrative: ${updates.narrative}, subNarrative: ${updates.subNarrative}, primaryNarrative: ${updates.primaryNarrative}`);
+          console.log(`Admin: Re-parsed asymmetry fields - floor: ${updates.asymmetryFloor}, ceiling: ${updates.asymmetryCeiling}`);
         } catch (err) {
           console.warn(`Admin: Re-parse error:`, err);
         }
@@ -1208,6 +1385,83 @@ export async function registerRoutes(
       }
     } catch (error) {
       console.error("Admin recover error:", error);
+      res.status(500).json({ message: error instanceof Error ? error.message : "Recover error" });
+    }
+  });
+
+  // Admin: Recover a failed analysis using a different Gumloop run ID (for resumed flows)
+  app.post("/api/admin/analyze/:id/recover-with-run", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const analysisId = parseInt(req.params.id, 10);
+      const { runId } = req.body;
+
+      if (isNaN(analysisId)) {
+        res.status(400).json({ message: "Invalid analysis ID" });
+        return;
+      }
+
+      if (!runId || typeof runId !== "string") {
+        res.status(400).json({ message: "runId is required in request body" });
+        return;
+      }
+
+      const analysis = await storage.getAnalysis(analysisId);
+      if (!analysis) {
+        res.status(404).json({ message: "Analysis not found" });
+        return;
+      }
+
+      console.log(`Admin ${req.userEmail}: Recovering analysis ${analysisId} (${analysis.tokenSymbol}) with new run ID: ${runId}`);
+
+      // Fetch status from Gumloop using the provided run ID
+      const runStatus = await fetchGumloopRunStatus(runId);
+      if (!runStatus) {
+        res.status(502).json({ message: "Could not fetch status from Gumloop for the provided run ID" });
+        return;
+      }
+
+      console.log(`Admin: Gumloop run ${runId} state: ${runStatus.state}`);
+
+      if (runStatus.state === "DONE" && runStatus.outputs) {
+        // Update the analysis with the new run ID first
+        await storage.updateAnalysis(analysisId, { gumloopRunId: runId });
+
+        // Process the completion - this will update all fields and mark as completed
+        await processGumloopCompletion(analysisId, runStatus.outputs);
+
+        // Invalidate cache
+        const { invalidateCache, CACHE_KEYS } = await import("./redis");
+        await invalidateCache(CACHE_KEYS.ANALYSIS(analysisId));
+        await invalidateCache(CACHE_KEYS.LEADERBOARD);
+
+        res.json({
+          message: `Successfully recovered analysis ${analysisId} with run ${runId}`,
+          gumloopState: runStatus.state,
+          status: "completed",
+        });
+      } else if (runStatus.state === "RUNNING" || runStatus.state === "STARTED") {
+        // Update the run ID and mark as processing
+        await storage.updateAnalysis(analysisId, {
+          gumloopRunId: runId,
+          status: "processing",
+          errorCode: null,
+          errorMessage: null,
+        });
+
+        res.json({
+          message: `Analysis ${analysisId} linked to run ${runId} which is still running`,
+          gumloopState: runStatus.state,
+          status: "processing",
+        });
+      } else {
+        res.json({
+          message: `Gumloop run ${runId} is in state: ${runStatus.state} - cannot recover`,
+          gumloopState: runStatus.state,
+          status: analysis.status,
+        });
+      }
+    } catch (error) {
+      console.error("Admin recover-with-run error:", error);
       res.status(500).json({ message: error instanceof Error ? error.message : "Recover error" });
     }
   });
@@ -1939,10 +2193,22 @@ export async function registerRoutes(
   app.post("/api/vote", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.userId!;
-      const { tokenId, tokenSymbol, tokenName, tokenImage } = req.body;
+      const { tokenId, tokenSymbol, tokenName, tokenImage, chain, contractAddress, source } = req.body;
 
       if (!tokenId || !tokenSymbol || !tokenName) {
         res.status(400).json({ message: "Token ID, symbol, and name are required" });
+        return;
+      }
+
+      // Require contract address and source for new votes
+      if (!contractAddress || !source) {
+        res.status(400).json({ message: "Contract address and source are required" });
+        return;
+      }
+
+      // Validate source
+      if (source !== "coingecko" && source !== "dexscreener") {
+        res.status(400).json({ message: "Source must be 'coingecko' or 'dexscreener'" });
         return;
       }
 
@@ -1952,15 +2218,36 @@ export async function registerRoutes(
       const sanitizedTokenSymbol = sanitize(tokenSymbol).slice(0, 20);
       const sanitizedTokenName = sanitize(tokenName).slice(0, 100);
       const sanitizedTokenImage = tokenImage ? sanitize(tokenImage).slice(0, 500) : null;
+      const sanitizedChain = chain ? sanitize(chain).slice(0, 50).toLowerCase() : null;
+      const sanitizedContractAddress = sanitize(contractAddress).slice(0, 100);
+      const sanitizedSource = source as "coingecko" | "dexscreener";
 
-      // Validate tokenId format (CoinGecko IDs are lowercase alphanumeric with hyphens)
-      if (!/^[a-z0-9-]+$/.test(sanitizedTokenId)) {
+      // Validate tokenId format based on source
+      // CoinGecko: lowercase alphanumeric with hyphens (e.g., "bitcoin", "ethereum")
+      // Or prefixed format: cg_{chain}_{address} for CoinGecko contract lookups
+      // Dexscreener: dex_{chain}_{address} format
+      const isCoinGeckoId = /^[a-z0-9-]+$/.test(sanitizedTokenId);
+      const isPrefixedId = /^(cg|dex)_[a-z0-9]+_[a-zA-Z0-9]+$/.test(sanitizedTokenId);
+
+      if (!isCoinGeckoId && !isPrefixedId) {
         res.status(400).json({ message: "Invalid token ID format" });
         return;
       }
 
+      // Validate contract address format
+      const isEvmAddress = /^0x[a-fA-F0-9]{40}$/i.test(sanitizedContractAddress);
+      const isSolanaAddress = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(sanitizedContractAddress);
+      if (!isEvmAddress && !isSolanaAddress) {
+        res.status(400).json({ message: "Invalid contract address format" });
+        return;
+      }
+
       // Check if token already has a completed analysis (already on leaderboard)
-      const existingAnalysis = await storage.getLatestAnalysisByTokenId(sanitizedTokenId);
+      // Check by both tokenId AND contract address to catch different ID formats for the same token
+      const existingByTokenId = await storage.getLatestAnalysisByTokenId(sanitizedTokenId);
+      const existingByContract = await storage.getLatestAnalysisByContractAddress(sanitizedContractAddress);
+
+      const existingAnalysis = existingByTokenId || existingByContract;
       if (existingAnalysis && existingAnalysis.status === "completed") {
         res.status(400).json({
           message: "This token has already been analyzed and is on the leaderboard.",
@@ -2002,6 +2289,9 @@ export async function registerRoutes(
           tokenSymbol: sanitizedTokenSymbol,
           tokenName: sanitizedTokenName,
           tokenImage: sanitizedTokenImage,
+          chain: sanitizedChain,
+          contractAddress: sanitizedContractAddress,
+          source: sanitizedSource,
           voteCount: 0,
           priorityVoteCount: 0,
           status: "pending",
@@ -2609,11 +2899,12 @@ async function processGumloopCompletion(
   if (!parsed.narrative && outputs['analysis_result'] && typeof outputs['analysis_result'] === 'string') {
     const analysisText = outputs['analysis_result'];
     // Look for common narrative patterns in the text
+    // Use word boundary \b to avoid matching "narrative" within "primary_narrative"
     const narrativePatterns = [
-      /narrative[:\s]+([^\n|,]+)/i,
+      /(?:^|[\s\n])narrative[:\s]+([^\n|,]+)/i,
       /\*\*narrative\*\*[:\s]+([^\n|*]+)/i,
-      /category[:\s]+([^\n|,]+)/i,
-      /sector[:\s]+([^\n|,]+)/i,
+      /(?:^|[\s\n])category[:\s]+([^\n|,]+)/i,
+      /(?:^|[\s\n])sector[:\s]+([^\n|,]+)/i,
     ];
     for (const pattern of narrativePatterns) {
       const match = analysisText.match(pattern);
