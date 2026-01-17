@@ -240,6 +240,7 @@ export interface IStorage {
   getTopVoteRequests(limit?: number): Promise<TokenVoteRequest[]>;
   getRecentlyAnalyzedRequests(limit?: number): Promise<TokenVoteRequest[]>;
   getYesterdayTopVote(): Promise<{ request: TokenVoteRequest; voteCount: number; priorityVoteCount: number; totalScore: number } | null>;
+  getYesterdayTopVotedToken(): Promise<TokenVoteRequest | null>;
 
   // Performance tracking methods
   createPriceSnapshot(data: InsertPriceSnapshot): Promise<PriceSnapshot>;
@@ -1447,6 +1448,80 @@ export class PostgresStorage implements IStorage {
     });
   }
 
+  /**
+   * Get the top voted token from yesterday that is still pending and has contract address info.
+   * Used by the auto-analyze job to trigger analysis for the daily winner.
+   */
+  async getYesterdayTopVotedToken(): Promise<TokenVoteRequest | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const { start: yesterdayStart, end: yesterdayEnd } = getESTYesterdayRange();
+
+      // Get yesterday's votes grouped by request, calculating scores
+      // Regular votes = 1 point, Priority votes = 2 points
+      const yesterdaysVotes = await db
+        .select({
+          tokenVoteRequestId: tokenVotes.tokenVoteRequestId,
+          totalScore: sql<number>`SUM(CASE WHEN ${tokenVotes.isPriorityVote} THEN 2 ELSE 1 END)`.as('total_score'),
+          regularVotes: sql<number>`SUM(CASE WHEN ${tokenVotes.isPriorityVote} THEN 0 ELSE 1 END)`.as('regular_votes'),
+          priorityVotes: sql<number>`SUM(CASE WHEN ${tokenVotes.isPriorityVote} THEN 1 ELSE 0 END)`.as('priority_votes'),
+        })
+        .from(tokenVotes)
+        .where(
+          and(
+            gte(tokenVotes.createdAt, yesterdayStart),
+            lt(tokenVotes.createdAt, yesterdayEnd)
+          )
+        )
+        .groupBy(tokenVotes.tokenVoteRequestId)
+        .orderBy(desc(sql`total_score`))
+        .limit(10); // Get top 10 to find one with contract info
+
+      if (yesterdaysVotes.length === 0) {
+        console.log('[Storage] No votes found for yesterday');
+        return null;
+      }
+
+      // Get the full request details for tokens with votes yesterday
+      const requestIds = yesterdaysVotes.map(v => v.tokenVoteRequestId);
+
+      const requests = await db
+        .select()
+        .from(tokenVoteRequests)
+        .where(
+          and(
+            inArray(tokenVoteRequests.id, requestIds),
+            eq(tokenVoteRequests.status, "pending"),
+            isNotNull(tokenVoteRequests.contractAddress),
+            isNotNull(tokenVoteRequests.source)
+          )
+        );
+
+      if (requests.length === 0) {
+        console.log('[Storage] No pending vote requests with contract info found for yesterday');
+        return null;
+      }
+
+      // Create a map for quick lookup
+      const requestMap = new Map(requests.map(r => [r.id, r]));
+
+      // Find the highest voted request that has contract info
+      for (const v of yesterdaysVotes) {
+        const request = requestMap.get(v.tokenVoteRequestId);
+        if (request) {
+          // Return the request with yesterday's vote counts
+          return {
+            ...request,
+            voteCount: Number(v.regularVotes) || 0,
+            priorityVoteCount: Number(v.priorityVotes) || 0,
+          };
+        }
+      }
+
+      return null;
+    });
+  }
+
   async getRecentlyAnalyzedRequests(limit: number = 10): Promise<TokenVoteRequest[]> {
     return withRetry(async () => {
       const db = getDb();
@@ -2636,6 +2711,11 @@ export class MemStorage implements IStorage {
   }
 
   async getYesterdayTopVote(): Promise<{ request: TokenVoteRequest; voteCount: number; priorityVoteCount: number; totalScore: number } | null> {
+    // In-memory storage doesn't track vote timestamps, so return null
+    return null;
+  }
+
+  async getYesterdayTopVotedToken(): Promise<TokenVoteRequest | null> {
     // In-memory storage doesn't track vote timestamps, so return null
     return null;
   }

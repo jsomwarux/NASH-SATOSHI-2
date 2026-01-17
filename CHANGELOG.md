@@ -4,7 +4,58 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-17 - Fix Narrative Field Showing "primary_narrative:" Prefix (Latest)
+## Session: 2026-01-17 - Auto-Analyze Top Voted Token Daily (Latest)
+
+### Summary
+Added a new automated job that runs at midnight EST each day to analyze the top voted token from the previous day. This means users who vote for tokens will see their top pick automatically analyzed without admin intervention.
+
+### How It Works
+1. At midnight EST, the job checks for yesterday's top voted pending token
+2. Token must have contract address and source info (from the new Vote page)
+3. Automatically triggers a Gumloop analysis for that token
+4. Marks the vote request as "analyzing" with the analysis ID
+
+### Changes Made
+
+#### 1. New Storage Function (server/storage.ts)
+- Added `getYesterdayTopVotedToken()` method to get the top voted pending token from yesterday
+- Filters for tokens with contract address and source info
+- Returns the highest scored token (regular votes = 1pt, priority votes = 2pt)
+
+#### 2. New Auto-Analyze Job (server/jobs/autoAnalyzeTopVote.ts)
+- Created new job file based on reanalysisQueue.ts structure
+- `startAutoAnalyzeTopVoteJob()` - Starts the daily scheduler
+- `stopAutoAnalyzeTopVoteJob()` - Stops the scheduler for graceful shutdown
+- `triggerManualAnalyzeTopVote()` - Manual trigger for testing
+- Runs at midnight EST each day
+
+#### 3. Server Integration (server/index.ts)
+- Added import for the new job
+- Starts job on server startup
+- Stops job on graceful shutdown
+
+#### 4. Admin Endpoint (server/routes.ts)
+- Added `POST /api/admin/auto-analyze-top-vote/trigger` endpoint for manual testing
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/storage.ts` | Added `getYesterdayTopVotedToken()` method and interface update |
+| `server/jobs/autoAnalyzeTopVote.ts` | New job file for auto-analyzing top votes |
+| `server/index.ts` | Added job startup/shutdown integration |
+| `server/routes.ts` | Added manual trigger endpoint for admins |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### Current State
+- Auto-analyze job will run at midnight EST each day
+- Only tokens with contract address info (from new Vote page) are eligible
+- Admin can manually trigger the job via POST `/api/admin/auto-analyze-top-vote/trigger`
+
+---
+
+## Session: 2026-01-17 - Fix Narrative Field Showing "primary_narrative:" Prefix
 
 ### Summary
 Fixed an issue where the Narrative field on scorecards was showing "primary_narrative: AI Agents" instead of just the sub_narrative value "Embodied AI / Egocentric Data Collection". The parser wasn't correctly extracting `sub_narrative` from the `## NARRATIVE:` markdown section in Gumloop output.

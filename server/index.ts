@@ -9,6 +9,7 @@ import { initStorage } from "./storage";
 import { closeDb } from "./db";
 import { startPriceSnapshotJob, stopPriceSnapshotJob } from "./jobs/priceSnapshots";
 import { startReanalysisQueueJob, stopReanalysisQueueJob } from "./jobs/reanalysisQueue";
+import { startAutoAnalyzeTopVoteJob, stopAutoAnalyzeTopVoteJob } from "./jobs/autoAnalyzeTopVote";
 
 const app = express();
 const httpServer = createServer(app);
@@ -214,6 +215,8 @@ app.use((req, res, next) => {
           startPriceSnapshotJob();
           // Start automated reanalysis queue job (schedules Monday midnight + worker every 3 min)
           startReanalysisQueueJob();
+          // Start auto-analyze top vote job (runs midnight EST each day)
+          startAutoAnalyzeTopVoteJob();
         } catch (err) {
           console.error("Error during analysis recovery:", err);
         }
@@ -231,6 +234,8 @@ app.use((req, res, next) => {
     stopPriceSnapshotJob();
     // Stop reanalysis queue job
     stopReanalysisQueueJob();
+    // Stop auto-analyze top vote job
+    stopAutoAnalyzeTopVoteJob();
 
     // Stop accepting new connections
     httpServer.close(async () => {

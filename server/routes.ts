@@ -1799,6 +1799,19 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== AUTO-ANALYZE TOP VOTE (Admin) ====================
+  // Manually trigger auto-analyze for yesterday's top voted token
+  app.post("/api/admin/auto-analyze-top-vote/trigger", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const { triggerManualAnalyzeTopVote } = await import("./jobs/autoAnalyzeTopVote");
+      await triggerManualAnalyzeTopVote();
+      res.json({ message: "Auto-analyze top vote triggered successfully" });
+    } catch (error) {
+      console.error("Error triggering auto-analyze top vote:", error);
+      res.status(500).json({ message: "Failed to trigger auto-analyze" });
+    }
+  });
+
   // ==================== FILTER OPTIONS (Public) ====================
   app.get("/api/filters", async (_req: Request, res: Response) => {
     try {
