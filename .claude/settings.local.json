@@ -42,7 +42,12 @@
       "Bash(echo:*)",
       "WebFetch(domain:resend.com)",
       "WebFetch(domain:docs.dexscreener.com)",
-      "WebFetch(domain:docs.coingecko.com)"
+      "WebFetch(domain:docs.coingecko.com)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd CoinGecko platforms fallback for reanalysis + fix mobile scorecard downloads\n\nReanalysis Queue:\n- Add fallback to fetch contract addresses from CoinGecko platforms API\n- Prioritizes chains: Ethereum > Base > Arbitrum > Optimism > Polygon > Solana > BSC\n- Ensures reanalysis works even if contract address wasn''t originally stored\n\nMobile Scorecard Downloads:\n- Fix token logo not appearing in downloaded images on mobile\n- Preload and convert token images to base64 before capture\n- Clone ShareCard to off-screen container to avoid viewport clipping\n- Scale preview for mobile display while maintaining full capture dimensions\n- Add explicit width/height to toPng options for consistent output\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git config:*)",
+      "Bash(git push:*)",
+      "Bash(TZ=\"America/New_York\" date:*)"
     ]
   }
 }
