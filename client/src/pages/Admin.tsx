@@ -1375,30 +1375,52 @@ export default function Admin() {
                               <td className="py-3 px-2">
                                 <div className="flex gap-1">
                                   {analysis.status === "completed" && (
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        reprocessMutation.mutate(analysis.id);
-                                      }}
-                                      disabled={reprocessingId === analysis.id || reprocessMutation.isPending}
-                                      className="h-7 text-xs"
-                                    >
-                                      {reprocessingId === analysis.id ? (
-                                        <>
-                                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                          Processing
-                                        </>
-                                      ) : (
-                                        <>
-                                          <RefreshCw className="w-3 h-3 mr-1" />
-                                          Reprocess
-                                        </>
-                                      )}
-                                    </Button>
+                                    <>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          reprocessMutation.mutate(analysis.id);
+                                        }}
+                                        disabled={reprocessingId === analysis.id || reprocessMutation.isPending}
+                                        className="h-7 text-xs"
+                                      >
+                                        {reprocessingId === analysis.id ? (
+                                          <>
+                                            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                            Processing
+                                          </>
+                                        ) : (
+                                          <>
+                                            <RefreshCw className="w-3 h-3 mr-1" />
+                                            Reprocess
+                                          </>
+                                        )}
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setRecoveryModal({
+                                            isOpen: true,
+                                            analysisId: analysis.id,
+                                            tokenSymbol: analysis.tokenSymbol || 'Unknown',
+                                            runId: '',
+                                          });
+                                        }}
+                                        className="h-7 text-xs border-purple-500/50 text-purple-400 hover:bg-purple-500/10"
+                                        title="Use a different Gumloop run ID"
+                                      >
+                                        <Scan className="w-3 h-3 mr-1" />
+                                        New Run
+                                      </Button>
+                                    </>
                                   )}
                                   {analysis.status === "failed" && analysis.gumloopRunId && (
                                     <>

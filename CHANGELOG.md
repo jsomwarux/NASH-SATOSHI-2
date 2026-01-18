@@ -4,7 +4,98 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-17 - Auto-Analyze Top Voted Token Daily (Latest)
+## Session: 2026-01-18 - Fix Narrative Field Showing Field Names as Values (Latest)
+
+### Summary
+Fixed a bug where the narrative field on scorecards was displaying field names like "primary_narrative" instead of the actual narrative value from sub_narrative. This occurred when malformed Gumloop output had `narrative: primary_narrative` literally (field name as value).
+
+### Root Cause
+The `extractNarrativeSectionFields` function was not recognizing the plain `NARRATIVE:` section format in Gumloop output. It only matched patterns with markdown headers like `## NARRATIVE:` or `**NARRATIVE:**`, but the actual output uses just `NARRATIVE:` on its own line.
+
+This caused:
+1. `subNarrative` and `primaryNarrative` to be null (never extracted from the NARRATIVE section)
+2. The parser falling back to pattern matching which picked up `primary_narrative: AI` and stripped it to just "AI"
+3. The actual `sub_narrative: Environmental Robotics / Autonomous Ocean Cleanup` was never captured
+
+### Changes Made
+
+#### Fixed NARRATIVE Section Extraction (server/gumloop-parser.ts)
+Added a new pattern to `extractNarrativeSectionFields` that matches plain `NARRATIVE:` section headers (without markdown formatting):
+```javascript
+/(?:^|\n)NARRATIVE:\s*\n([\s\S]*?)(?=\n[A-Z]{4,}:|\n##|\n---|\n\*\*[A-Z]|$)/i
+```
+This pattern correctly captures the NARRATIVE section content up until the next all-caps section header like `THESIS:`.
+
+#### Added Aggressive Field Prefix Stripping (server/routes.ts)
+Added regex-based stripping in `processGumloopCompletion` and the reprocess endpoint to catch any field label prefixes that slip through:
+```javascript
+const fieldPrefixRegex = /^(primary_narrative|sub_narrative|narrative|thesis|display_summary)[:\s]+/i;
+```
+
+#### Added Field Name Rejection (server/gumloop-parser.ts)
+1. Added `INVALID_VALUES_FIELD_NAMES` set containing field names that should never be used as values:
+   - `primary_narrative`, `sub_narrative`, `narrative`, `thesis`, `display_summary`, `recommendation`, `final_score`, `final_tier`, `token_type`
+
+2. Added `isFieldNameAsValue()` function to check if a value is actually a field name
+
+3. Updated all narrative parsing locations to reject field names as values:
+   - OUTPUT SUMMARY parsing
+   - `extractNarrativeField()` fallback
+   - Pattern matching fallbacks
+   - `parseGumloopOutputs()` text content parsing
+
+4. Added final safety net checks that clear the narrative field if it contains a field name
+
+#### Added "New Run" Button for Completed Analyses (client/src/pages/Admin.tsx)
+- Completed analyses now have a "New Run" button next to "Reprocess"
+- Opens a modal to enter a different Gumloop run ID
+- Use this when the original run had issues but you've re-run the flow in Gumloop with a new run ID
+- This updates the stored run ID and re-processes with the new data
+
+#### Fixed HOT NARRATIVES Section for Sub-Narratives (server/storage.ts)
+Updated `getLeaderboardStats` to use `primaryNarrative` (broader category like "AI") when available for grouping, instead of the more specific `subNarrative` (like "Environmental Robotics / Autonomous Ocean Cleanup"). This ensures tokens can still be grouped together for the HOT NARRATIVES section.
+
+Added new keyword mappings for narrative normalization:
+- **Robotics**: robot, robotics, autonomous robot, swarm, drone, hardware
+- **Environmental**: environment, climate, carbon, green, sustainability, ocean, cleanup, pollution
+- **Stablecoin**: stablecoin, stable coin, pegged, usd backed
+- **Security**: security, audit, protection, anti-hack
+- **DAO**: dao, governance, decentralized autonomous, voting token
+- **Compute**: compute, computing, processing, cloud, decentralized compute
+- **Utility**: utility, utility token, platform token, ecosystem token
+- Plus expanded keywords for existing categories
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/gumloop-parser.ts` | Added `INVALID_VALUES_FIELD_NAMES`, `isFieldNameAsValue()`, NARRATIVE section pattern fix, and validation checks |
+| `server/routes.ts` | Added aggressive field prefix stripping and logging in processGumloopCompletion and reprocess endpoint |
+| `server/storage.ts` | Updated `getLeaderboardStats` to prefer `primaryNarrative`, expanded `NARRATIVE_MAPPINGS` with new categories |
+| `client/src/pages/Admin.tsx` | Added "New Run" button for completed analyses to recover with a different Gumloop run ID |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### Current State
+- Parser now correctly extracts `primaryNarrative` and `subNarrative` from NARRATIVE section
+- Parser rejects field names being used as values
+- HOT NARRATIVES section groups by `primaryNarrative` (broader category) when available
+- New analyses will correctly show sub_narrative on scorecards
+- Admin panel has "New Run" button to recover with a different Gumloop run ID
+
+### How to Fix Existing Analyses
+For analyses with wrong narrative (like "primary_narrative"):
+1. If you re-ran the flow in Gumloop with a new run ID:
+   - Go to Admin panel → All Analyses
+   - Find the analysis → Click "New Run" button
+   - Enter the new Gumloop run ID from your re-run
+   - Click "Recover Analysis"
+2. If using the same run ID:
+   - Click "Reprocess" (but this will re-parse the same potentially malformed data)
+
+---
+
+## Session: 2026-01-17 - Auto-Analyze Top Voted Token Daily
 
 ### Summary
 Added a new automated job that runs at midnight EST each day to analyze the top voted token from the previous day. This means users who vote for tokens will see their top pick automatically analyzed without admin intervention.

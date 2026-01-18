@@ -85,34 +85,43 @@ const NARRATIVE_MAPPINGS: { canonical: string; keywords: string[] }[] = [
   { canonical: "AI Agents", keywords: ["ai agent", "autonomous ai", "ai assistant", "intelligent agent", "artificial intelligence", " ai ", " ai,", "(ai)", "ai/", "ai token", "ai crypto"] },
   { canonical: "AI Infrastructure", keywords: ["ai infra", "ai infrastructure", "machine learning infra", "ml infra", "gpu network", "compute network"] },
   { canonical: "DePIN", keywords: ["depin", "decentralized physical", "physical infrastructure"] },
+  { canonical: "Robotics", keywords: ["robot", "robotics", "autonomous robot", "swarm", "drone", "hardware"] },
 
   // Science & Research
   { canonical: "DeSci", keywords: ["desci", "decentralized science", "science token", "research token", "biotech"] },
+  { canonical: "Environmental", keywords: ["environment", "climate", "carbon", "green", "sustainability", "ocean", "cleanup", "pollution"] },
 
   // Finance narratives
   { canonical: "Payments", keywords: ["payment", "neobank", "spending", "remittance", "transfer"] },
-  { canonical: "DeFi", keywords: ["defi", "decentralized finance", "yield", "lending", "borrowing", "dex"] },
+  { canonical: "DeFi", keywords: ["defi", "decentralized finance", "yield", "lending", "borrowing", "dex", "liquidity"] },
   { canonical: "RWA", keywords: ["rwa", "real world asset", "tokenized asset", "real-world"] },
+  { canonical: "Stablecoin", keywords: ["stablecoin", "stable coin", "pegged", "usd backed"] },
 
   // Privacy & Security
-  { canonical: "Privacy", keywords: ["privacy", "confidential", "anonymous", "zero knowledge", "zk"] },
+  { canonical: "Privacy", keywords: ["privacy", "confidential", "anonymous", "zero knowledge", "zk", "encryption"] },
+  { canonical: "Security", keywords: ["security", "audit", "protection", "anti-hack"] },
 
   // Gaming & Entertainment
-  { canonical: "Gaming", keywords: ["gaming", "gamefi", "play to earn", "p2e", "metaverse game"] },
-  { canonical: "Metaverse", keywords: ["metaverse", "virtual world", "virtual reality", "vr"] },
-  { canonical: "NFT", keywords: ["nft", "collectible", "digital art", "pfp"] },
+  { canonical: "Gaming", keywords: ["gaming", "gamefi", "play to earn", "p2e", "metaverse game", "game token"] },
+  { canonical: "Metaverse", keywords: ["metaverse", "virtual world", "virtual reality", "vr", "3d world"] },
+  { canonical: "NFT", keywords: ["nft", "collectible", "digital art", "pfp", "non-fungible"] },
 
   // Social & Identity
-  { canonical: "SocialFi", keywords: ["socialfi", "social finance", "social token", "creator"] },
-  { canonical: "Identity", keywords: ["identity", "did", "decentralized identity", "sybil"] },
+  { canonical: "SocialFi", keywords: ["socialfi", "social finance", "social token", "creator", "content creator"] },
+  { canonical: "Identity", keywords: ["identity", "did", "decentralized identity", "sybil", "verification"] },
+  { canonical: "DAO", keywords: ["dao", "governance", "decentralized autonomous", "voting token"] },
 
   // Infrastructure
-  { canonical: "L1/L2", keywords: ["layer 1", "layer 2", "l1 ", "l2 ", "rollup", "scaling", "smart contract platform"] },
-  { canonical: "Interoperability", keywords: ["interop", "cross-chain", "bridge", "multichain"] },
-  { canonical: "Data", keywords: ["data", "oracle", "indexing", "storage", "database"] },
+  { canonical: "L1/L2", keywords: ["layer 1", "layer 2", "l1 ", "l2 ", "rollup", "scaling", "smart contract platform", "blockchain"] },
+  { canonical: "Interoperability", keywords: ["interop", "cross-chain", "bridge", "multichain", "omnichain"] },
+  { canonical: "Data", keywords: ["data", "oracle", "indexing", "storage", "database", "data availability"] },
+  { canonical: "Compute", keywords: ["compute", "computing", "processing", "cloud", "decentralized compute"] },
 
   // Meme & Culture
-  { canonical: "Meme", keywords: ["meme", "memecoin", "doge", "shib", "culture"] },
+  { canonical: "Meme", keywords: ["meme", "memecoin", "doge", "shib", "culture", "viral", "community token"] },
+
+  // Utility
+  { canonical: "Utility", keywords: ["utility", "utility token", "platform token", "ecosystem token"] },
 ];
 
 // Acronyms that should always be uppercase
@@ -1113,8 +1122,10 @@ export class PostgresStorage implements IStorage {
       .limit(3);
 
     // Get all narratives with their scores and token IDs for normalization
+    // Prefer primaryNarrative (broader category) over narrative (sub_narrative) for grouping
     const allNarrativesQuery = await db
       .select({
+        primaryNarrative: tokenAnalyses.primaryNarrative,
         narrative: tokenAnalyses.narrative,
         finalScore: tokenAnalyses.finalScore,
         tokenId: tokenAnalyses.tokenId,
@@ -1123,17 +1134,21 @@ export class PostgresStorage implements IStorage {
       .where(
         and(
           eq(tokenAnalyses.status, 'completed'),
-          isNotNull(tokenAnalyses.narrative),
-          sql`${tokenAnalyses.narrative} != ''`
+          // At least one narrative field must be present
+          sql`(${tokenAnalyses.primaryNarrative} IS NOT NULL AND ${tokenAnalyses.primaryNarrative} != '') OR (${tokenAnalyses.narrative} IS NOT NULL AND ${tokenAnalyses.narrative} != '')`
         )
       );
 
     // Normalize and group narratives
+    // Use primaryNarrative when available (broader category like "AI")
+    // Fall back to narrative if primaryNarrative is not available
     const narrativeGroups = new Map<string, { scores: number[]; tokenIds: Set<string> }>();
 
     for (const row of allNarrativesQuery) {
-      if (!row.narrative) continue;
-      const normalized = normalizeNarrative(row.narrative);
+      // Prefer primaryNarrative for grouping (it's the broader category)
+      const rawNarrative = row.primaryNarrative || row.narrative;
+      if (!rawNarrative) continue;
+      const normalized = normalizeNarrative(rawNarrative);
       if (!narrativeGroups.has(normalized)) {
         narrativeGroups.set(normalized, { scores: [], tokenIds: new Set() });
       }

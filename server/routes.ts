@@ -1251,7 +1251,7 @@ export async function registerRoutes(
       // Re-parse raw output if available to extract upside fields
       if (analysis.rawGumloopResponse) {
         try {
-          const { parseGumloopResponse, parseGumloopOutputs } = await import("./gumloop-parser");
+          const { parseGumloopResponse, parseGumloopOutputs, stripFieldLabelPrefix, isFieldNameAsValue } = await import("./gumloop-parser");
 
           let parsed;
           // Try to parse as JSON first (new format)
@@ -1272,11 +1272,38 @@ export async function registerRoutes(
           // Update narrative fields (re-parsed with fixed label stripping)
           // IMPORTANT: Prefer subNarrative for the narrative field (more specific classification)
           // subNarrative comes from the ## NARRATIVE: section with proper parsing
+          // Final safety: clean and validate narrative value
+          let narrativeValue: string | undefined = parsed.subNarrative || parsed.narrative;
+          if (narrativeValue) {
+            narrativeValue = stripFieldLabelPrefix(narrativeValue);
+
+            // Extra aggressive cleaning: strip any "fieldname:" pattern at the start
+            const fieldPrefixRegex = /^(primary_narrative|sub_narrative|narrative|thesis|display_summary)[:\s]+/i;
+            if (fieldPrefixRegex.test(narrativeValue)) {
+              const cleaned = narrativeValue.replace(fieldPrefixRegex, '').trim();
+              console.log(`Admin reprocess: Aggressively stripped field prefix from "${narrativeValue}" -> "${cleaned}"`);
+              narrativeValue = cleaned;
+            }
+
+            if (isFieldNameAsValue(narrativeValue)) {
+              console.log(`Admin reprocess: Rejecting invalid narrative value "${narrativeValue}" (it's a field name)`);
+              narrativeValue = undefined;
+            }
+          }
+          console.log(`Admin reprocess: Final narrative value: "${narrativeValue}" (from subNarrative: "${parsed.subNarrative}", narrative: "${parsed.narrative}")`);
+          if (narrativeValue) {
+            updates.narrative = narrativeValue;
+          }
           if (parsed.subNarrative) {
-            updates.narrative = parsed.subNarrative;
-            updates.subNarrative = parsed.subNarrative;
-          } else if (parsed.narrative) {
-            updates.narrative = parsed.narrative;
+            let cleanSubNarrative = stripFieldLabelPrefix(parsed.subNarrative);
+            // Also apply aggressive cleaning to subNarrative
+            const fieldPrefixRegex = /^(primary_narrative|sub_narrative|narrative|thesis|display_summary)[:\s]+/i;
+            if (fieldPrefixRegex.test(cleanSubNarrative)) {
+              cleanSubNarrative = cleanSubNarrative.replace(fieldPrefixRegex, '').trim();
+            }
+            if (!isFieldNameAsValue(cleanSubNarrative)) {
+              updates.subNarrative = cleanSubNarrative;
+            }
           }
           if (parsed.primaryNarrative) updates.primaryNarrative = parsed.primaryNarrative;
           if (parsed.subNarrativeCeiling) updates.subNarrativeCeiling = parsed.subNarrativeCeiling;
@@ -2853,7 +2880,7 @@ async function processGumloopCompletion(
   }
 
   // Import the parser functions
-  const { parseGumloopResponse, parseGumloopOutputs, hasDirectOutputFields } = await import("./gumloop-parser");
+  const { parseGumloopResponse, parseGumloopOutputs, hasDirectOutputFields, stripFieldLabelPrefix, isFieldNameAsValue } = await import("./gumloop-parser");
 
   // Check if outputs have direct field outputs (new format with "output fieldname")
   let parsed;
@@ -3002,7 +3029,30 @@ async function processGumloopCompletion(
     tokenType: parsed.tokenType || 'UTILITY',
     phase: parsed.phase,
     phaseName: parsed.phaseName,
-    narrative: parsed.subNarrative || parsed.narrative, // Prefer sub_narrative for backward compat
+    narrative: (() => {
+      // Final safety: clean narrative and reject if it's a field name
+      let narrativeValue: string | null = parsed.subNarrative || parsed.narrative || null;
+      if (narrativeValue) {
+        // Strip field label prefix
+        narrativeValue = stripFieldLabelPrefix(narrativeValue);
+
+        // Extra aggressive cleaning: strip any "fieldname:" pattern at the start
+        // This catches cases like "primary_narrative: AI" that might slip through
+        const fieldPrefixRegex = /^(primary_narrative|sub_narrative|narrative|thesis|display_summary)[:\s]+/i;
+        if (fieldPrefixRegex.test(narrativeValue)) {
+          const cleaned = narrativeValue.replace(fieldPrefixRegex, '').trim();
+          console.log(`processGumloopCompletion: Aggressively stripped field prefix from "${narrativeValue}" -> "${cleaned}"`);
+          narrativeValue = cleaned;
+        }
+
+        if (isFieldNameAsValue(narrativeValue)) {
+          console.log(`processGumloopCompletion: Rejecting invalid narrative value "${narrativeValue}" (it's a field name)`);
+          narrativeValue = null;
+        }
+      }
+      console.log(`processGumloopCompletion: Final narrative value: "${narrativeValue}" (from subNarrative: "${parsed.subNarrative}", narrative: "${parsed.narrative}")`);
+      return narrativeValue;
+    })(),
     narrativeHeat: parsed.narrativeHeat?.toString(),
     narrativeRank: parsed.narrativeRank,
     // Sub-narrative classification fields

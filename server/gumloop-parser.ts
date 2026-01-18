@@ -330,6 +330,30 @@ function extractAsymmetryNumeric(text: string | undefined | null): string {
   return cleaned;
 }
 
+// Field names that should never be used as values (malformed output detection)
+// If a value equals one of these, it's clearly a parsing error
+const INVALID_VALUES_FIELD_NAMES = new Set([
+  'primary_narrative',
+  'sub_narrative',
+  'narrative',
+  'primary narrative',
+  'sub narrative',
+  'thesis',
+  'display_summary',
+  'recommendation',
+  'final_score',
+  'final_tier',
+  'token_type',
+]);
+
+// Check if a value is actually a field name (malformed output)
+// Exported for use in routes.ts as final safety check
+export function isFieldNameAsValue(value: string): boolean {
+  if (!value) return false;
+  const normalized = value.toLowerCase().trim();
+  return INVALID_VALUES_FIELD_NAMES.has(normalized);
+}
+
 // Strip common field label prefixes from values
 // Many fields come through with their label included (e.g., "narrative: AI Agents")
 const FIELD_LABEL_PREFIXES = [
@@ -371,7 +395,8 @@ const FIELD_LABEL_PREFIXES = [
   'narrative rank:',
 ];
 
-function stripFieldLabelPrefix(text: string): string {
+// Exported for use in routes.ts as final safety check
+export function stripFieldLabelPrefix(text: string): string {
   if (!text) return "";
   let result = text.trim();
 
@@ -1119,10 +1144,16 @@ function extractNarrativeField(text: string): string | null {
 function extractNarrativeSectionFields(text: string): { primaryNarrative?: string; subNarrative?: string } {
   const result: { primaryNarrative?: string; subNarrative?: string } = {};
 
-  // Look for ## NARRATIVE: or similar markdown headers
+  // Look for NARRATIVE: section in various formats
   const narrativeSectionPatterns = [
+    // Plain "NARRATIVE:" section header (most common in Gumloop output)
+    // Ends at next all-caps section header like "THESIS:" or "CATALYSTS:"
+    /(?:^|\n)NARRATIVE:\s*\n([\s\S]*?)(?=\n[A-Z]{4,}:|\n##|\n---|\n\*\*[A-Z]|$)/i,
+    // ## NARRATIVE: markdown header
     /##\s*NARRATIVE:?\s*\n([\s\S]*?)(?=\n##|\n---|\n\*\*[A-Z]|$)/i,
+    // **NARRATIVE:** bold markdown
     /\*\*NARRATIVE:?\*\*\s*:?\s*\n([\s\S]*?)(?=\n##|\n\*\*[A-Z]|$)/i,
+    // NARRATIVE SECTION: alternative format
     /NARRATIVE\s*SECTION:?\s*\n([\s\S]*?)(?=\n##|\n---|\n\*\*[A-Z]|$)/i,
   ];
 
@@ -1371,7 +1402,13 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   // Narrative - use dedicated extraction with multiple patterns
   const narrative = extractNarrativeField(parseText);
   if (narrative) {
-    result.narrative = stripFieldLabelPrefix(narrative);
+    const cleanedNarrative = stripFieldLabelPrefix(narrative);
+    // IMPORTANT: Reject if the value is actually a field name (malformed output)
+    if (!isFieldNameAsValue(cleanedNarrative)) {
+      result.narrative = cleanedNarrative;
+    } else {
+      console.log(`Parser: Rejecting narrative value "${cleanedNarrative}" from extractNarrativeField - it's a field name`);
+    }
   }
 
   const narrativeHeat = extractNumericField(parseText, 'narrative_heat');
@@ -2036,7 +2073,8 @@ function parseLegacyFormat(rawText: string, result: ParsedGumloopResponse): void
       if (match && match[1]) {
         const narrative = stripFieldLabelPrefix(cleanText(match[1]));
         if (narrative.length > 3 && narrative.length < 60 &&
-            !narrative.includes('AT_RISK') && !narrative.includes('USER')) {
+            !narrative.includes('AT_RISK') && !narrative.includes('USER') &&
+            !isFieldNameAsValue(narrative)) {
           result.narrative = narrative;
           break;
         }
@@ -2227,8 +2265,14 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
 
       const summaryNarrative = getStringFromMap(summaryMap, 'narrative');
       if (summaryNarrative && summaryNarrative.length > 2 && summaryNarrative.length < 100) {
-        result.narrative = stripFieldLabelPrefix(summaryNarrative);
-        console.log(`Parser: Got narrative from OUTPUT SUMMARY: ${result.narrative}`);
+        const cleanedNarrative = stripFieldLabelPrefix(summaryNarrative);
+        // IMPORTANT: Reject if the value is actually a field name (malformed output)
+        if (!isFieldNameAsValue(cleanedNarrative)) {
+          result.narrative = cleanedNarrative;
+          console.log(`Parser: Got narrative from OUTPUT SUMMARY: ${result.narrative}`);
+        } else {
+          console.log(`Parser: Rejecting narrative value "${cleanedNarrative}" - it's a field name, not a valid value`);
+        }
       }
 
       const summaryTokenType = getStringFromMap(summaryMap, 'token_type');
@@ -2462,6 +2506,11 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
     // Strip any remaining prefixes from key text fields (final safety net)
     if (result.narrative) {
       result.narrative = stripFieldLabelPrefix(result.narrative);
+      // Final check: reject if narrative is actually a field name
+      if (isFieldNameAsValue(result.narrative)) {
+        console.log(`Parser: Final check - clearing invalid narrative value "${result.narrative}" (it's a field name)`);
+        result.narrative = undefined;
+      }
     }
     if (result.thesis) {
       result.thesis = stripFieldLabelPrefix(result.thesis);
@@ -2618,7 +2667,11 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   // Narrative data
   const narrative = getString('narrative');
   if (narrative && narrative.length > 2) {
-    result.narrative = stripFieldLabelPrefix(narrative);
+    const cleanedNarrative = stripFieldLabelPrefix(narrative);
+    // IMPORTANT: Reject if the value is actually a field name (malformed output)
+    if (!isFieldNameAsValue(cleanedNarrative)) {
+      result.narrative = cleanedNarrative;
+    }
   }
 
   const narrativeHeat = getNumber('narrative_heat');
@@ -3101,10 +3154,12 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
           const match = combinedText.match(pattern);
           if (match && match[1]) {
             const narrative = cleanText(match[1].trim());
-            if (narrative.length > 2 && narrative.length < 100 &&
-                !narrative.includes('AT_RISK') && !narrative.includes('USER') &&
-                !narrative.toLowerCase().includes('unknown')) {
-              result.narrative = stripFieldLabelPrefix(narrative);
+            const cleanedNarrative = stripFieldLabelPrefix(narrative);
+            if (cleanedNarrative.length > 2 && cleanedNarrative.length < 100 &&
+                !cleanedNarrative.includes('AT_RISK') && !cleanedNarrative.includes('USER') &&
+                !cleanedNarrative.toLowerCase().includes('unknown') &&
+                !isFieldNameAsValue(cleanedNarrative)) {
+              result.narrative = cleanedNarrative;
               console.log(`parseGumloopOutputs: Found narrative in text content: "${result.narrative}"`);
               break;
             }
@@ -3142,6 +3197,11 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   // Strip any remaining prefixes from key text fields (final safety net)
   if (result.narrative) {
     result.narrative = stripFieldLabelPrefix(result.narrative);
+    // Final check: reject if narrative is actually a field name
+    if (isFieldNameAsValue(result.narrative)) {
+      console.log(`parseGumloopOutputs: Final check - clearing invalid narrative value "${result.narrative}" (it's a field name)`);
+      result.narrative = undefined;
+    }
   }
   if (result.thesis) {
     result.thesis = stripFieldLabelPrefix(result.thesis);
