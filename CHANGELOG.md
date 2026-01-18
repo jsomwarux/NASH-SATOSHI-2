@@ -4,7 +4,46 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-18 - Fix Narrative Field Showing Field Names as Values (Latest)
+## Session: 2026-01-18 - Fix Mobile Scorecard Download Issues (Latest)
+
+### Summary
+Fixed two issues with scorecard image downloads on mobile: token logo images not appearing in the downloaded image, and S-tier badge having a weird visual effect.
+
+### Root Causes
+1. **Token logo not appearing**: Race condition between React state updates and DOM cloning. The image replacement logic was checking for `/api/image-proxy` in img.src but wasn't reliably matching due to timing issues and URL resolution differences.
+
+2. **S-tier badge weird effect**: The `shadow-lg` and colored shadow classes (e.g., `shadow-green-500/50`) don't render correctly with html-to-image library on mobile devices.
+
+### Changes Made
+
+#### Fixed Token Logo Image Capture (client/src/components/scorecard/ShareModal.tsx)
+- Updated image replacement logic to replace ALL img elements that don't already have data: URLs
+- Uses `img.getAttribute('src')` as fallback to check original src attribute
+- Increased wait time from 100ms to 300ms before capture to ensure images are fully rendered
+- Added `crossOrigin` attribute to replaced images for proper rendering
+
+#### Fixed S-tier Badge Styling (client/src/components/scorecard/ShareCard.tsx)
+- Replaced problematic `shadow-lg` and colored shadow classes with solid borders
+- Changed `glow: "shadow-*-500/50"` to `border: "border-2 border-*-300"` for all tier styles
+- Gradients preserved for visual appeal, but shadows removed for reliable capture
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `client/src/components/scorecard/ShareModal.tsx` | Fixed image replacement logic, increased render wait time |
+| `client/src/components/scorecard/ShareCard.tsx` | Replaced shadow effects with borders for tier badges |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### Current State
+- Token logo images now appear in mobile scorecard downloads
+- S-tier badge renders cleanly without artifacts on mobile
+- Desktop behavior unchanged (uses same rendering pipeline)
+
+---
+
+## Session: 2026-01-18 - Fix Narrative Field Showing Field Names as Values
 
 ### Summary
 Fixed a bug where the narrative field on scorecards was displaying field names like "primary_narrative" instead of the actual narrative value from sub_narrative. This occurred when malformed Gumloop output had `narrative: primary_narrative` literally (field name as value).

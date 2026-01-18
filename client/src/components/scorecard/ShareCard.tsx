@@ -9,20 +9,21 @@ interface ShareCardProps {
 }
 
 // Get tier style for the share card
+// Note: Using solid colors and borders instead of shadows for reliable mobile capture
 function getTierStyle(tier: string | null) {
   switch (tier?.toUpperCase()) {
     case "S+":
-      return { bg: "from-amber-500 to-yellow-500", text: "text-amber-900", glow: "shadow-amber-500/50" };
+      return { bg: "from-amber-500 to-yellow-500", text: "text-amber-900", border: "border-2 border-amber-300" };
     case "S":
-      return { bg: "from-green-500 to-emerald-500", text: "text-green-900", glow: "shadow-green-500/50" };
+      return { bg: "from-green-500 to-emerald-500", text: "text-green-900", border: "border-2 border-green-300" };
     case "A":
-      return { bg: "from-blue-500 to-cyan-500", text: "text-blue-900", glow: "shadow-blue-500/50" };
+      return { bg: "from-blue-500 to-cyan-500", text: "text-blue-900", border: "border-2 border-blue-300" };
     case "B":
-      return { bg: "from-yellow-500 to-orange-500", text: "text-yellow-900", glow: "shadow-yellow-500/50" };
+      return { bg: "from-yellow-500 to-orange-500", text: "text-yellow-900", border: "border-2 border-yellow-300" };
     case "C":
-      return { bg: "from-red-500 to-rose-500", text: "text-red-900", glow: "shadow-red-500/50" };
+      return { bg: "from-red-500 to-rose-500", text: "text-red-900", border: "border-2 border-red-300" };
     default:
-      return { bg: "from-gray-500 to-slate-500", text: "text-gray-900", glow: "shadow-gray-500/50" };
+      return { bg: "from-gray-500 to-slate-500", text: "text-gray-900", border: "border-2 border-gray-300" };
   }
 }
 
@@ -177,7 +178,7 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
             </div>
 
             {/* Tier Badge */}
-            <div className={`px-4 py-2 rounded-lg bg-gradient-to-r ${tierStyle.bg} ${tierStyle.glow} shadow-lg`}>
+            <div className={`px-4 py-2 rounded-lg bg-gradient-to-r ${tierStyle.bg} ${tierStyle.border}`}>
               <span className={`text-2xl font-black ${tierStyle.text}`}>{analysis.tier || 'N/A'}</span>
             </div>
           </div>

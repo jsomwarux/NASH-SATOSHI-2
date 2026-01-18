@@ -164,12 +164,17 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
         clone.style.transform = 'none';
         clone.style.overflow = 'visible';
 
-        // If we have base64 token image, replace the img src in the clone
+        // Replace ALL img elements with base64 if available (fixes mobile image capture)
+        // This handles both cases: when React already rendered with base64, and when it hasn't yet
         if (tokenImageBase64) {
           const imgElements = clone.querySelectorAll('img');
           imgElements.forEach((img) => {
-            if (img.src.includes('/api/image-proxy')) {
+            // Replace any image that's not already a data URL or the Nash logo SVG
+            const src = img.getAttribute('src') || img.src;
+            if (src && !src.startsWith('data:')) {
               img.src = tokenImageBase64;
+              // Also set crossOrigin to ensure proper rendering
+              img.crossOrigin = 'anonymous';
             }
           });
         }
@@ -180,8 +185,8 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
         // Force a reflow to ensure rendering
         void tempContainer.offsetHeight;
 
-        // Wait a bit for rendering to complete
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Wait longer for mobile rendering to complete (images need more time)
+        await new Promise(resolve => setTimeout(resolve, 300));
 
         targetNode = clone;
       }
