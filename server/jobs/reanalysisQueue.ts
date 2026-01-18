@@ -214,7 +214,7 @@ async function triggerGumloopAnalysis(
       return { success: false, error: "Analysis already in progress" };
     }
 
-    // Fetch market data from CoinGecko
+    // Fetch market data from CoinGecko (also extract platforms for contract address fallback)
     let marketData: {
       currentPrice?: string;
       marketCap?: string;
@@ -224,6 +224,7 @@ async function triggerGumloopAnalysis(
       priceChange7d?: string;
       categories?: string[];
     } = {};
+    let cgPlatforms: Record<string, string> | null = null;
 
     try {
       const cgApiKey = process.env.COINGECKO_API_KEY;
@@ -254,6 +255,10 @@ async function triggerGumloopAnalysis(
           priceChange7d: data.market_data?.price_change_percentage_7d?.toString(),
           categories: data.categories || [],
         };
+        // Store platforms for contract address fallback
+        if (data.platforms && typeof data.platforms === "object") {
+          cgPlatforms = data.platforms;
+        }
       }
     } catch {
       console.warn(`[ReanalysisQueue] CoinGecko fetch failed for ${item.tokenId}`);
@@ -305,6 +310,50 @@ async function triggerGumloopAnalysis(
         if (parts.length >= 3) {
           chain = parts[1];
           contractAddress = parts.slice(2).join("_");
+        }
+      }
+    }
+
+    // Fallback: Use CoinGecko platforms data if contract address still missing
+    if (!contractAddress && cgPlatforms) {
+      // Map CoinGecko platform names to our chain names
+      const platformMapping: Record<string, string> = {
+        "ethereum": "ethereum",
+        "polygon-pos": "polygon",
+        "arbitrum-one": "arbitrum",
+        "base": "base",
+        "optimistic-ethereum": "optimism",
+        "avalanche": "avalanche",
+        "binance-smart-chain": "bsc",
+        "solana": "solana",
+        "fantom": "fantom",
+      };
+
+      // Prioritize certain chains (ethereum first, then popular L2s)
+      const chainPriority = ["ethereum", "base", "arbitrum-one", "optimistic-ethereum", "polygon-pos", "solana", "binance-smart-chain", "avalanche"];
+
+      // Try chains in priority order first
+      for (const platformKey of chainPriority) {
+        const addr = cgPlatforms[platformKey];
+        if (addr && addr.length > 0) {
+          contractAddress = addr;
+          chain = platformMapping[platformKey] || platformKey;
+          source = "coingecko";
+          console.log(`[ReanalysisQueue] Using CoinGecko platforms fallback for ${item.tokenSymbol}: chain=${chain}, address=${contractAddress.slice(0, 10)}...`);
+          break;
+        }
+      }
+
+      // If no priority chain found, try any available platform
+      if (!contractAddress) {
+        for (const [platformKey, addr] of Object.entries(cgPlatforms)) {
+          if (addr && addr.length > 0 && platformKey !== "") {
+            contractAddress = addr;
+            chain = platformMapping[platformKey] || platformKey;
+            source = "coingecko";
+            console.log(`[ReanalysisQueue] Using CoinGecko platforms fallback (non-priority) for ${item.tokenSymbol}: chain=${chain}, address=${contractAddress.slice(0, 10)}...`);
+            break;
+          }
         }
       }
     }

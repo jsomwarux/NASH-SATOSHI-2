@@ -5,6 +5,7 @@ import { formatScore } from "@/lib/utils";
 
 interface ShareCardProps {
   analysis: TokenAnalysis;
+  preloadedImageBase64?: string | null;
 }
 
 // Get tier style for the share card
@@ -99,7 +100,7 @@ function NashSatoshiLogo({ size = 24 }: { size?: number }) {
 }
 
 export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
-  ({ analysis }, ref) => {
+  ({ analysis, preloadedImageBase64 }, ref) => {
     const [imageError, setImageError] = useState(false);
     const finalScore = parseFloat(analysis.finalScore as string) || 0;
     const tierStyle = getTierStyle(analysis.tier);
@@ -122,7 +123,9 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
     const phaseStyle = getPhaseStyle(phase);
 
     // Check if we should show the image or fallback to initials
-    const showImage = analysis.tokenImage && !imageError;
+    // Prefer preloaded base64 image if available (for reliable mobile capture)
+    const showImage = (preloadedImageBase64 || analysis.tokenImage) && !imageError;
+    const imageSrc = preloadedImageBase64 || `/api/image-proxy?url=${encodeURIComponent(analysis.tokenImage!)}`;
 
     return (
       <div
@@ -149,7 +152,7 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
             <div className="flex items-center gap-3">
               {showImage ? (
                 <img
-                  src={`/api/image-proxy?url=${encodeURIComponent(analysis.tokenImage!)}`}
+                  src={imageSrc}
                   alt={analysis.tokenName}
                   className="w-14 h-14 rounded-xl bg-white/10 ring-2 ring-white/20"
                   crossOrigin="anonymous"

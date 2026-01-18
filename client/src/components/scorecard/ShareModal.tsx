@@ -9,6 +9,12 @@ import { createTwitterShare, verifyShare } from "@/lib/api";
 import type { TokenAnalysis } from "@shared/schema";
 import { formatScore } from "@/lib/utils";
 
+// Detect mobile device
+const isMobile = () => {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+    (window.innerWidth <= 768);
+};
+
 interface ShareModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -25,7 +31,10 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
   const [isVerifying, setIsVerifying] = useState(false);
   const [shareVerified, setShareVerified] = useState(false);
   const [isPriorityUnlocked, setIsPriorityUnlocked] = useState(false);
+  const [tokenImageBase64, setTokenImageBase64] = useState<string | null>(null);
+  const [imageReady, setImageReady] = useState(false);
   const shareCardRef = useRef<HTMLDivElement>(null);
+  const captureContainerRef = useRef<HTMLDivElement>(null);
   const { user, getAccessToken } = useAuth();
 
   const finalScore = parseFloat(analysis.finalScore as string) || 0;
@@ -54,6 +63,59 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
     }
   }, [analysis.id]);
 
+  // Preload and convert token image to base64 for reliable mobile capture
+  useEffect(() => {
+    if (!isOpen || !analysis.tokenImage) {
+      setImageReady(true);
+      return;
+    }
+
+    setImageReady(false);
+    const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(analysis.tokenImage)}`;
+
+    // Create a new image to preload
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+
+    img.onload = () => {
+      try {
+        // Convert to base64 using canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || 56;
+        canvas.height = img.naturalHeight || 56;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          const base64 = canvas.toDataURL('image/png');
+          setTokenImageBase64(base64);
+        }
+      } catch (e) {
+        console.warn('Could not convert token image to base64:', e);
+        setTokenImageBase64(null);
+      }
+      setImageReady(true);
+    };
+
+    img.onerror = () => {
+      console.warn('Failed to preload token image');
+      setTokenImageBase64(null);
+      setImageReady(true);
+    };
+
+    // Set a timeout in case the image takes too long
+    const timeout = setTimeout(() => {
+      if (!imageReady) {
+        console.warn('Token image preload timeout');
+        setTokenImageBase64(null);
+        setImageReady(true);
+      }
+    }, 5000);
+
+    img.src = proxyUrl;
+
+    return () => clearTimeout(timeout);
+  }, [isOpen, analysis.tokenImage]);
+
   // Generate image from ShareCard
   const generateImage = useCallback(async () => {
     if (!shareCardRef.current) {
@@ -61,25 +123,101 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
       return null;
     }
 
+    // Wait for image to be ready on mobile
+    if (!imageReady && isMobile()) {
+      console.log("Waiting for image to be ready...");
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
     setIsGenerating(true);
+
+    const mobile = isMobile();
+
     try {
-      const dataUrl = await toPng(shareCardRef.current, {
+      // For mobile, we need special handling:
+      // 1. Clone the node to avoid viewport clipping issues
+      // 2. Use inline styles where possible
+      // 3. Ensure the full 800x450 dimensions are captured
+
+      let targetNode = shareCardRef.current;
+      let tempContainer: HTMLDivElement | null = null;
+
+      if (mobile) {
+        // On mobile, create a temporary off-screen container to ensure full rendering
+        tempContainer = document.createElement('div');
+        tempContainer.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 800px;
+          height: 450px;
+          z-index: -9999;
+          opacity: 0;
+          pointer-events: none;
+          overflow: visible;
+        `;
+
+        // Clone the ShareCard
+        const clone = shareCardRef.current.cloneNode(true) as HTMLDivElement;
+        clone.style.width = '800px';
+        clone.style.height = '450px';
+        clone.style.transform = 'none';
+        clone.style.overflow = 'visible';
+
+        // If we have base64 token image, replace the img src in the clone
+        if (tokenImageBase64) {
+          const imgElements = clone.querySelectorAll('img');
+          imgElements.forEach((img) => {
+            if (img.src.includes('/api/image-proxy')) {
+              img.src = tokenImageBase64;
+            }
+          });
+        }
+
+        tempContainer.appendChild(clone);
+        document.body.appendChild(tempContainer);
+
+        // Force a reflow to ensure rendering
+        void tempContainer.offsetHeight;
+
+        // Wait a bit for rendering to complete
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        targetNode = clone;
+      }
+
+      const toPngOptions = {
         quality: 1,
-        pixelRatio: 2,
+        pixelRatio: mobile ? 2 : 2, // Consistent pixel ratio
         cacheBust: true,
         skipAutoScale: true,
+        width: 800,
+        height: 450,
+        style: {
+          transform: 'none',
+          width: '800px',
+          height: '450px',
+        },
         // Handle CORS for external images
         fetchRequestInit: {
-          mode: 'cors',
-          cache: 'no-cache',
+          mode: 'cors' as RequestMode,
+          cache: 'no-cache' as RequestCache,
         },
-        // Filter out problematic elements or convert external images
+        // Filter out problematic elements
         filter: (node: HTMLElement) => {
           // Skip any hidden elements
           if (node.style?.display === 'none') return false;
           return true;
         },
-      });
+      };
+
+      const dataUrl = await toPng(targetNode, toPngOptions);
+
+      // Clean up temp container
+      if (tempContainer) {
+        document.body.removeChild(tempContainer);
+      }
+
       setImageUrl(dataUrl);
 
       // Upload to server for Twitter card
@@ -95,6 +233,8 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
           pixelRatio: 2,
           cacheBust: true,
           skipAutoScale: true,
+          width: 800,
+          height: 450,
           // Skip external images that might cause CORS issues
           filter: (node: HTMLElement) => {
             if (node.tagName === 'IMG') {
@@ -117,7 +257,7 @@ export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
     } finally {
       setIsGenerating(false);
     }
-  }, [uploadImage]);
+  }, [uploadImage, imageReady, tokenImageBase64]);
 
   // Download the image
   const handleDownload = useCallback(async () => {
@@ -228,16 +368,18 @@ ${shareUrl}`;
     }
   }, [pendingShareId, getAccessToken]);
 
-  // Generate image when modal opens
+  // Generate image when modal opens (wait for image to be ready on mobile)
   useEffect(() => {
-    if (isOpen && !imageUrl && !isGenerating) {
+    if (isOpen && !imageUrl && !isGenerating && imageReady) {
       // Small delay to ensure the DOM is ready
+      // Longer delay on mobile to ensure everything is rendered
+      const delay = isMobile() ? 400 : 200;
       const timer = setTimeout(() => {
         generateImage();
-      }, 200);
+      }, delay);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, imageUrl, isGenerating, generateImage]);
+  }, [isOpen, imageUrl, isGenerating, generateImage, imageReady]);
 
   if (!isOpen) return null;
 
@@ -270,16 +412,40 @@ ${shareUrl}`;
           </div>
 
           {/* Content */}
-          <div className="p-6">
-            {/* Preview Card */}
+          <div className="p-4 sm:p-6">
+            {/* Preview Card - scale down for display but capture at full size */}
             <div className="relative rounded-xl overflow-hidden border border-white/10 shadow-xl mb-6">
-              {isGenerating && (
+              {(isGenerating || !imageReady) && (
                 <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-10">
                   <Loader2 className="w-8 h-8 text-primary animate-spin" />
                 </div>
               )}
-              <div className="overflow-auto max-h-[400px] flex justify-center bg-black/50">
-                <ShareCard ref={shareCardRef} analysis={analysis} />
+              {/* Container with proper scaling for mobile preview */}
+              <div
+                className="flex justify-center bg-black/50 overflow-hidden"
+                style={{
+                  // Scale down the preview container for mobile viewing
+                  // The actual capture uses full dimensions
+                  maxHeight: isMobile() ? '280px' : '450px',
+                }}
+              >
+                <div
+                  style={{
+                    // On mobile, scale down the visual preview but keep full dimensions for capture
+                    transform: isMobile() ? 'scale(0.45)' : 'scale(1)',
+                    transformOrigin: 'top center',
+                    // Ensure the card doesn't get clipped during capture
+                    width: '800px',
+                    height: '450px',
+                    flexShrink: 0,
+                  }}
+                >
+                  <ShareCard
+                    ref={shareCardRef}
+                    analysis={analysis}
+                    preloadedImageBase64={tokenImageBase64}
+                  />
+                </div>
               </div>
             </div>
 
