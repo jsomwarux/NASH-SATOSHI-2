@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
 import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database, Crown, Flame, Award, Sparkles, Lock, TrendingUp, Rocket, Zap, Users } from "lucide-react";
@@ -32,8 +32,25 @@ export default function Leaderboard() {
   const [sortBy, setSortBy] = useState<SortField>("latestScore");
   const [order, setOrder] = useState<SortOrder>("desc");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filters, setFilters] = useState<LeaderboardFilters>({});
   const [showFilters, setShowFilters] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce search input - only update API query after user stops typing
+  useEffect(() => {
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+    searchDebounceRef.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current);
+      }
+    };
+  }, [searchQuery]);
 
   // Beta banner dismissal state (persisted to localStorage)
   const [showBetaBanner, setShowBetaBanner] = useState(() => {
@@ -45,11 +62,11 @@ export default function Leaderboard() {
     return localStorage.getItem('promo-banner-dismissed') !== 'true';
   });
 
-  // Build filter options with search
+  // Build filter options with debounced search (prevents API call on every keystroke)
   const activeFilters = useMemo(() => ({
     ...filters,
-    search: searchQuery || undefined,
-  }), [filters, searchQuery]);
+    search: debouncedSearch || undefined,
+  }), [filters, debouncedSearch]);
 
   const { data, isLoading, error } = useLeaderboard({
     sortBy,

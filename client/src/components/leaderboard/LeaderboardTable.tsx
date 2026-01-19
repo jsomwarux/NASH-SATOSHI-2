@@ -158,7 +158,8 @@ function getTrendInfo(scoreTrend: number | null): {
   const absChange = Math.abs(scoreTrend);
   const sign = scoreTrend >= 0 ? '+' : '';
 
-  if (scoreTrend >= 3) {
+  // Show actual trend values for changes >= 0.5 points
+  if (scoreTrend >= 0.5) {
     return {
       icon: TrendingUp,
       color: 'text-green-400',
@@ -168,7 +169,7 @@ function getTrendInfo(scoreTrend: number | null): {
     };
   }
 
-  if (scoreTrend <= -3) {
+  if (scoreTrend <= -0.5) {
     return {
       icon: TrendingDown,
       color: 'text-red-400',
@@ -178,6 +179,7 @@ function getTrendInfo(scoreTrend: number | null): {
     };
   }
 
+  // Only show stable for very small changes (between -0.5 and +0.5)
   return {
     icon: Minus,
     color: 'text-muted-foreground',

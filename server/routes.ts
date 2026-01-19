@@ -1187,9 +1187,10 @@ export async function registerRoutes(
       const limit = parseInt(req.query.limit as string) || 50;
       const offset = parseInt(req.query.offset as string) || 0;
       const status = req.query.status as string | undefined;
+      const symbol = req.query.symbol as string | undefined;
 
       // Get all analyses (not filtered by user)
-      const result = await storage.getAllAnalyses(limit, offset, status);
+      const result = await storage.getAllAnalyses(limit, offset, status, symbol);
 
       res.json(result);
     } catch (error) {

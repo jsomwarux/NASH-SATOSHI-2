@@ -70,12 +70,13 @@ export function Layout({ children }: LayoutProps) {
       { href: "/rankings", label: "RANKINGS", icon: BarChart3 },
       { href: "/vote", label: "VOTE", icon: Vote },
     ];
-    // Only show pricing if not in beta mode
-    if (!subscriptionStatus?.isBeta) {
+    // Only show pricing when we explicitly know we're NOT in beta mode
+    // This prevents the pricing link from flashing before subscription status loads
+    if (subscriptionStatus && subscriptionStatus.isBeta === false) {
       links.push({ href: "/pricing", label: "PRICING", icon: Crown });
     }
     return links;
-  }, [subscriptionStatus?.isBeta]);
+  }, [subscriptionStatus]);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background text-foreground font-sans">

@@ -210,7 +210,7 @@ export interface IStorage {
   getAnalysesByTokenId(tokenId: string): Promise<TokenAnalysis[]>;
   getLatestAnalysisByTokenId(tokenId: string): Promise<TokenAnalysis | null>;
   getLatestAnalysisByContractAddress(contractAddress: string): Promise<TokenAnalysis | null>;
-  getAllAnalyses(limit?: number, offset?: number, status?: string): Promise<{ items: TokenAnalysis[]; total: number }>;
+  getAllAnalyses(limit?: number, offset?: number, status?: string, symbol?: string): Promise<{ items: TokenAnalysis[]; total: number }>;
 
   // Leaderboard methods
   getLeaderboard(options: {
@@ -734,11 +734,18 @@ export class PostgresStorage implements IStorage {
     });
   }
 
-  async getAllAnalyses(limit = 50, offset = 0, status?: string): Promise<{ items: TokenAnalysis[]; total: number }> {
+  async getAllAnalyses(limit = 50, offset = 0, status?: string, symbol?: string): Promise<{ items: TokenAnalysis[]; total: number }> {
     return withRetry(async () => {
       const db = getDb();
 
-      const conditions = status ? [eq(tokenAnalyses.status, status)] : [];
+      const conditions: any[] = [];
+      if (status) {
+        conditions.push(eq(tokenAnalyses.status, status));
+      }
+      if (symbol) {
+        // Case-insensitive symbol search
+        conditions.push(ilike(tokenAnalyses.tokenSymbol, symbol));
+      }
 
       const [items, countResult] = await Promise.all([
         db
@@ -783,17 +790,16 @@ export class PostgresStorage implements IStorage {
       const { limit = 10000, offset = 0, sortBy = "latestScore", order = "desc", filters } = options;
 
     // Build WHERE conditions
+    // IMPORTANT: Only apply filters that don't change between analyses at query level.
+    // Filters like tier, narrative, tokenType, marketCapTier are applied POST-aggregation
+    // so that we can correctly calculate scoreTrend from all historical analyses.
     const conditions = [eq(tokenAnalyses.status, "completed")];
 
-    if (filters?.tier) {
-      conditions.push(eq(tokenAnalyses.tier, filters.tier));
-    }
-    if (filters?.narrative) {
-      conditions.push(eq(tokenAnalyses.narrative, filters.narrative));
-    }
+    // Chain filter - chain shouldn't change between analyses
     if (filters?.chain) {
       conditions.push(eq(tokenAnalyses.chain, filters.chain));
     }
+    // Search filter - token name/symbol shouldn't change
     if (filters?.search) {
       conditions.push(
         or(
@@ -802,13 +808,9 @@ export class PostgresStorage implements IStorage {
         )!
       );
     }
-    if (filters?.tokenType) {
-      conditions.push(eq(tokenAnalyses.tokenType, filters.tokenType));
-    }
-    if (filters?.marketCapTier) {
-      conditions.push(eq(tokenAnalyses.marketCapTier, filters.marketCapTier));
-    }
-    // Note: upsideTier filter is applied post-aggregation to filter by LATEST analysis
+    // Note: tier, narrative, tokenType, marketCapTier, upsideTier filters are applied
+    // post-aggregation to filter by LATEST analysis properties while preserving
+    // trend calculation from historical analyses
 
     // Get aggregated data per token with time-based metrics
     const now = new Date();
@@ -823,6 +825,7 @@ export class PostgresStorage implements IStorage {
         tokenName: tokenAnalyses.tokenName,
         tokenImage: tokenAnalyses.tokenImage,
         chain: tokenAnalyses.chain,
+        contractAddress: tokenAnalyses.contractAddress,
         finalScore: tokenAnalyses.finalScore,
         tier: tokenAnalyses.tier,
         narrative: tokenAnalyses.narrative,
@@ -843,7 +846,42 @@ export class PostgresStorage implements IStorage {
 
     const allResults = await query;
 
+    // Build maps for grouping analyses of the same token with different tokenIds
+    // Priority: 1) contract address, 2) symbol+chain combination, 3) symbol only (least reliable)
+    const contractToTokenId = new Map<string, string>();
+    const symbolChainToTokenId = new Map<string, string>();
+    const symbolToTokenId = new Map<string, string>();
+
+    for (const row of allResults) {
+      // Map by contract address (most reliable)
+      if (row.contractAddress) {
+        const normalizedContract = row.contractAddress.toLowerCase();
+        // First occurrence (most recent due to ORDER BY) becomes the canonical tokenId
+        if (!contractToTokenId.has(normalizedContract)) {
+          contractToTokenId.set(normalizedContract, row.tokenId);
+        }
+      }
+
+      // Map by symbol+chain as fallback (handles cases where contract address is missing)
+      if (row.tokenSymbol && row.chain) {
+        const symbolChainKey = `${row.tokenSymbol.toUpperCase()}_${row.chain.toLowerCase()}`;
+        if (!symbolChainToTokenId.has(symbolChainKey)) {
+          symbolChainToTokenId.set(symbolChainKey, row.tokenId);
+        }
+      }
+
+      // Map by symbol only as last resort (handles cases where chain is also missing)
+      // This is less reliable but necessary for some legacy analyses
+      if (row.tokenSymbol) {
+        const symbolKey = row.tokenSymbol.toUpperCase();
+        if (!symbolToTokenId.has(symbolKey)) {
+          symbolToTokenId.set(symbolKey, row.tokenId);
+        }
+      }
+    }
+
     // Aggregate by tokenId with 7D/30D metrics
+    // Uses contract address to group analyses with different tokenIds for the same token
     const tokenMap = new Map<string, {
       tokenId: string;
       tokenSymbol: string;
@@ -880,8 +918,39 @@ export class PostgresStorage implements IStorage {
       const isWithin7d = analysisDate >= sevenDaysAgo;
       const isWithin30d = analysisDate >= thirtyDaysAgo;
 
-      if (!tokenMap.has(row.tokenId)) {
-        tokenMap.set(row.tokenId, {
+      // Use canonical tokenId to group same-token analyses with different tokenId formats
+      // Priority: 1) contract address match, 2) symbol+chain match, 3) symbol only, 4) exact tokenId
+      let groupKey = row.tokenId;
+
+      // Try contract address first (most reliable)
+      if (row.contractAddress) {
+        const normalizedContract = row.contractAddress.toLowerCase();
+        const canonicalTokenId = contractToTokenId.get(normalizedContract);
+        if (canonicalTokenId) {
+          groupKey = canonicalTokenId;
+        }
+      }
+
+      // Fallback to symbol+chain if contract address didn't provide a different grouping
+      if (groupKey === row.tokenId && row.tokenSymbol && row.chain) {
+        const symbolChainKey = `${row.tokenSymbol.toUpperCase()}_${row.chain.toLowerCase()}`;
+        const canonicalTokenId = symbolChainToTokenId.get(symbolChainKey);
+        if (canonicalTokenId) {
+          groupKey = canonicalTokenId;
+        }
+      }
+
+      // Last resort: group by symbol only (handles legacy analyses missing chain/contract)
+      if (groupKey === row.tokenId && row.tokenSymbol) {
+        const symbolKey = row.tokenSymbol.toUpperCase();
+        const canonicalTokenId = symbolToTokenId.get(symbolKey);
+        if (canonicalTokenId) {
+          groupKey = canonicalTokenId;
+        }
+      }
+
+      if (!tokenMap.has(groupKey)) {
+        tokenMap.set(groupKey, {
           tokenId: row.tokenId,
           tokenSymbol: row.tokenSymbol,
           tokenName: row.tokenName,
@@ -912,14 +981,14 @@ export class PostgresStorage implements IStorage {
         });
       } else {
         // This is not the first analysis for this token - capture as previousScore if not set
-        const item = tokenMap.get(row.tokenId)!;
+        const item = tokenMap.get(groupKey)!;
         if (item.previousScore === null) {
           item.previousScore = score;
           item.scoreTrend = item.latestScore - score;
         }
       }
 
-      const item = tokenMap.get(row.tokenId)!;
+      const item = tokenMap.get(groupKey)!;
 
       // Add to 7D metrics if within 7 days
       if (isWithin7d) {
@@ -970,10 +1039,28 @@ export class PostgresStorage implements IStorage {
       items.push(cleanItem);
     }
 
-    // Post-aggregation filter: filter by latest analysis's upside tier
+    // Post-aggregation filters: filter by latest analysis's properties
+    // This preserves trend calculation while filtering by current token state
     let filteredItems = items;
+    if (filters?.tier) {
+      filteredItems = filteredItems.filter(item => item.latestTier === filters.tier);
+    }
+    if (filters?.narrative) {
+      // Match against subNarrative, primaryNarrative, or latestNarrative
+      filteredItems = filteredItems.filter(item =>
+        item.latestSubNarrative === filters.narrative ||
+        item.latestPrimaryNarrative === filters.narrative ||
+        item.latestNarrative === filters.narrative
+      );
+    }
+    if (filters?.tokenType) {
+      filteredItems = filteredItems.filter(item => item.tokenType === filters.tokenType);
+    }
+    if (filters?.marketCapTier) {
+      filteredItems = filteredItems.filter(item => item.marketCapTier === filters.marketCapTier);
+    }
     if (filters?.upsideTier) {
-      filteredItems = items.filter(item => item.upsideTier === filters.upsideTier);
+      filteredItems = filteredItems.filter(item => item.upsideTier === filters.upsideTier);
     }
 
     // Sort based on sortBy parameter
@@ -1613,47 +1700,28 @@ export class PostgresStorage implements IStorage {
         .orderBy(desc(sql`total_score`))
         .limit(1);
 
-      // If we found individual vote records from yesterday, use them
-      if (yesterdaysVotes.length > 0) {
-        const topVote = yesterdaysVotes[0];
-        const requests = await db
-          .select()
-          .from(tokenVoteRequests)
-          .where(eq(tokenVoteRequests.id, topVote.tokenVoteRequestId))
-          .limit(1);
-
-        if (requests.length > 0) {
-          return {
-            request: requests[0],
-            voteCount: Number(topVote.regularVotes) || 0,
-            priorityVoteCount: Number(topVote.priorityVotes) || 0,
-            totalScore: Number(topVote.totalScore) || 0,
-          };
-        }
-      }
-
-      // Fallback: Get the top pending request by accumulated vote counts
-      // This handles cases where votes were added without individual vote records
-      const topPendingRequests = await db
-        .select()
-        .from(tokenVoteRequests)
-        .where(eq(tokenVoteRequests.status, "pending"))
-        .orderBy(desc(sql`${tokenVoteRequests.voteCount} + (${tokenVoteRequests.priorityVoteCount} * 2)`))
-        .limit(1);
-
-      if (topPendingRequests.length === 0) {
+      // If no votes from yesterday, return null (don't show stale data)
+      if (yesterdaysVotes.length === 0) {
         return null;
       }
 
-      const topRequest = topPendingRequests[0];
-      const voteCount = topRequest.voteCount || 0;
-      const priorityVoteCount = topRequest.priorityVoteCount || 0;
+      // Get the request details for yesterday's top voted token
+      const topVote = yesterdaysVotes[0];
+      const requests = await db
+        .select()
+        .from(tokenVoteRequests)
+        .where(eq(tokenVoteRequests.id, topVote.tokenVoteRequestId))
+        .limit(1);
+
+      if (requests.length === 0) {
+        return null;
+      }
 
       return {
-        request: topRequest,
-        voteCount,
-        priorityVoteCount,
-        totalScore: voteCount + (priorityVoteCount * 2),
+        request: requests[0],
+        voteCount: Number(topVote.regularVotes) || 0,
+        priorityVoteCount: Number(topVote.priorityVotes) || 0,
+        totalScore: Number(topVote.totalScore) || 0,
       };
     });
   }
@@ -2564,10 +2632,13 @@ export class MemStorage implements IStorage {
     return analyses[0] || null;
   }
 
-  async getAllAnalyses(limit = 50, offset = 0, status?: string): Promise<{ items: TokenAnalysis[]; total: number }> {
+  async getAllAnalyses(limit = 50, offset = 0, status?: string, symbol?: string): Promise<{ items: TokenAnalysis[]; total: number }> {
     let analyses = Array.from(this.analyses.values());
     if (status) {
       analyses = analyses.filter((a) => a.status === status);
+    }
+    if (symbol) {
+      analyses = analyses.filter((a) => a.tokenSymbol.toLowerCase() === symbol.toLowerCase());
     }
     analyses.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return {

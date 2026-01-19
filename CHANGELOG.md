@@ -4,7 +4,71 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-18 - Fix Mobile Scorecard Download Issues (Latest)
+## Session: 2026-01-19 - Rankings Search, Trend Display, and Navigation Fixes (Latest)
+
+### Summary
+Fixed multiple UX issues: search input requiring letter-by-letter typing, trend column showing blank for reanalyzed tokens, "Yesterday's Top Voted" showing stale data, and navigation bar flashing Pricing tab on load.
+
+### Changes Made
+
+#### 1. Debounced Search Input (client/src/pages/Leaderboard.tsx)
+- Added 300ms debounce to search input so users can type full token names at once
+- Immediate UI feedback (input updates instantly) while API calls are delayed until user stops typing
+- Added `debouncedSearch` state and `useRef` for timeout management
+
+#### 2. Fixed "Yesterday's Top Voted" Stale Data (server/storage.ts)
+- Removed fallback that returned top pending request by total votes when no votes were cast yesterday
+- Now correctly returns `null` when there are no votes from yesterday
+- UI already handles null case by showing "No votes recorded yesterday"
+
+#### 3. Fixed Leaderboard Trend Calculation (server/storage.ts)
+- **Moved filters to post-aggregation**: Filters for tier, narrative, tokenType, marketCapTier were excluding historical analyses needed for trend calculation. Now applied after aggregation based on latest analysis properties.
+- **Added multi-level grouping for tokenId mismatches**: Analyses of the same token with different tokenIds (e.g., "bitcoin" vs "cg_ethereum_0x...") are now grouped together using:
+  1. Contract address (most reliable)
+  2. Symbol + Chain combination
+  3. Symbol only (fallback for legacy data)
+- This ensures trend is calculated even when tokenId format changed between analyses
+
+#### 4. Fixed Trend Display Threshold (client/src/components/leaderboard/LeaderboardTable.tsx)
+- Lowered threshold for showing trend values from ±3 to ±0.5 points
+- Changes ≥ +0.5 show green with value, ≤ -0.5 show red with value
+- Only tiny changes (-0.5 to +0.5) show as stable dash
+- Previously, tokens like RADR (+2.9) and ENTROPY (+2.15) showed blank because they were under the ±3 threshold
+
+#### 5. Fixed Navigation Pricing Tab Flash (client/src/components/common/Layout.tsx)
+- Changed condition from `!subscriptionStatus?.isBeta` to `subscriptionStatus && subscriptionStatus.isBeta === false`
+- Prevents Pricing link from showing before subscription status loads
+- Pricing tab only appears when explicitly NOT in beta mode
+
+#### 6. Added Symbol Search to Admin Analyses Endpoint (server/routes.ts, server/storage.ts)
+- `/api/admin/analyses?symbol=RADR` now filters analyses by token symbol
+- Useful for debugging token analysis history
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `client/src/pages/Leaderboard.tsx` | Added debounced search with 300ms delay |
+| `client/src/components/leaderboard/LeaderboardTable.tsx` | Lowered trend display threshold from ±3 to ±0.5 |
+| `client/src/components/common/Layout.tsx` | Fixed Pricing tab flash on initial load |
+| `server/storage.ts` | Fixed getYesterdayTopVote fallback, moved leaderboard filters to post-aggregation, added contract/symbol grouping, added symbol param to getAllAnalyses |
+| `server/routes.ts` | Added symbol query param to admin analyses endpoint |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed (multiple times)
+
+### Current State
+- Search input allows typing full token names without waiting
+- Trend column shows values for all reanalyzed tokens (RADR, ENTROPY now show +2.9, +2.1)
+- "Yesterday's Top Voted" shows correct data or "No votes" message
+- Navigation bar no longer flashes Pricing tab on page load
+
+### Still Working
+- All existing functionality preserved
+- Pricing pages still exist (hidden during beta, available for future use)
+
+---
+
+## Session: 2026-01-18 - Fix Mobile Scorecard Download Issues
 
 ### Summary
 Fixed two issues with scorecard image downloads on mobile: token logo images not appearing in the downloaded image, and S-tier badge having a weird visual effect.
