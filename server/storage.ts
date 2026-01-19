@@ -1189,24 +1189,98 @@ export class PostgresStorage implements IStorage {
   }> {
     const db = getDb();
 
-    // Get the top 3 tokens (highest 7-day average score) and when they first appeared
-    const topTokensQuery = await db
+    // Get all completed analyses from the past 30 days to calculate days in top 3
+    const allAnalysesQuery = await db
       .select({
         tokenSymbol: tokenAnalyses.tokenSymbol,
         tokenName: tokenAnalyses.tokenName,
-        avgScore: sql<number>`AVG(CAST(${tokenAnalyses.finalScore} AS DECIMAL))`.as('avg_score'),
-        firstAnalysis: sql<Date>`MIN(${tokenAnalyses.createdAt})`.as('first_analysis'),
+        finalScore: tokenAnalyses.finalScore,
+        createdAt: tokenAnalyses.createdAt,
       })
       .from(tokenAnalyses)
       .where(
         and(
           eq(tokenAnalyses.status, 'completed'),
-          gte(tokenAnalyses.createdAt, sql`NOW() - INTERVAL '7 days'`)
+          gte(tokenAnalyses.createdAt, sql`NOW() - INTERVAL '30 days'`)
         )
       )
-      .groupBy(tokenAnalyses.tokenSymbol, tokenAnalyses.tokenName)
-      .orderBy(sql`avg_score DESC`)
-      .limit(3);
+      .orderBy(desc(tokenAnalyses.createdAt));
+
+    // Group by token to get latest score for each token
+    const tokenLatestScores = new Map<string, { symbol: string; name: string; score: number; date: Date }>();
+    for (const row of allAnalysesQuery) {
+      const key = row.tokenSymbol.toUpperCase();
+      if (!tokenLatestScores.has(key)) {
+        tokenLatestScores.set(key, {
+          symbol: row.tokenSymbol,
+          name: row.tokenName,
+          score: parseFloat(row.finalScore as string) || 0,
+          date: new Date(row.createdAt),
+        });
+      }
+    }
+
+    // Get current top 3 by latest score
+    const sortedByLatest = Array.from(tokenLatestScores.values())
+      .sort((a, b) => b.score - a.score);
+    const currentTop3Symbols = new Set(sortedByLatest.slice(0, 3).map(t => t.symbol.toUpperCase()));
+
+    // Calculate days in top 3 for each current top 3 token
+    // We'll check each day going back and see if this token was in that day's top 3
+    const daysInTop3Map = new Map<string, number>();
+    const currentTop3Array = Array.from(currentTop3Symbols);
+    for (const symbol of currentTop3Array) {
+      daysInTop3Map.set(symbol, 0);
+    }
+
+    // Group analyses by date to compute daily top 3
+    const analysesByDate = new Map<string, { symbol: string; score: number }[]>();
+    for (const row of allAnalysesQuery) {
+      const dateKey = new Date(row.createdAt).toISOString().split('T')[0];
+      if (!analysesByDate.has(dateKey)) {
+        analysesByDate.set(dateKey, []);
+      }
+      // Only keep the highest score per token per day
+      const dayAnalyses = analysesByDate.get(dateKey)!;
+      const existing = dayAnalyses.find(a => a.symbol.toUpperCase() === row.tokenSymbol.toUpperCase());
+      const score = parseFloat(row.finalScore as string) || 0;
+      if (!existing) {
+        dayAnalyses.push({ symbol: row.tokenSymbol, score });
+      } else if (score > existing.score) {
+        existing.score = score;
+      }
+    }
+
+    // Sort dates from most recent to oldest
+    const sortedDates = Array.from(analysesByDate.keys()).sort().reverse();
+
+    // For each current top 3 token, count consecutive days in top 3
+    for (const symbol of currentTop3Array) {
+      let consecutiveDays = 0;
+      for (const dateKey of sortedDates) {
+        const dayAnalyses = analysesByDate.get(dateKey)!;
+        const dayTop3 = dayAnalyses
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 3)
+          .map(a => a.symbol.toUpperCase());
+
+        if (dayTop3.includes(symbol)) {
+          consecutiveDays++;
+        } else {
+          // Stop counting when token falls out of top 3
+          break;
+        }
+      }
+      daysInTop3Map.set(symbol, Math.max(1, consecutiveDays));
+    }
+
+    // Build top tokens result with latest scores
+    const topTokensResult = sortedByLatest.slice(0, 3).map(token => ({
+      symbol: token.symbol,
+      name: token.name,
+      score: token.score,
+      daysInTop3: daysInTop3Map.get(token.symbol.toUpperCase()) || 1,
+    }));
 
     // Get all narratives with their scores and token IDs for normalization
     // Prefer primaryNarrative (broader category) over narrative (sub_narrative) for grouping
@@ -1307,17 +1381,8 @@ export class PostgresStorage implements IStorage {
       .orderBy(sql`max_score DESC`)
       .limit(3);
 
-    // Calculate days in top 3 for each top token
-    const topTokens = topTokensQuery.map(row => {
-      const firstAnalysisDate = new Date(row.firstAnalysis);
-      const daysInTop3 = Math.floor((Date.now() - firstAnalysisDate.getTime()) / (1000 * 60 * 60 * 24));
-      return {
-        symbol: row.tokenSymbol,
-        name: row.tokenName,
-        score: parseFloat(String(row.avgScore)) || 0,
-        daysInTop3: Math.max(1, daysInTop3),
-      };
-    });
+    // Use the calculated top tokens with latest scores and actual days in top 3
+    const topTokens = topTokensResult;
 
     // Map all 7d winners (now deduplicated)
     const winners7d = winners7dQuery.map(row => ({

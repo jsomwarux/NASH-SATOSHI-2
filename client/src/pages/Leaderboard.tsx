@@ -268,9 +268,20 @@ export default function Leaderboard() {
                           </span>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
-                          <span className={`${isFirst ? 'text-xs' : 'text-[10px]'} text-muted-foreground font-mono`}>
-                            {token.daysInTop3}d
-                          </span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className={`${isFirst ? 'text-xs' : 'text-[10px]'} text-muted-foreground font-mono cursor-help`}>
+                                {token.daysInTop3}d
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="cyber-card border-primary/20">
+                              <p className="text-xs font-mono">
+                                {token.daysInTop3 === 1
+                                  ? "In top 3 for 1 day"
+                                  : `In top 3 for ${token.daysInTop3} consecutive days`}
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
                           <span className={`${isFirst ? 'text-xs' : 'text-[10px]'} text-purple-400/70 font-mono font-bold`}>
                             {formatScore(token.score)}
                           </span>
