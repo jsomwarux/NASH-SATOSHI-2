@@ -3205,7 +3205,63 @@ async function processGumloopCompletion(
 
   // Fetch existing analysis to get FDV for score capping (fall back to market cap)
   const existingAnalysis = await storage.getAnalysis(analysisId);
-  const fdvStr = existingAnalysis?.fdv || existingAnalysis?.marketCap;
+
+  // Helper to parse currency strings like "$5M", "$100,000", "$0.0001234" into numeric values
+  const parseCurrencyValue = (value: string | undefined): number | null => {
+    if (!value) return null;
+    // Remove $ and commas
+    let cleaned = value.replace(/[$,]/g, '').trim();
+    // Handle suffixes: K, M, B, T
+    const suffixMultipliers: Record<string, number> = {
+      'k': 1_000,
+      'm': 1_000_000,
+      'b': 1_000_000_000,
+      't': 1_000_000_000_000,
+    };
+    const match = cleaned.match(/^([\d.]+)\s*([kmbt])?$/i);
+    if (match) {
+      const num = parseFloat(match[1]);
+      const suffix = match[2]?.toLowerCase();
+      if (!isNaN(num)) {
+        return suffix ? num * (suffixMultipliers[suffix] || 1) : num;
+      }
+    }
+    // Try direct parse
+    const direct = parseFloat(cleaned);
+    return isNaN(direct) ? null : direct;
+  };
+
+  // Use Gumloop market data as fallback when CoinGecko data is missing
+  let fallbackPrice: string | undefined;
+  let fallbackMarketCap: string | undefined;
+  let fallbackFdv: string | undefined;
+
+  if (!existingAnalysis?.currentPrice && parsed.gumloopPrice) {
+    const priceValue = parseCurrencyValue(parsed.gumloopPrice);
+    if (priceValue !== null) {
+      fallbackPrice = priceValue.toString();
+      console.log(`Analysis ${analysisId}: Using Gumloop price as fallback: ${parsed.gumloopPrice} -> ${fallbackPrice}`);
+    }
+  }
+
+  if (!existingAnalysis?.marketCap && parsed.gumloopMarketCap) {
+    const mcValue = parseCurrencyValue(parsed.gumloopMarketCap);
+    if (mcValue !== null) {
+      fallbackMarketCap = mcValue.toString();
+      console.log(`Analysis ${analysisId}: Using Gumloop market cap as fallback: ${parsed.gumloopMarketCap} -> ${fallbackMarketCap}`);
+    }
+  }
+
+  if (!existingAnalysis?.fdv && parsed.gumloopFdv) {
+    const fdvVal = parseCurrencyValue(parsed.gumloopFdv);
+    if (fdvVal !== null) {
+      fallbackFdv = fdvVal.toString();
+      console.log(`Analysis ${analysisId}: Using Gumloop FDV as fallback: ${parsed.gumloopFdv} -> ${fallbackFdv}`);
+    }
+  }
+
+  // Use existing data or fallback from Gumloop
+  const fdvStr = existingAnalysis?.fdv || fallbackFdv || existingAnalysis?.marketCap || fallbackMarketCap;
   const fdvValue = fdvStr ? parseFloat(fdvStr as string) : null;
 
   // Determine FDV tier and apply hard caps
@@ -3367,6 +3423,10 @@ async function processGumloopCompletion(
     scoreSpread: parsed.scoreSpread?.toString(),
     divergenceFlag: parsed.divergenceFlag,
     divergenceNote: parsed.divergenceNote,
+    // Market data fallbacks from Gumloop (only set if CoinGecko data was missing)
+    ...(fallbackPrice && { currentPrice: fallbackPrice }),
+    ...(fallbackMarketCap && { marketCap: fallbackMarketCap }),
+    ...(fallbackFdv && { fdv: fallbackFdv }),
     rawGumloopResponse: rawResponseToSave,
     // Clear any previous error state on success
     errorMessage: null,

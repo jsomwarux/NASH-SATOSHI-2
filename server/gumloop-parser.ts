@@ -96,6 +96,12 @@ export interface ParsedGumloopResponse {
   upsideMultiple?: string; // e.g., "10x", "50x", "100x"
   upsideTier?: string; // "<5x", "5-10x", "10-25x", "25-50x", "50-100x", "100x+"
 
+  // Market data from Gumloop (fallback when CoinGecko unavailable)
+  gumloopTicker?: string; // Token ticker/symbol from Gumloop
+  gumloopPrice?: string; // Current price from Gumloop (e.g., "$0.0001234")
+  gumloopMarketCap?: string; // Market cap from Gumloop (e.g., "$5M", "$50,000,000")
+  gumloopFdv?: string; // FDV from Gumloop (e.g., "$10M", "$100,000,000")
+
   // New Stage 4 fields
   narrativeDurability?: string; // "High", "Medium", "Low" - from NARRATIVE section
   kolMentionRecency?: string; // "Last 7 days", "Last 30 days", "1-3 months ago", "Older than 3 months"
@@ -2987,6 +2993,31 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
     result.fdvModifier = marketCapModifier; // Use market cap as fallback
   }
   if (marketCapModifier !== undefined) result.marketCapModifier = marketCapModifier;
+
+  // Market data from Gumloop (fallback when CoinGecko unavailable)
+  const gumloopTicker = getString('ticker');
+  if (gumloopTicker) {
+    result.gumloopTicker = gumloopTicker;
+    console.log(`Parser (outputs): Extracted gumloopTicker: "${result.gumloopTicker}"`);
+  }
+
+  const gumloopPrice = getString('price');
+  if (gumloopPrice) {
+    result.gumloopPrice = gumloopPrice;
+    console.log(`Parser (outputs): Extracted gumloopPrice: "${result.gumloopPrice}"`);
+  }
+
+  const gumloopMarketCap = getString('market_cap');
+  if (gumloopMarketCap) {
+    result.gumloopMarketCap = gumloopMarketCap;
+    console.log(`Parser (outputs): Extracted gumloopMarketCap: "${result.gumloopMarketCap}"`);
+  }
+
+  const gumloopFdv = getString('fdv');
+  if (gumloopFdv) {
+    result.gumloopFdv = gumloopFdv;
+    console.log(`Parser (outputs): Extracted gumloopFdv: "${result.gumloopFdv}"`);
+  }
 
   // Model scores
   const gptScore = getNumber('gpt_score');
