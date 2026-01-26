@@ -502,6 +502,15 @@ export const analysisStatusSchema = z.object({
   currentNode: z.string().optional(), // Name of currently executing node
 });
 
+// Score history item for individual analysis records
+export interface ScoreHistoryItem {
+  analysisId: number;
+  score: number;
+  tier: string;
+  date: string;
+  recommendation?: string;
+}
+
 // Token stats response (aggregate data for tokens with multiple analyses)
 export interface TokenStats {
   tokenId: string;
@@ -511,6 +520,7 @@ export interface TokenStats {
   runs7d: number;
   latestAnalysisId: number;
   latestAnalysisDate: string;
+  scoreHistory?: ScoreHistoryItem[];
 }
 
 export type AnalysisStatus = z.infer<typeof analysisStatusSchema>;
@@ -701,6 +711,19 @@ export interface PerformanceSummary {
   metricDate: string | null;
 }
 
+// Global crypto market data from CoinGecko
+// Uses BTC as market benchmark (total market cap chart requires paid API)
+export interface GlobalMarketData {
+  totalMarketCap: number | null;
+  totalVolume24h: number | null;
+  marketCapChange24h: number | null;
+  btc7dChange: number | null;  // BTC price change as market benchmark
+  btc30dChange: number | null; // BTC price change as market benchmark
+  btcDominance: number | null;
+  activeCryptocurrencies: number | null;
+  updatedAt: string;
+}
+
 export interface TokenPerformance {
   tokenId: string;
   priceAtFirstAnalysis: number | null;
@@ -854,6 +877,7 @@ export const reanalysisQueue = pgTable("reanalysis_queue", {
 
   // Queue metadata
   priority: integer("priority").notNull(), // 1=top25 (weekly), 2=top50 (bi-weekly), 3=top100 (monthly)
+  rank: integer("rank"), // Leaderboard rank at time of scheduling (1 = top token)
   status: text("status").notNull().default("pending"), // pending, processing, completed, failed
 
   // Scheduling
@@ -890,3 +914,36 @@ export type ReanalysisQueueItem = typeof reanalysisQueue.$inferSelect;
 
 // Reanalysis queue status type
 export type ReanalysisQueueStatus = "pending" | "processing" | "completed" | "failed";
+
+// ==================== JOB RUNS TRACKING ====================
+// Tracks when scheduled jobs last ran to detect missed runs after server restarts
+
+export const jobRuns = pgTable("job_runs", {
+  id: serial("id").primaryKey(),
+
+  // Job identifier (e.g., "reanalysis_weekly", "price_snapshots_daily")
+  jobName: text("job_name").notNull().unique(),
+
+  // Last time this job successfully ran
+  lastRunAt: timestamp("last_run_at"),
+
+  // The scheduled date that was processed (e.g., "2026-01-20" for a Monday run)
+  lastScheduledDate: text("last_scheduled_date"),
+
+  // Additional metadata about the last run
+  lastRunMetadata: jsonb("last_run_metadata"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertJobRunSchema = createInsertSchema(jobRuns).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const selectJobRunSchema = createSelectSchema(jobRuns);
+
+export type InsertJobRun = z.infer<typeof insertJobRunSchema>;
+export type JobRun = typeof jobRuns.$inferSelect;

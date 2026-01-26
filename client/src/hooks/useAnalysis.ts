@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   getAnalysis,
   getAnalysisByToken,
+  getAnalysisBySymbol,
   getAnalysisStatus,
   searchTokens,
   getTokenDetails,
@@ -109,6 +110,25 @@ export function useAnalysisByToken(tokenId: string | null) {
     queryFn: () => getAnalysisByToken(tokenId!),
     enabled: !!tokenId,
     retry: 3, // Retry for transient errors
+    retryDelay: (attemptIndex) => Math.min(500 * Math.pow(2, attemptIndex), 3000),
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+}
+
+// Analysis by Symbol Hook (for clean URLs like /token/PREDI)
+export function useAnalysisBySymbol(symbol: string | null) {
+  const { getAccessToken } = useAuth();
+
+  const fetchAnalysis = useCallback(async () => {
+    const token = await getAccessToken();
+    return getAnalysisBySymbol(symbol!, token || undefined);
+  }, [symbol, getAccessToken]);
+
+  return useQuery({
+    queryKey: ["analysisBySymbol", symbol?.toUpperCase()],
+    queryFn: fetchAnalysis,
+    enabled: !!symbol,
+    retry: 3,
     retryDelay: (attemptIndex) => Math.min(500 * Math.pow(2, attemptIndex), 3000),
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   });

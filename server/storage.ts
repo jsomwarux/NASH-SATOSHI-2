@@ -16,6 +16,7 @@ import {
   referralVisits,
   prioritySharers,
   reanalysisQueue,
+  jobRuns,
   SUBSCRIPTION_TIERS,
   PRIORITY_SHARE_THRESHOLD,
   REANALYSIS_PRIORITIES,
@@ -46,6 +47,8 @@ import {
   type ReanalysisQueueItem,
   type InsertReanalysisQueue,
   type ReanalysisQueueStatus,
+  type JobRun,
+  type InsertJobRun,
 } from "@shared/schema";
 
 // ==================== HELPERS ====================
@@ -209,6 +212,7 @@ export interface IStorage {
   getStuckAnalysesWithRunId(minAgeMinutes?: number): Promise<TokenAnalysis[]>;
   getAnalysesByTokenId(tokenId: string): Promise<TokenAnalysis[]>;
   getLatestAnalysisByTokenId(tokenId: string): Promise<TokenAnalysis | null>;
+  getLatestAnalysisBySymbol(symbol: string): Promise<TokenAnalysis | null>;
   getLatestAnalysisByContractAddress(contractAddress: string): Promise<TokenAnalysis | null>;
   getAllAnalyses(limit?: number, offset?: number, status?: string, symbol?: string): Promise<{ items: TokenAnalysis[]; total: number }>;
 
@@ -297,11 +301,15 @@ export interface IStorage {
   getPendingReanalysisItems(limit: number): Promise<ReanalysisQueueItem[]>;
   getProcessingReanalysisCount(): Promise<number>;
   updateReanalysisQueueItem(id: number, data: Partial<InsertReanalysisQueue>): Promise<ReanalysisQueueItem | null>;
-  isTokenInReanalysisQueue(tokenId: string): Promise<boolean>;
+  isTokenInReanalysisQueue(tokenId: string, tokenSymbol?: string): Promise<boolean>;
   getTopTokensForReanalysis(count: number): Promise<{ tokenId: string; tokenSymbol: string; tokenName: string; tokenImage: string | null; chain: string | null; contractAddress: string | null; score: number }[]>;
   getReanalysisQueueStats(): Promise<{ pending: number; processing: number; completed: number; failed: number }>;
   getReanalysisQueueItems(options: { status?: ReanalysisQueueStatus; limit?: number; offset?: number }): Promise<{ items: ReanalysisQueueItem[]; total: number }>;
   cleanupOldQueueItems(daysOld: number): Promise<number>;
+
+  // Job runs tracking methods
+  getJobRun(jobName: string): Promise<JobRun | null>;
+  upsertJobRun(jobName: string, data: { lastRunAt?: Date; lastScheduledDate?: string; lastRunMetadata?: Record<string, unknown> }): Promise<JobRun>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -714,6 +722,24 @@ export class PostgresStorage implements IStorage {
         .select()
         .from(tokenAnalyses)
         .where(sql`LOWER(${tokenAnalyses.tokenId}) = LOWER(${tokenId})`)
+        .orderBy(desc(tokenAnalyses.createdAt))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async getLatestAnalysisBySymbol(symbol: string): Promise<TokenAnalysis | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      // Get the latest completed analysis for a token symbol (case-insensitive)
+      // Use ilike for case-insensitive exact match (no wildcards)
+      const result = await db
+        .select()
+        .from(tokenAnalyses)
+        .where(and(
+          ilike(tokenAnalyses.tokenSymbol, symbol),
+          eq(tokenAnalyses.status, "completed")
+        ))
         .orderBy(desc(tokenAnalyses.createdAt))
         .limit(1);
       return result[0] || null;
@@ -2297,12 +2323,12 @@ export class PostgresStorage implements IStorage {
   async getPendingReanalysisItems(limit: number): Promise<ReanalysisQueueItem[]> {
     return withRetry(async () => {
       const db = getDb();
-      // Get pending items ordered by priority (lower = higher priority) then by created time
+      // Get pending items ordered by priority (lower = higher priority) then by rank (lower = higher ranked token)
       const result = await db
         .select()
         .from(reanalysisQueue)
         .where(eq(reanalysisQueue.status, "pending"))
-        .orderBy(reanalysisQueue.priority, reanalysisQueue.createdAt)
+        .orderBy(reanalysisQueue.priority, reanalysisQueue.rank, reanalysisQueue.createdAt)
         .limit(limit);
       return result;
     });
@@ -2331,17 +2357,34 @@ export class PostgresStorage implements IStorage {
     });
   }
 
-  async isTokenInReanalysisQueue(tokenId: string): Promise<boolean> {
+  async isTokenInReanalysisQueue(tokenId: string, tokenSymbol?: string): Promise<boolean> {
     return withRetry(async () => {
       const db = getDb();
+      // Check if token is pending/processing OR was completed within the last 7 days
+      // Also checks by symbol (case-insensitive) to catch same token with different IDs
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+      // Build the token matching condition - match by tokenId OR by symbol (case-insensitive)
+      const tokenMatch = tokenSymbol
+        ? or(
+            eq(reanalysisQueue.tokenId, tokenId),
+            sql`UPPER(${reanalysisQueue.tokenSymbol}) = UPPER(${tokenSymbol})`
+          )
+        : eq(reanalysisQueue.tokenId, tokenId);
+
       const result = await db
         .select({ id: reanalysisQueue.id })
         .from(reanalysisQueue)
         .where(and(
-          eq(reanalysisQueue.tokenId, tokenId),
+          tokenMatch,
           or(
             eq(reanalysisQueue.status, "pending"),
-            eq(reanalysisQueue.status, "processing")
+            eq(reanalysisQueue.status, "processing"),
+            // Also check for recently completed (within last 7 days) to avoid re-adding same week
+            and(
+              eq(reanalysisQueue.status, "completed"),
+              gte(reanalysisQueue.completedAt, sevenDaysAgo)
+            )
           )
         ))
         .limit(1);
@@ -2353,20 +2396,24 @@ export class PostgresStorage implements IStorage {
     return withRetry(async () => {
       const db = getDb();
       // Get tokens with most recent completed analysis, ordered by score
-      // Uses a subquery to get the latest analysis per token
+      // Deduplicates by UPPER(token_symbol) to avoid analyzing the same token twice
+      // when it exists under different IDs (CoinGecko vs DexScreener)
+      // IMPORTANT: Order by created_at DESC first to get the LATEST analysis per token,
+      // then rank the results by score
       const result = await db.execute(sql`
         WITH latest_analyses AS (
-          SELECT DISTINCT ON (token_id)
+          SELECT DISTINCT ON (UPPER(token_symbol))
             token_id,
             token_symbol,
             token_name,
             token_image,
             chain,
             contract_address,
-            CAST(final_score AS FLOAT) as score
+            CAST(final_score AS FLOAT) as score,
+            created_at
           FROM token_analyses
           WHERE status = 'completed'
-          ORDER BY token_id, created_at DESC
+          ORDER BY UPPER(token_symbol), created_at DESC
         )
         SELECT * FROM latest_analyses
         ORDER BY score DESC
@@ -2455,6 +2502,62 @@ export class PostgresStorage implements IStorage {
         .returning({ id: reanalysisQueue.id });
 
       return result.length;
+    });
+  }
+
+  // ==================== JOB RUNS TRACKING ====================
+
+  async getJobRun(jobName: string): Promise<JobRun | null> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .select()
+        .from(jobRuns)
+        .where(eq(jobRuns.jobName, jobName))
+        .limit(1);
+      return result[0] || null;
+    });
+  }
+
+  async upsertJobRun(
+    jobName: string,
+    data: { lastRunAt?: Date; lastScheduledDate?: string; lastRunMetadata?: Record<string, unknown> }
+  ): Promise<JobRun> {
+    return withRetry(async () => {
+      const db = getDb();
+
+      // Try to update existing record
+      const existing = await db
+        .select()
+        .from(jobRuns)
+        .where(eq(jobRuns.jobName, jobName))
+        .limit(1);
+
+      if (existing.length > 0) {
+        const updated = await db
+          .update(jobRuns)
+          .set({
+            lastRunAt: data.lastRunAt ?? existing[0].lastRunAt,
+            lastScheduledDate: data.lastScheduledDate ?? existing[0].lastScheduledDate,
+            lastRunMetadata: data.lastRunMetadata ?? existing[0].lastRunMetadata,
+            updatedAt: new Date(),
+          })
+          .where(eq(jobRuns.jobName, jobName))
+          .returning();
+        return updated[0];
+      }
+
+      // Insert new record
+      const inserted = await db
+        .insert(jobRuns)
+        .values({
+          jobName,
+          lastRunAt: data.lastRunAt,
+          lastScheduledDate: data.lastScheduledDate,
+          lastRunMetadata: data.lastRunMetadata,
+        })
+        .returning();
+      return inserted[0];
     });
   }
 }
@@ -2686,6 +2789,13 @@ export class MemStorage implements IStorage {
   async getLatestAnalysisByTokenId(tokenId: string): Promise<TokenAnalysis | null> {
     const analyses = Array.from(this.analyses.values())
       .filter((a) => a.tokenId === tokenId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return analyses[0] || null;
+  }
+
+  async getLatestAnalysisBySymbol(symbol: string): Promise<TokenAnalysis | null> {
+    const analyses = Array.from(this.analyses.values())
+      .filter((a) => a.tokenSymbol?.toUpperCase() === symbol.toUpperCase() && a.status === "completed")
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return analyses[0] || null;
   }
@@ -3021,7 +3131,7 @@ export class MemStorage implements IStorage {
     return null;
   }
 
-  async isTokenInReanalysisQueue(_tokenId: string): Promise<boolean> {
+  async isTokenInReanalysisQueue(_tokenId: string, _tokenSymbol?: string): Promise<boolean> {
     return false;
   }
 
@@ -3039,6 +3149,22 @@ export class MemStorage implements IStorage {
 
   async cleanupOldQueueItems(_daysOld: number): Promise<number> {
     return 0;
+  }
+
+  async getJobRun(_jobName: string): Promise<JobRun | null> {
+    return null;
+  }
+
+  async upsertJobRun(jobName: string, data: { lastRunAt?: Date; lastScheduledDate?: string; lastRunMetadata?: Record<string, unknown> }): Promise<JobRun> {
+    return {
+      id: 1,
+      jobName,
+      lastRunAt: data.lastRunAt || null,
+      lastScheduledDate: data.lastScheduledDate || null,
+      lastRunMetadata: data.lastRunMetadata || null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
   }
 }
 

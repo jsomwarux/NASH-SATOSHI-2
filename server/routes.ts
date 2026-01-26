@@ -379,6 +379,17 @@ export async function registerRoutes(
         current.createdAt > latest.createdAt ? current : latest
       );
 
+      // Build score history (sorted by date, most recent first)
+      const scoreHistory = analyses
+        .map(analysis => ({
+          analysisId: analysis.id,
+          score: parseFloat(analysis.finalScore as string) || 0,
+          tier: analysis.tier || "?",
+          date: analysis.createdAt.toISOString(),
+          recommendation: analysis.recommendation || undefined,
+        }))
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
       res.json({
         tokenId,
         analysisCount: analyses.length,
@@ -387,6 +398,7 @@ export async function registerRoutes(
         runs7d: scores7d.length,
         latestAnalysisId: latestAnalysis.id,
         latestAnalysisDate: latestAnalysis.createdAt.toISOString(),
+        scoreHistory,
       });
     } catch (error) {
       console.error("Error getting token stats:", error);
@@ -1633,6 +1645,91 @@ export async function registerRoutes(
     }
   });
 
+  // Get global crypto market data from CoinGecko
+  // Used to compare our top 10 performance against total market
+  app.get("/api/market/global", async (_req: Request, res: Response) => {
+    try {
+      const cgApiKey = process.env.COINGECKO_API_KEY;
+      const cgApiType = process.env.COINGECKO_API_TYPE || 'demo';
+      const cgBaseUrl = cgApiType === 'pro' ? 'https://pro-api.coingecko.com/api/v3' : 'https://api.coingecko.com/api/v3';
+
+      const headers: Record<string, string> = { 'Accept': 'application/json' };
+      if (cgApiKey) {
+        headers[cgApiType === 'pro' ? 'x-cg-pro-api-key' : 'x-cg-demo-api-key'] = cgApiKey;
+      }
+
+      const response = await fetch(`${cgBaseUrl}/global`, { headers });
+
+      if (!response.ok) {
+        console.error(`CoinGecko global API error: ${response.status}`);
+        res.status(response.status).json({ message: "Failed to fetch global market data" });
+        return;
+      }
+
+      const data = await response.json();
+      const globalData = data.data;
+
+      // Use Bitcoin as market benchmark (BTC dominance ~50-60%, strong correlation with overall market)
+      // The /global/market_cap_chart endpoint requires a paid plan, so we use BTC price data instead
+
+      let btc7dChange: number | null = null;
+      let btc30dChange: number | null = null;
+
+      // Fetch Bitcoin price chart data (30 days to cover both 7d and 30d)
+      const chartResponse = await fetch(
+        `${cgBaseUrl}/coins/bitcoin/market_chart?vs_currency=usd&days=30&interval=daily`,
+        { headers }
+      );
+
+      if (chartResponse.ok) {
+        const chartData = await chartResponse.json();
+        const prices = chartData.prices || [];
+
+        if (prices.length >= 2) {
+          const latestPrice = prices[prices.length - 1]?.[1];
+
+          // 7d change (need at least 8 data points for 7 days ago)
+          if (prices.length >= 8 && latestPrice) {
+            const price7dAgo = prices[prices.length - 8]?.[1];
+            if (price7dAgo && price7dAgo > 0) {
+              btc7dChange = ((latestPrice - price7dAgo) / price7dAgo) * 100;
+            }
+          }
+
+          // 30d change (use first data point)
+          if (prices.length >= 2 && latestPrice) {
+            const price30dAgo = prices[0]?.[1];
+            if (price30dAgo && price30dAgo > 0) {
+              btc30dChange = ((latestPrice - price30dAgo) / price30dAgo) * 100;
+            }
+          }
+        }
+      } else {
+        console.warn(`CoinGecko Bitcoin chart API returned ${chartResponse.status}`);
+      }
+
+      // Set cache headers (cache for 5 minutes)
+      res.set({
+        'Cache-Control': 'public, max-age=300',
+      });
+
+      res.json({
+        totalMarketCap: globalData.total_market_cap?.usd || null,
+        totalVolume24h: globalData.total_volume?.usd || null,
+        marketCapChange24h: globalData.market_cap_change_percentage_24h_usd || null,
+        // BTC used as market benchmark (total market cap chart requires paid API)
+        btc7dChange,
+        btc30dChange,
+        btcDominance: globalData.market_cap_percentage?.btc || null,
+        activeCryptocurrencies: globalData.active_cryptocurrencies || null,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Error fetching global market data:", error);
+      res.status(500).json({ message: "Failed to fetch global market data" });
+    }
+  });
+
   // Get individual token performance metrics
   app.get("/api/performance/token/:tokenId", async (req: Request, res: Response) => {
     try {
@@ -1840,6 +1937,97 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== CRON ENDPOINTS (External Scheduler) ====================
+  // These endpoints allow external cron services to trigger scheduled jobs.
+  // Authenticated via CRON_SECRET environment variable.
+
+  const CRON_SECRET = process.env.CRON_SECRET;
+
+  const validateCronSecret = (req: Request, res: Response): boolean => {
+    if (!CRON_SECRET) {
+      console.error("[Cron] CRON_SECRET not configured");
+      res.status(500).json({ message: "Cron endpoints not configured" });
+      return false;
+    }
+
+    // Accept secret from query param or Authorization header
+    const providedSecret = req.query.secret || req.headers["x-cron-secret"];
+
+    if (providedSecret !== CRON_SECRET) {
+      console.warn("[Cron] Invalid or missing secret");
+      res.status(401).json({ message: "Unauthorized" });
+      return false;
+    }
+
+    return true;
+  };
+
+  // Trigger weekly reanalysis (call every Monday at midnight EST)
+  app.post("/api/cron/weekly-reanalysis", async (req: Request, res: Response) => {
+    if (!validateCronSecret(req, res)) return;
+
+    try {
+      console.log("[Cron] Weekly reanalysis triggered by external scheduler");
+      const { triggerManualSchedule } = await import("./jobs/reanalysisQueue");
+      await triggerManualSchedule();
+      res.json({
+        success: true,
+        message: "Weekly reanalysis scheduled",
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("[Cron] Error triggering weekly reanalysis:", error);
+      res.status(500).json({ success: false, message: "Failed to trigger reanalysis" });
+    }
+  });
+
+  // Trigger auto-analyze top vote (call daily at midnight EST)
+  app.post("/api/cron/auto-analyze-top-vote", async (req: Request, res: Response) => {
+    if (!validateCronSecret(req, res)) return;
+
+    try {
+      console.log("[Cron] Auto-analyze top vote triggered by external scheduler");
+      const { triggerManualAnalyzeTopVote } = await import("./jobs/autoAnalyzeTopVote");
+      await triggerManualAnalyzeTopVote();
+      res.json({
+        success: true,
+        message: "Auto-analyze top vote triggered",
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("[Cron] Error triggering auto-analyze top vote:", error);
+      res.status(500).json({ success: false, message: "Failed to trigger auto-analyze" });
+    }
+  });
+
+  // Trigger queue processing (call every 3-5 minutes to process pending reanalyses)
+  app.post("/api/cron/process-queue", async (req: Request, res: Response) => {
+    if (!validateCronSecret(req, res)) return;
+
+    try {
+      console.log("[Cron] Queue processing triggered by external scheduler");
+      const { triggerManualProcess } = await import("./jobs/reanalysisQueue");
+      await triggerManualProcess();
+      res.json({
+        success: true,
+        message: "Queue processing triggered",
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("[Cron] Error triggering queue processing:", error);
+      res.status(500).json({ success: false, message: "Failed to process queue" });
+    }
+  });
+
+  // Health check for cron service (no auth required, just confirms server is up)
+  app.get("/api/cron/health", (_req: Request, res: Response) => {
+    res.json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      cronConfigured: !!CRON_SECRET
+    });
+  });
+
   // ==================== FILTER OPTIONS (Public) ====================
   app.get("/api/filters", async (_req: Request, res: Response) => {
     try {
@@ -1980,6 +2168,48 @@ export async function registerRoutes(
       res.json(analysis);
     } catch (error) {
       console.error("Error getting analysis by token:", error);
+      res.status(500).json({ message: "Failed to get analysis" });
+    }
+  });
+
+  // Get analysis by symbol/ticker (Access-Gated)
+  // Used for clean URLs like /token/PREDI instead of /analyze/554
+  app.get("/api/analyze/symbol/:symbol", optionalAuth, async (req: Request, res: Response) => {
+    try {
+      const symbol = req.params.symbol;
+      const userId = req.userId;
+      const isAdmin = req.isAdmin;
+
+      if (!symbol) {
+        res.status(400).json({ message: "Token symbol is required" });
+        return;
+      }
+
+      const analysis = await storage.getLatestAnalysisBySymbol(symbol);
+
+      if (!analysis) {
+        res.status(404).json({ message: "No analysis found for this token symbol" });
+        return;
+      }
+
+      // Check access for completed analyses (admins bypass)
+      if (analysis.status === "completed" && !isAdmin) {
+        const accessCheck = await checkScorecardAccess(userId, analysis.tokenId);
+        if (!accessCheck.hasAccess) {
+          res.status(403).json({
+            message: "Upgrade to view this scorecard",
+            code: "ACCESS_DENIED",
+            rank: accessCheck.rank,
+            accessLimit: accessCheck.accessLimit,
+            requiresUpgrade: true,
+          });
+          return;
+        }
+      }
+
+      res.json(analysis);
+    } catch (error) {
+      console.error("Error getting analysis by symbol:", error);
       res.status(500).json({ message: "Failed to get analysis" });
     }
   });

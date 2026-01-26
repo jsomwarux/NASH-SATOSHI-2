@@ -28,6 +28,9 @@ const MAX_RETRIES = 2;
 // Timeout for stuck "processing" items (40 minutes)
 const STUCK_TIMEOUT_MS = 40 * 60 * 1000;
 
+// Job name for tracking in job_runs table
+const JOB_NAME = "reanalysis_weekly";
+
 // ==================== HELPERS ====================
 
 // Get current date string in EST (YYYY-MM-DD)
@@ -65,6 +68,26 @@ function getNextMondayMidnightEST(): Date {
 
   // Convert back to actual UTC time
   return new Date(nextMonday.getTime() + 5 * 60 * 60 * 1000);
+}
+
+// Get the most recent Monday's date string in EST (YYYY-MM-DD)
+// If today is Monday, returns today's date
+function getMostRecentMondayEST(): string {
+  const now = new Date();
+  // Get EST offset time
+  const estNow = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+
+  // Get day of week (0 = Sunday, 1 = Monday, etc.)
+  const dayOfWeek = estNow.getUTCDay();
+
+  // Calculate days since last Monday (0 if today is Monday)
+  const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+  // Go back to most recent Monday
+  const monday = new Date(estNow);
+  monday.setUTCDate(monday.getUTCDate() - daysSinceMonday);
+
+  return monday.toISOString().split("T")[0];
 }
 
 // Get the week number of the month (1-4/5)
@@ -150,8 +173,8 @@ async function scheduleWeeklyReanalysis(): Promise<void> {
       const token = topTokens[i];
       const rank = i + 1;
 
-      // Check if already in queue
-      const inQueue = await storage.isTokenInReanalysisQueue(token.tokenId);
+      // Check if already in queue (by tokenId or symbol to catch duplicates with different IDs)
+      const inQueue = await storage.isTokenInReanalysisQueue(token.tokenId, token.tokenSymbol);
       if (inQueue) {
         skipped++;
         continue;
@@ -169,6 +192,7 @@ async function scheduleWeeklyReanalysis(): Promise<void> {
         contractAddress: token.contractAddress,
         source,
         priority: getPriorityForRank(rank),
+        rank, // Preserve leaderboard order
         status: "pending",
         scheduledAt: new Date(),
         batchId,
@@ -181,6 +205,15 @@ async function scheduleWeeklyReanalysis(): Promise<void> {
     } else {
       console.log(`[ReanalysisQueue] All ${skipped} tokens already in queue, nothing to add`);
     }
+
+    // Record successful run in job_runs table
+    const mondayDate = getMostRecentMondayEST();
+    await storage.upsertJobRun(JOB_NAME, {
+      lastRunAt: new Date(),
+      lastScheduledDate: mondayDate,
+      lastRunMetadata: { batchType, tokenCount: queueItems.length, skipped },
+    });
+    console.log(`[ReanalysisQueue] Recorded run for ${mondayDate}`);
   } catch (err) {
     console.error("[ReanalysisQueue] Error scheduling reanalysis:", err);
   }
@@ -626,7 +659,7 @@ function scheduleNextMondayRun(): void {
   }, msUntilMonday);
 }
 
-export function startReanalysisQueueJob(): void {
+export async function startReanalysisQueueJob(): Promise<void> {
   console.log("[ReanalysisQueue] Starting reanalysis queue job...");
 
   // Start the queue worker (every 3 minutes)
@@ -640,10 +673,38 @@ export function startReanalysisQueueJob(): void {
     await processQueue();
   }, 15000); // 15 second delay
 
+  // Check if we missed a scheduled run (e.g., server was down on Monday)
+  await checkForMissedRun();
+
   // Schedule weekly runs at Monday midnight EST
   scheduleNextMondayRun();
 
   console.log("[ReanalysisQueue] Queue job started successfully");
+}
+
+/**
+ * Checks if we missed a scheduled run and triggers it if needed.
+ * This handles cases where the server was down or restarted after the scheduled time.
+ */
+async function checkForMissedRun(): Promise<void> {
+  try {
+    const mostRecentMonday = getMostRecentMondayEST();
+    const lastRun = await storage.getJobRun(JOB_NAME);
+
+    console.log(`[ReanalysisQueue] Checking for missed runs...`);
+    console.log(`[ReanalysisQueue] Most recent Monday: ${mostRecentMonday}`);
+    console.log(`[ReanalysisQueue] Last scheduled date: ${lastRun?.lastScheduledDate || "never"}`);
+
+    // If we've never run, or if the last run was before the most recent Monday
+    if (!lastRun || !lastRun.lastScheduledDate || lastRun.lastScheduledDate < mostRecentMonday) {
+      console.log(`[ReanalysisQueue] ⚠️ MISSED RUN DETECTED! Triggering weekly reanalysis now...`);
+      await scheduleWeeklyReanalysis();
+    } else {
+      console.log(`[ReanalysisQueue] ✓ No missed runs - last run was for ${lastRun.lastScheduledDate}`);
+    }
+  } catch (err) {
+    console.error("[ReanalysisQueue] Error checking for missed runs:", err);
+  }
 }
 
 export function stopReanalysisQueueJob(): void {

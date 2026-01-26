@@ -214,7 +214,8 @@ app.use((req, res, next) => {
           // Start daily price snapshot collection job
           startPriceSnapshotJob();
           // Start automated reanalysis queue job (schedules Monday midnight + worker every 3 min)
-          startReanalysisQueueJob();
+          // Also checks for missed runs on startup
+          await startReanalysisQueueJob();
           // Start auto-analyze top vote job (runs midnight EST each day)
           startAutoAnalyzeTopVoteJob();
         } catch (err) {

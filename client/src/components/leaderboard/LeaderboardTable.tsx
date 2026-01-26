@@ -504,7 +504,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3, delay: index * 0.03 }}
                   className="border-primary/5 transition-colors hover:bg-primary/5 cursor-pointer group"
-                  onClick={() => window.location.href = `/analyze/${item.latestAnalysisId}`}
+                  onClick={() => window.location.href = `/token/${item.tokenSymbol}`}
                 >
                   <TableCell className="text-center font-mono text-muted-foreground text-xs">
                     {String(index + 1).padStart(2, '0')}
@@ -647,7 +647,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                     )}
                   </TableCell>
                   <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
-                    <Link href={`/analyze/${item.latestAnalysisId}`}>
+                    <Link href={`/token/${item.tokenSymbol}`}>
                       <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity">
                         <ExternalLink className="w-4 h-4 text-primary" />
                       </Button>

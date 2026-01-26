@@ -8,6 +8,7 @@ import { AnalysisTrackerProvider } from "@/contexts/AnalysisTrackerContext";
 import { useReferralCapture } from "@/hooks/useReferral";
 import Home from "@/pages/Home";
 import Analyze from "@/pages/Analyze";
+import Token from "@/pages/Token";
 import Leaderboard from "@/pages/Leaderboard";
 import Vote from "@/pages/Vote";
 import Pricing from "@/pages/Pricing";
@@ -22,6 +23,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/analyze/:id" component={Analyze} />
+      <Route path="/token/:symbol" component={Token} />
       <Route path="/rankings" component={Leaderboard} />
       <Route path="/vote" component={Vote} />
       <Route path="/pricing" component={Pricing} />

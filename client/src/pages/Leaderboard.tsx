@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database, Crown, Flame, Award, Sparkles, Lock, TrendingUp, Rocket, Zap, Users } from "lucide-react";
+import { ArrowLeft, Loader2, Search, Trophy, BarChart3, Filter, X, Scan, Database, Crown, Flame, Award, Sparkles, Lock, TrendingUp, Rocket, Zap, Users, Info } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { LeaderboardTable } from "@/components/leaderboard/LeaderboardTable";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useLeaderboard, useFilterOptions, useLeaderboardStats } from "@/hooks/useLeaderboard";
-import { usePerformanceMetrics } from "@/hooks/usePerformance";
+import { usePerformanceMetrics, useGlobalMarketData } from "@/hooks/usePerformance";
 import type { LeaderboardFilters } from "@shared/schema";
 import { formatScore } from "@/lib/utils";
 
@@ -77,6 +77,7 @@ export default function Leaderboard() {
   const { data: filterOptions } = useFilterOptions();
   const { data: leaderboardStats } = useLeaderboardStats();
   const { data: performanceMetrics } = usePerformanceMetrics();
+  const { data: globalMarketData } = useGlobalMarketData();
 
   const handleSort = (field: SortField) => {
     if (field === sortBy) {
@@ -203,47 +204,102 @@ export default function Leaderboard() {
             className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-2"
           >
             {/* Performance Summary - Combined metrics in one card */}
-            <div className="cyber-card p-4 rounded border border-cyan-500/20">
-              <div className="text-[10px] font-mono text-muted-foreground mb-2 tracking-wider flex items-center gap-1">
-                <TrendingUp className="w-3 h-3" />
-                PERFORMANCE
+            <TooltipProvider>
+              <div className="cyber-card p-4 rounded border border-cyan-500/20">
+                <div className="text-[10px] font-mono text-muted-foreground mb-2 tracking-wider flex items-center gap-1">
+                  <TrendingUp className="w-3 h-3" />
+                  PERFORMANCE
+                </div>
+                <div className="space-y-2">
+                  {/* Top 10 Avg 7D */}
+                  <div className="flex items-center justify-between">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 cursor-help">
+                          Top 10 7D
+                          <Info className="w-2.5 h-2.5" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <p className="text-xs">Average 7-day price return of the top 10 ranked tokens on the leaderboard.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                    {performanceMetrics?.top10Avg7dReturn !== null && performanceMetrics?.top10Avg7dReturn !== undefined ? (
+                      <span className={`text-sm font-bold font-mono ${performanceMetrics.top10Avg7dReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {performanceMetrics.top10Avg7dReturn >= 0 ? '+' : ''}{performanceMetrics.top10Avg7dReturn.toFixed(1)}%
+                      </span>
+                    ) : (
+                      <span className="text-sm font-bold font-mono text-muted-foreground">—</span>
+                    )}
+                  </div>
+                  {/* BTC 7D (Market Benchmark) */}
+                  <div className="flex items-center justify-between">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 cursor-help">
+                          <span className="text-orange-400">₿</span>
+                          BTC 7D
+                          <Info className="w-2.5 h-2.5" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <p className="text-xs">Bitcoin 7-day price change (market benchmark). Compare against Top 10 to see if our rankings outperform the market.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                    {globalMarketData?.btc7dChange !== null && globalMarketData?.btc7dChange !== undefined ? (
+                      <span className={`text-sm font-bold font-mono ${globalMarketData.btc7dChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {globalMarketData.btc7dChange >= 0 ? '+' : ''}{globalMarketData.btc7dChange.toFixed(1)}%
+                      </span>
+                    ) : (
+                      <span className="text-sm font-bold font-mono text-muted-foreground">—</span>
+                    )}
+                  </div>
+                  {/* Top 10 Avg 30D */}
+                  <div className="flex items-center justify-between">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 cursor-help">
+                          Top 10 30D
+                          <Info className="w-2.5 h-2.5" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <p className="text-xs">Average 30-day price return of the top 10 ranked tokens on the leaderboard.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                    {performanceMetrics?.top10Avg30dReturn !== null && performanceMetrics?.top10Avg30dReturn !== undefined ? (
+                      <span className={`text-sm font-bold font-mono ${performanceMetrics.top10Avg30dReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {performanceMetrics.top10Avg30dReturn >= 0 ? '+' : ''}{performanceMetrics.top10Avg30dReturn.toFixed(1)}%
+                      </span>
+                    ) : (
+                      <span className="text-sm font-bold font-mono text-muted-foreground">—</span>
+                    )}
+                  </div>
+                  {/* BTC 30D (Market Benchmark) */}
+                  <div className="flex items-center justify-between">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 cursor-help">
+                          <span className="text-orange-400">₿</span>
+                          BTC 30D
+                          <Info className="w-2.5 h-2.5" />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <p className="text-xs">Bitcoin 30-day price change (market benchmark). Compare against Top 10 to see if our rankings outperform the market.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                    {globalMarketData?.btc30dChange !== null && globalMarketData?.btc30dChange !== undefined ? (
+                      <span className={`text-sm font-bold font-mono ${globalMarketData.btc30dChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {globalMarketData.btc30dChange >= 0 ? '+' : ''}{globalMarketData.btc30dChange.toFixed(1)}%
+                      </span>
+                    ) : (
+                      <span className="text-sm font-bold font-mono text-muted-foreground">—</span>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="space-y-2">
-                {/* Top 10 Avg 7D */}
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-muted-foreground font-mono">7D Avg</span>
-                  {performanceMetrics?.top10Avg7dReturn !== null && performanceMetrics?.top10Avg7dReturn !== undefined ? (
-                    <span className={`text-sm font-bold font-mono ${performanceMetrics.top10Avg7dReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {performanceMetrics.top10Avg7dReturn >= 0 ? '+' : ''}{performanceMetrics.top10Avg7dReturn.toFixed(1)}%
-                    </span>
-                  ) : (
-                    <span className="text-sm font-bold font-mono text-muted-foreground">—</span>
-                  )}
-                </div>
-                {/* Top 10 Avg 30D */}
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-muted-foreground font-mono">30D Avg</span>
-                  {performanceMetrics?.top10Avg30dReturn !== null && performanceMetrics?.top10Avg30dReturn !== undefined ? (
-                    <span className={`text-sm font-bold font-mono ${performanceMetrics.top10Avg30dReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {performanceMetrics.top10Avg30dReturn >= 0 ? '+' : ''}{performanceMetrics.top10Avg30dReturn.toFixed(1)}%
-                    </span>
-                  ) : (
-                    <span className="text-sm font-bold font-mono text-muted-foreground">—</span>
-                  )}
-                </div>
-                {/* Hit Rate */}
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-muted-foreground font-mono">Hit Rate</span>
-                  {performanceMetrics?.hitRate30d !== null && performanceMetrics?.hitRate30d !== undefined ? (
-                    <span className="text-sm font-bold font-mono text-primary">
-                      {performanceMetrics.hitRate30d.toFixed(0)}%
-                    </span>
-                  ) : (
-                    <span className="text-sm font-bold font-mono text-muted-foreground">—</span>
-                  )}
-                </div>
-              </div>
-            </div>
+            </TooltipProvider>
 
             {/* Top 3 Ranked Tokens */}
             <div className="cyber-card p-4 rounded border border-purple-500/20">

@@ -811,6 +811,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
   const [showMethodologyModal, setShowMethodologyModal] = useState(false);
   const [showReportIssueModal, setShowReportIssueModal] = useState(false);
   const [selectedModel, setSelectedModel] = useState<'gpt' | 'claude' | 'gemini' | 'grok' | null>(null);
+  const [showScoreHistory, setShowScoreHistory] = useState(false);
 
   // Fetch token performance data
   const { data: tokenPerformance } = useTokenPerformance(analysis.tokenId);
@@ -1189,17 +1190,89 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   <HelpCircle className="w-3 h-3" />
                   How scoring works
                 </button>
-                {/* Average Score Display */}
+                {/* Score History Section */}
                 {tokenStats && tokenStats.analysisCount > 1 && (
-                  <div className="text-xs text-muted-foreground mt-2 flex items-center gap-1.5">
-                    <span className="bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-medium">
-                      #{tokenStats.analysisCount}
-                    </span>
-                    <span>Avg:</span>
-                    <span className={`font-mono font-medium ${getScoreColor(tokenStats.averageScore)}`}>
-                      {formatScore(tokenStats.averageScore)}
-                    </span>
-                    <span>across all runs</span>
+                  <div className="mt-2">
+                    <button
+                      onClick={() => setShowScoreHistory(!showScoreHistory)}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 mx-auto"
+                    >
+                      <span className="bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                        {tokenStats.analysisCount} runs
+                      </span>
+                      <span>Avg:</span>
+                      <span className={`font-mono font-medium ${getScoreColor(tokenStats.averageScore)}`}>
+                        {formatScore(tokenStats.averageScore)}
+                      </span>
+                      <Clock className="w-3 h-3 ml-1" />
+                      <span className="text-primary/70 hover:text-primary">View history</span>
+                      {showScoreHistory ? (
+                        <ChevronUp className="w-3 h-3" />
+                      ) : (
+                        <ChevronDown className="w-3 h-3" />
+                      )}
+                    </button>
+
+                    {/* Expandable Score History */}
+                    <AnimatePresence>
+                      {showScoreHistory && tokenStats.scoreHistory && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="mt-3 bg-card/50 border border-border/50 rounded-lg p-3 max-w-md mx-auto">
+                            <div className="text-xs font-medium text-foreground mb-2 flex items-center gap-2">
+                              <BarChart3 className="w-3.5 h-3.5 text-primary" />
+                              Score History
+                            </div>
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                              {tokenStats.scoreHistory.map((item, index) => (
+                                <div
+                                  key={item.analysisId}
+                                  className={`flex items-center justify-between text-xs py-1.5 px-2 rounded ${
+                                    index === 0 ? 'bg-primary/10 border border-primary/20' : 'bg-muted/30'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-muted-foreground w-20">
+                                      {new Date(item.date).toLocaleDateString('en-US', {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        year: '2-digit'
+                                      })}
+                                    </span>
+                                    {index === 0 && (
+                                      <span className="text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded">
+                                        Latest
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`font-mono font-medium ${getScoreColor(item.score)}`}>
+                                      {item.score.toFixed(2)}
+                                    </span>
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${getTierBadgeStyle(item.tier).bg} ${getTierBadgeStyle(item.tier).text}`}>
+                                      {item.tier}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            {tokenStats.score7d !== null && tokenStats.runs7d > 1 && (
+                              <div className="mt-2 pt-2 border-t border-border/50 text-xs text-muted-foreground flex justify-between">
+                                <span>7-day avg ({tokenStats.runs7d} runs):</span>
+                                <span className={`font-mono font-medium ${getScoreColor(tokenStats.score7d)}`}>
+                                  {formatScore(tokenStats.score7d)}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 )}
                 <div className="flex items-center gap-2 mt-2 flex-wrap justify-center">

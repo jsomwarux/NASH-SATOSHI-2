@@ -139,6 +139,11 @@ export async function getAnalysisByToken(tokenId: string): Promise<TokenAnalysis
   return fetchApi<TokenAnalysis>(`/api/analyze/token/${tokenId}`);
 }
 
+// Get Analysis by Symbol/Ticker (for clean URLs like /token/PREDI)
+export async function getAnalysisBySymbol(symbol: string, authToken?: string): Promise<TokenAnalysis> {
+  return fetchApi<TokenAnalysis>(`/api/analyze/symbol/${encodeURIComponent(symbol)}`, { authToken });
+}
+
 // Get Token Stats (aggregate data for tokens with multiple analyses)
 export async function getTokenStats(tokenId: string): Promise<TokenStats> {
   return fetchApi<TokenStats>(`/api/token/${tokenId}/stats`);
