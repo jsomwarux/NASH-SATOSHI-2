@@ -59,6 +59,9 @@ import {
   adminRecoverAnalysis,
   adminRecoverAnalysisWithRun,
   adminRefreshMarketData,
+  retryAllFailedReanalysis,
+  getReanalysisQueueStats,
+  smartRetryReanalysis,
   getTopVoteRequests,
   getRecentlyAnalyzedRequests,
   getYesterdayTopVote,
@@ -451,6 +454,36 @@ export default function Admin() {
       queryClient.invalidateQueries({ queryKey: ["adminAnalyses"] });
       queryClient.invalidateQueries({ queryKey: ["adminLeaderboard"] });
     },
+  });
+
+  // Smart retry reanalyses mutation
+  const [smartRetryResult, setSmartRetryResult] = useState<{ message: string; tokens: string[] } | null>(null);
+  const smartRetryMutation = useMutation({
+    mutationFn: async () => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Authentication required");
+      return smartRetryReanalysis(token);
+    },
+    onSuccess: (data) => {
+      setSmartRetryResult({
+        message: data.message,
+        tokens: data.details.tokensNeedingReanalysis,
+      });
+      queryClient.invalidateQueries({ queryKey: ["adminAnalyses"] });
+      queryClient.invalidateQueries({ queryKey: ["reanalysisQueueStats"] });
+    },
+  });
+
+  // Reanalysis queue stats (lightweight query for showing failed count)
+  const { data: queueStats } = useQuery({
+    queryKey: ["reanalysisQueueStats"],
+    queryFn: async () => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Authentication required");
+      return getReanalysisQueueStats(token);
+    },
+    enabled: !!adminStatus?.isAdmin,
+    refetchInterval: 30000,
   });
 
   // Not logged in
@@ -1324,6 +1357,32 @@ export default function Admin() {
                       size="sm"
                       variant="outline"
                       onClick={() => {
+                        setSmartRetryResult(null);
+                        smartRetryMutation.mutate();
+                      }}
+                      disabled={smartRetryMutation.isPending}
+                      className="h-8 text-xs border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+                    >
+                      {smartRetryMutation.isPending ? (
+                        <>
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                          Checking...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-3 h-3 mr-1" />
+                          Retry Missing Reanalyses
+                          {((queueStats?.pending ?? 0) + (queueStats?.failed ?? 0)) > 0 && (
+                            <span className="ml-1">({(queueStats?.pending ?? 0) + (queueStats?.failed ?? 0)})</span>
+                          )}
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
                         setRefreshMarketResult(null);
                         refreshMarketDataMutation.mutate();
                       }}
@@ -1347,6 +1406,21 @@ export default function Admin() {
                     </Badge>
                   </div>
                 </CardTitle>
+                {smartRetryResult && (
+                  <div className="text-xs mt-1">
+                    <p className="text-amber-400">{smartRetryResult.message}</p>
+                    {smartRetryResult.tokens.length > 0 && (
+                      <p className="text-muted-foreground mt-0.5">
+                        Queued: {smartRetryResult.tokens.join(', ')}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {smartRetryMutation.isError && (
+                  <p className="text-xs text-red-400 mt-1">
+                    Error: {smartRetryMutation.error instanceof Error ? smartRetryMutation.error.message : "Failed"}
+                  </p>
+                )}
                 {refreshMarketResult && (
                   <p className="text-xs text-muted-foreground mt-1">
                     Updated pricing for {refreshMarketResult.updated}/{refreshMarketResult.total} analyses with missing data

@@ -969,3 +969,37 @@ export async function cleanupReanalysisQueue(
     authToken,
   });
 }
+
+export async function retryAllFailedReanalysis(
+  authToken: string
+): Promise<{ message: string }> {
+  return fetchApi<{ message: string }>("/api/admin/reanalysis-queue/retry-all-failed", {
+    method: "POST",
+    authToken,
+  });
+}
+
+export async function smartRetryReanalysis(
+  authToken: string
+): Promise<{
+  message: string;
+  details: {
+    markedCompleted: number;
+    keptPending: number;
+    resetFromFailed: number;
+    tokensNeedingReanalysis: string[];
+  };
+}> {
+  return fetchApi<{
+    message: string;
+    details: {
+      markedCompleted: number;
+      keptPending: number;
+      resetFromFailed: number;
+      tokensNeedingReanalysis: string[];
+    };
+  }>("/api/admin/reanalysis-queue/smart-retry", {
+    method: "POST",
+    authToken,
+  });
+}

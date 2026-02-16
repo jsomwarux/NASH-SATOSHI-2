@@ -275,6 +275,33 @@ async function triggerGumloopAnalysis(
       return { success: false, error: "Analysis already in progress" };
     }
 
+    // Check if this token already has a completed analysis since this queue item was scheduled.
+    // This prevents wasting a Gumloop slot on a token that was already successfully reanalyzed
+    // (e.g., via admin trigger, another queue item, or a previous retry).
+    // Check by both tokenId AND symbol (tokens can have different IDs across CG/DexScreener).
+    const recentCompleted = (
+      existingAnalysis &&
+      existingAnalysis.status === "completed" &&
+      item.scheduledAt &&
+      new Date(existingAnalysis.createdAt).getTime() >= new Date(item.scheduledAt).getTime()
+    ) ? existingAnalysis : null;
+
+    const recentBySymbol = !recentCompleted
+      ? await storage.getLatestAnalysisBySymbol(item.tokenSymbol)
+      : null;
+    const recentCompletedBySymbol = (
+      recentBySymbol &&
+      recentBySymbol.status === "completed" &&
+      item.scheduledAt &&
+      new Date(recentBySymbol.createdAt).getTime() >= new Date(item.scheduledAt).getTime()
+    ) ? recentBySymbol : null;
+
+    const alreadyCompleted = recentCompleted || recentCompletedBySymbol;
+    if (alreadyCompleted) {
+      console.log(`[ReanalysisQueue] Skipping ${item.tokenSymbol} - already has completed analysis ${alreadyCompleted.id} since batch was scheduled`);
+      return { success: false, error: "Already has recent completed analysis" };
+    }
+
     // Determine source and extract contract address/chain from tokenId
     let source = item.source || "coingecko";
     let contractAddress = item.contractAddress || "";
@@ -685,6 +712,17 @@ async function processQueue(): Promise<void> {
             startedAt: null,
             errorMessage: "Cleaned up stuck old analysis, will retry",
           });
+          continue;
+        }
+
+        // Check if this token already has a recent completed analysis — mark as done, don't retry
+        if (result.error && result.error.includes("Already has recent completed analysis")) {
+          await storage.updateReanalysisQueueItem(item.id, {
+            status: "completed",
+            completedAt: new Date(),
+            errorMessage: null,
+          });
+          console.log(`[ReanalysisQueue] ${item.tokenSymbol} already reanalyzed — marked queue item as completed`);
           continue;
         }
 

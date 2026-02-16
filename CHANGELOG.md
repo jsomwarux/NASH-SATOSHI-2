@@ -4,7 +4,43 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-02-16 - Fix Pricing "N/A" on Reanalyzed Token Scorecards (Latest)
+## Session: 2026-02-16 - Fix Retry Logic: Skip Already-Completed Tokens (Latest)
+
+### Summary
+Fixed "Retry Failed Reanalyses" re-triggering analyses for tokens that already completed successfully. The retry endpoint and queue worker now check if a token already has a completed analysis since the batch was scheduled before retrying. Also fixed retry endpoints not triggering immediate queue processing.
+
+### Changes Made
+
+#### 1. Smart Retry: Skip Already-Completed Tokens (server/routes.ts)
+- `retry-all-failed` endpoint now checks `getLatestAnalysisBySymbol` for each failed item
+- If the token already has a completed analysis created after the queue item's `scheduledAt`, marks the queue item as "completed" instead of retrying
+- Response now reports both reset count and skipped count
+
+#### 2. Queue Worker: Skip Already-Completed Tokens (server/jobs/reanalysisQueue.ts)
+- `triggerGumloopAnalysis` now checks for completed analyses since `item.scheduledAt`
+- Checks by both tokenId AND symbol (handles CG vs DexScreener ID mismatches)
+- Returns "Already has recent completed analysis" error, which processQueue handles by marking the queue item as completed
+- Prevents wasting Gumloop slots on tokens that don't need reanalysis
+
+#### 3. Trigger Queue Processing After Retry (server/routes.ts)
+- Both single-item and bulk retry endpoints now call `triggerManualProcess()` after resetting items
+- Previously items sat idle until the next 3-minute worker interval
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/routes.ts` | Smart retry-all-failed with completion check, trigger processQueue after retries |
+| `server/jobs/reanalysisQueue.ts` | Skip already-completed tokens in triggerGumloopAnalysis and processQueue |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### Note
+This week is Week 3 (Feb 16, day 16, ceil(16/7)=3) → top 50 bi-weekly reanalysis batch.
+
+---
+
+## Session: 2026-02-16 - Fix Pricing "N/A" on Reanalyzed Token Scorecards
 
 ### Summary
 Fixed all reanalyzed tokens showing "N/A" for pricing fields (price, FDV, market cap, price changes) on scorecards. Multiple root causes: CoinGecko rate limit responses were silently dropped, contractAddress was missing from analysis records, DexScreener-sourced tokens never tried CoinGecko, and there was no second-chance market data fetch when the initial fetch failed.
@@ -44,8 +80,8 @@ When batch reanalyses start, `fetchMarketData` is called for each token. If Coin
 | `server/routes.ts` | Added market data re-fetch in processGumloopCompletion when pricing is null |
 | `server/jobs/reanalysisQueue.ts` | Pass contractAddress and resolved chain to createAnalysis |
 | `server/jobs/autoAnalyzeTopVote.ts` | Use shared fetchMarketData instead of inline CoinGecko-only fetch |
-| `client/src/lib/api.ts` | Added `adminRefreshMarketData` API function |
-| `client/src/pages/Admin.tsx` | Added "Refresh Missing Prices" button to Analyses tab header |
+| `client/src/lib/api.ts` | Added `adminRefreshMarketData` and `retryAllFailedReanalysis` API functions |
+| `client/src/pages/Admin.tsx` | Added "Refresh Missing Prices" and "Retry Failed Reanalyses" buttons to Analyses tab header, added reanalysis queue stats query |
 
 ### Commands Run
 - `npx tsc --noEmit` - TypeScript check passed (multiple times)
@@ -56,6 +92,7 @@ When batch reanalyses start, `fetchMarketData` is called for each token. If Coin
 - If initial market data fetch fails, a second attempt occurs when the analysis completes
 - contractAddress is properly stored on analysis records for reliable re-fetching
 - Admin UI has a "Refresh Missing Prices" button that bulk-refreshes all analyses with null pricing
+- Admin UI has a "Retry Failed Reanalyses" button (only visible when failed items exist) that resets all failed queue items to pending for automatic reprocessing
 
 ---
 

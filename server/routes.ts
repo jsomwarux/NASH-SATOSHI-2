@@ -2042,6 +2042,10 @@ export async function registerRoutes(
         retryCount: 0,
       });
 
+      // Trigger queue processing immediately
+      const { triggerManualProcess } = await import("./jobs/reanalysisQueue");
+      setTimeout(() => triggerManualProcess(), 2000);
+
       res.json({ message: "Item reset for retry" });
     } catch (error) {
       console.error("Error retrying queue item:", error);
@@ -2073,12 +2077,36 @@ export async function registerRoutes(
   });
 
   // Retry ALL failed items at once (useful for bulk recovery)
+  // Smart: skips tokens that already have a completed analysis since the batch was scheduled
   app.post("/api/admin/reanalysis-queue/retry-all-failed", requireAdmin, async (_req: Request, res: Response) => {
     try {
       const { items } = await storage.getReanalysisQueueItems({ status: "failed", limit: 200 });
       let resetCount = 0;
+      let skippedCount = 0;
 
       for (const item of items) {
+        // Check if this token already has a completed analysis since the queue item was scheduled.
+        // This prevents re-running analyses for tokens that succeeded through another queue item
+        // or were manually analyzed by an admin.
+        const latestAnalysis = await storage.getLatestAnalysisBySymbol(item.tokenSymbol);
+        if (
+          latestAnalysis &&
+          latestAnalysis.status === "completed" &&
+          item.scheduledAt &&
+          new Date(latestAnalysis.createdAt).getTime() >= new Date(item.scheduledAt).getTime()
+        ) {
+          // Token already has a fresh analysis — mark queue item as completed, don't retry
+          await storage.updateReanalysisQueueItem(item.id, {
+            status: "completed",
+            completedAt: new Date(),
+            analysisId: latestAnalysis.id,
+            errorMessage: null,
+          });
+          skippedCount++;
+          console.log(`[Admin] Skipped retry for ${item.tokenSymbol} - already has completed analysis ${latestAnalysis.id}`);
+          continue;
+        }
+
         await storage.updateReanalysisQueueItem(item.id, {
           status: "pending",
           startedAt: null,
@@ -2090,11 +2118,102 @@ export async function registerRoutes(
         resetCount++;
       }
 
-      console.log(`[Admin] Reset ${resetCount} failed queue items for retry`);
-      res.json({ message: `Reset ${resetCount} failed items for retry` });
+      console.log(`[Admin] Reset ${resetCount} failed queue items for retry, skipped ${skippedCount} already completed`);
+
+      // Trigger queue processing immediately so items don't wait for the next 3-minute interval
+      if (resetCount > 0) {
+        const { triggerManualProcess } = await import("./jobs/reanalysisQueue");
+        setTimeout(() => triggerManualProcess(), 2000);
+      }
+
+      res.json({
+        message: `Reset ${resetCount} items for retry` +
+          (skippedCount > 0 ? `, skipped ${skippedCount} already completed` : ""),
+      });
     } catch (error) {
       console.error("Error retrying all failed items:", error);
       res.status(500).json({ message: "Failed to retry items" });
+    }
+  });
+
+  // Smart cleanup and retry: scans ALL non-completed queue items (pending + failed),
+  // marks those that already have a fresh analysis as completed, and ensures only
+  // genuinely-needed items remain pending for processing.
+  app.post("/api/admin/reanalysis-queue/smart-retry", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      // Get all pending and failed items
+      const { items: pendingItems } = await storage.getReanalysisQueueItems({ status: "pending", limit: 200 });
+      const { items: failedItems } = await storage.getReanalysisQueueItems({ status: "failed", limit: 200 });
+      const allItems = [...pendingItems, ...failedItems];
+
+      let markedCompleted = 0;
+      let keptForRetry = 0;
+      let resetForRetry = 0;
+      const needsRetry: string[] = [];
+
+      for (const item of allItems) {
+        // Check if this token already has a completed analysis since the batch was scheduled
+        const latestBySymbol = await storage.getLatestAnalysisBySymbol(item.tokenSymbol);
+        const hasRecentAnalysis = (
+          latestBySymbol &&
+          latestBySymbol.status === "completed" &&
+          item.scheduledAt &&
+          new Date(latestBySymbol.createdAt).getTime() >= new Date(item.scheduledAt).getTime()
+        );
+
+        if (hasRecentAnalysis) {
+          // Token already reanalyzed — mark queue item as completed
+          await storage.updateReanalysisQueueItem(item.id, {
+            status: "completed",
+            completedAt: new Date(),
+            analysisId: latestBySymbol.id,
+            errorMessage: null,
+            startedAt: item.startedAt || null,
+          });
+          markedCompleted++;
+        } else if (item.status === "pending") {
+          // Already pending, leave it for processing
+          keptForRetry++;
+          needsRetry.push(item.tokenSymbol);
+        } else {
+          // Failed item that genuinely needs retry — reset to pending
+          await storage.updateReanalysisQueueItem(item.id, {
+            status: "pending",
+            startedAt: null,
+            gumloopRunId: null,
+            analysisId: null,
+            errorMessage: null,
+            retryCount: 0,
+          });
+          resetForRetry++;
+          needsRetry.push(item.tokenSymbol);
+        }
+      }
+
+      const totalForRetry = keptForRetry + resetForRetry;
+      console.log(`[Admin] Smart retry: ${markedCompleted} already completed, ${totalForRetry} need reanalysis (${keptForRetry} pending, ${resetForRetry} reset from failed)`);
+      if (needsRetry.length > 0) {
+        console.log(`[Admin] Tokens needing reanalysis: ${needsRetry.join(', ')}`);
+      }
+
+      // Trigger queue processing immediately
+      if (totalForRetry > 0) {
+        const { triggerManualProcess } = await import("./jobs/reanalysisQueue");
+        setTimeout(() => triggerManualProcess(), 2000);
+      }
+
+      res.json({
+        message: `${markedCompleted} already done, ${totalForRetry} queued for reanalysis`,
+        details: {
+          markedCompleted,
+          keptPending: keptForRetry,
+          resetFromFailed: resetForRetry,
+          tokensNeedingReanalysis: needsRetry,
+        },
+      });
+    } catch (error) {
+      console.error("Error in smart retry:", error);
+      res.status(500).json({ message: "Smart retry failed" });
     }
   });
 
