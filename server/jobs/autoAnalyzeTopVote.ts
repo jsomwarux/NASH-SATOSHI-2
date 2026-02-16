@@ -10,6 +10,7 @@
 
 import { storage } from "../storage";
 import type { TokenVoteRequest } from "@shared/schema";
+import { fetchMarketData, extractTokenIdParts } from "../market-data";
 
 // Maximum concurrent Gumloop runs (must match reanalysisQueue.ts)
 const MAX_CONCURRENT_RUNS = 4;
@@ -93,7 +94,7 @@ async function triggerGumloopAnalysis(
       }
     }
 
-    // Fetch market data from CoinGecko or Dexscreener
+    // Fetch market data using shared CoinGecko-first strategy (tries CG first, falls back to DexScreener)
     let marketData: {
       currentPrice?: string;
       marketCap?: string;
@@ -104,40 +105,35 @@ async function triggerGumloopAnalysis(
       categories?: string[];
     } = {};
 
-    if (voteRequest.source === "coingecko") {
-      try {
-        const cgApiKey = process.env.COINGECKO_API_KEY;
-        const cgApiType = process.env.COINGECKO_API_TYPE || "demo";
-        const cgBaseUrl =
-          cgApiType === "pro"
-            ? "https://pro-api.coingecko.com/api/v3"
-            : "https://api.coingecko.com/api/v3";
+    // Resolve contract/chain from tokenId if not on the vote request
+    let resolvedContract = voteRequest.contractAddress || "";
+    let resolvedChain = voteRequest.chain || "";
+    const idParts = extractTokenIdParts(voteRequest.tokenId);
+    if (idParts) {
+      if (!resolvedContract) resolvedContract = idParts.contractAddress;
+      if (!resolvedChain) resolvedChain = idParts.chain;
+    }
 
-        const headers: Record<string, string> = { Accept: "application/json" };
-        if (cgApiKey) {
-          headers[cgApiType === "pro" ? "x-cg-pro-api-key" : "x-cg-demo-api-key"] = cgApiKey;
-        }
-
-        const cgResponse = await fetch(
-          `${cgBaseUrl}/coins/${voteRequest.tokenId}?localization=false&tickers=false&community_data=false&developer_data=false`,
-          { headers }
-        );
-
-        if (cgResponse.ok) {
-          const data = await cgResponse.json();
-          marketData = {
-            currentPrice: data.market_data?.current_price?.usd?.toString(),
-            marketCap: data.market_data?.market_cap?.usd?.toString(),
-            fdv: data.market_data?.fully_diluted_valuation?.usd?.toString(),
-            volume24h: data.market_data?.total_volume?.usd?.toString(),
-            priceChange24h: data.market_data?.price_change_percentage_24h?.toString(),
-            priceChange7d: data.market_data?.price_change_percentage_7d?.toString(),
-            categories: data.categories || [],
-          };
-        }
-      } catch {
-        console.warn(`[AutoAnalyzeTopVote] CoinGecko fetch failed for ${voteRequest.tokenId}`);
+    try {
+      const { data: fetchedData } = await fetchMarketData(
+        voteRequest.tokenId,
+        resolvedContract || null,
+        resolvedChain || null
+      );
+      if (fetchedData) {
+        marketData = {
+          currentPrice: fetchedData.currentPrice,
+          marketCap: fetchedData.marketCap,
+          fdv: fetchedData.fdv,
+          volume24h: fetchedData.volume24h,
+          priceChange24h: fetchedData.priceChange24h,
+          priceChange7d: fetchedData.priceChange7d,
+          categories: fetchedData.categories,
+        };
+        console.log(`[AutoAnalyzeTopVote] Fetched ${fetchedData.source} market data for ${voteRequest.tokenSymbol} - FDV: $${marketData.fdv}`);
       }
+    } catch {
+      console.warn(`[AutoAnalyzeTopVote] Market data fetch failed for ${voteRequest.tokenId}`);
     }
 
     // Create analysis record

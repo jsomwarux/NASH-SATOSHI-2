@@ -854,6 +854,20 @@ export async function adminRecoverAnalysisWithRun(
   );
 }
 
+export async function adminRefreshMarketData(
+  authToken: string,
+  limit: number = 100
+): Promise<{ message: string; results: { symbol: string; status: string; fdv?: string }[] }> {
+  return fetchApi<{ message: string; results: { symbol: string; status: string; fdv?: string }[] }>(
+    `/api/admin/refresh-market-data`,
+    {
+      method: "POST",
+      authToken,
+      body: JSON.stringify({ limit }),
+    }
+  );
+}
+
 // ==================== REANALYSIS QUEUE API ====================
 
 export interface ReanalysisQueueStats {

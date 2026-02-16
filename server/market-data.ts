@@ -121,10 +121,20 @@ export async function fetchMarketData(
 
   if (cleanTokenId) {
     try {
-      const cgResponse = await fetch(
+      let cgResponse = await fetch(
         `${cgBaseUrl}/coins/${cleanTokenId}?localization=false&tickers=false&community_data=false&developer_data=false`,
         { headers }
       );
+
+      // Retry once on rate limit (429) with a delay
+      if (cgResponse.status === 429) {
+        console.warn(`[MarketData] CoinGecko rate limited for ${tokenId}, retrying after 3s...`);
+        await new Promise(r => setTimeout(r, 3000));
+        cgResponse = await fetch(
+          `${cgBaseUrl}/coins/${cleanTokenId}?localization=false&tickers=false&community_data=false&developer_data=false`,
+          { headers }
+        );
+      }
 
       if (cgResponse.ok) {
         const data = await cgResponse.json();
@@ -133,6 +143,8 @@ export async function fetchMarketData(
         }
         console.log(`[MarketData] CoinGecko direct lookup succeeded for ${tokenId}`);
         return { data: parseCoinGeckoResponse(data), cgPlatforms };
+      } else {
+        console.warn(`[MarketData] CoinGecko direct lookup returned ${cgResponse.status} for ${tokenId}`);
       }
     } catch (err) {
       console.warn(`[MarketData] CoinGecko direct lookup failed for ${tokenId}:`, err);
@@ -144,10 +156,20 @@ export async function fetchMarketData(
     const platformId = COINGECKO_PLATFORM_MAP[chain.toLowerCase()];
     if (platformId) {
       try {
-        const cgResponse = await fetch(
+        let cgResponse = await fetch(
           `${cgBaseUrl}/coins/${platformId}/contract/${contractAddress}`,
           { headers }
         );
+
+        // Retry once on rate limit (429) with a delay
+        if (cgResponse.status === 429) {
+          console.warn(`[MarketData] CoinGecko rate limited for contract lookup ${tokenId}, retrying after 3s...`);
+          await new Promise(r => setTimeout(r, 3000));
+          cgResponse = await fetch(
+            `${cgBaseUrl}/coins/${platformId}/contract/${contractAddress}`,
+            { headers }
+          );
+        }
 
         if (cgResponse.ok) {
           const data = await cgResponse.json();
@@ -156,6 +178,8 @@ export async function fetchMarketData(
           }
           console.log(`[MarketData] CoinGecko contract lookup succeeded for ${tokenId} (${chain}/${contractAddress.slice(0, 10)}...)`);
           return { data: parseCoinGeckoResponse(data), cgPlatforms };
+        } else {
+          console.warn(`[MarketData] CoinGecko contract lookup returned ${cgResponse.status} for ${tokenId} (${chain}/${contractAddress?.slice(0, 10)}...)`);
         }
       } catch (err) {
         console.warn(`[MarketData] CoinGecko contract lookup failed for ${tokenId}:`, err);

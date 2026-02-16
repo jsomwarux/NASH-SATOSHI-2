@@ -4,7 +4,62 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-02-16 - Fix Reanalysis Queue Concurrency Bugs (5 Root Causes) (Latest)
+## Session: 2026-02-16 - Fix Pricing "N/A" on Reanalyzed Token Scorecards (Latest)
+
+### Summary
+Fixed all reanalyzed tokens showing "N/A" for pricing fields (price, FDV, market cap, price changes) on scorecards. Multiple root causes: CoinGecko rate limit responses were silently dropped, contractAddress was missing from analysis records, DexScreener-sourced tokens never tried CoinGecko, and there was no second-chance market data fetch when the initial fetch failed.
+
+### Root Cause Analysis
+When batch reanalyses start, `fetchMarketData` is called for each token. If CoinGecko returns a non-200 response (rate limit, auth error), the code fell through silently — no logging, no retry. The analysis record was created with null pricing fields. When `processGumloopCompletion` ran later, it only used Gumloop's parsed output as fallback (which often lacks pricing data), leaving the fields permanently null.
+
+### Changes Made
+
+#### 1. Added CoinGecko Rate Limit Retry & Error Logging (server/market-data.ts)
+- Both direct lookup (tier 1a) and contract lookup (tier 1b) now log non-200 CoinGecko responses
+- Added automatic retry with 3-second delay on 429 (rate limit) responses
+- Previously, a 429 from CoinGecko was completely silent — no logging, no retry
+
+#### 2. Market Data Re-fetch in processGumloopCompletion (server/routes.ts)
+- **Critical fix**: When Gumloop analysis completes and ALL pricing fields are null, the system now re-fetches market data from CoinGecko/DexScreener
+- This is a "belt and suspenders" approach — even if the initial fetch failed (rate limit, network error), the completion handler gets a second chance minutes later when rate limits have reset
+- Uses the analysis record's tokenId, contractAddress, and chain
+- Falls back to extracting chain/contract from prefixed tokenIds (dex_/cg_)
+
+#### 3. Pass contractAddress to createAnalysis in Reanalysis Queue (server/jobs/reanalysisQueue.ts)
+- The analysis record now stores the resolved contractAddress and chain
+- Previously, contractAddress was never passed, so the analysis record had null for this field
+- This meant the processGumloopCompletion re-fetch couldn't look up the token by contract
+- Uses the resolved values (from tokenId parsing or queue item) rather than just raw item values
+
+#### 4. Use Shared fetchMarketData in Auto-Analyze Top Vote (server/jobs/autoAnalyzeTopVote.ts)
+- Replaced inline CoinGecko-only fetch with the shared `fetchMarketData` function
+- Previously, DexScreener-sourced tokens voted to the top got NO market data at all
+- Now uses CoinGecko-first strategy for ALL tokens, with DexScreener fallback
+- Also extracts contract/chain from prefixed tokenIds when not available on the vote request
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/market-data.ts` | Added 429 retry with delay, logging for all non-200 CoinGecko responses |
+| `server/routes.ts` | Added market data re-fetch in processGumloopCompletion when pricing is null |
+| `server/jobs/reanalysisQueue.ts` | Pass contractAddress and resolved chain to createAnalysis |
+| `server/jobs/autoAnalyzeTopVote.ts` | Use shared fetchMarketData instead of inline CoinGecko-only fetch |
+| `client/src/lib/api.ts` | Added `adminRefreshMarketData` API function |
+| `client/src/pages/Admin.tsx` | Added "Refresh Missing Prices" button to Analyses tab header |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed (multiple times)
+
+### Current State
+- Market data is now fetched with CoinGecko-first strategy for ALL analysis paths (admin, reanalysis queue, auto-vote)
+- CoinGecko rate limits are retried automatically with a 3-second delay
+- If initial market data fetch fails, a second attempt occurs when the analysis completes
+- contractAddress is properly stored on analysis records for reliable re-fetching
+- Admin UI has a "Refresh Missing Prices" button that bulk-refreshes all analyses with null pricing
+
+---
+
+## Session: 2026-02-16 - Fix Reanalysis Queue Concurrency Bugs (5 Root Causes)
 
 ### Summary
 Fixed five interrelated bugs causing the reanalysis queue to repeatedly exceed Gumloop's 4-concurrent-run limit, leading to cascading failures and tokens being permanently skipped.

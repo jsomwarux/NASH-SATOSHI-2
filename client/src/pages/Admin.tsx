@@ -58,6 +58,7 @@ import {
   adminReprocessAnalysis,
   adminRecoverAnalysis,
   adminRecoverAnalysisWithRun,
+  adminRefreshMarketData,
   getTopVoteRequests,
   getRecentlyAnalyzedRequests,
   getYesterdayTopVote,
@@ -433,6 +434,22 @@ export default function Admin() {
       queryClient.invalidateQueries({ queryKey: ["adminAnalyses"] });
       queryClient.invalidateQueries({ queryKey: ["adminLeaderboard"] });
       setRecoveryModal({ isOpen: false, analysisId: null, tokenSymbol: '', runId: '' });
+    },
+  });
+
+  // Bulk refresh market data mutation
+  const [refreshMarketResult, setRefreshMarketResult] = useState<{ updated: number; total: number } | null>(null);
+  const refreshMarketDataMutation = useMutation({
+    mutationFn: async () => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Authentication required");
+      return adminRefreshMarketData(token, 100);
+    },
+    onSuccess: (data) => {
+      const updated = data.results.filter(r => r.status === 'updated').length;
+      setRefreshMarketResult({ updated, total: data.results.length });
+      queryClient.invalidateQueries({ queryKey: ["adminAnalyses"] });
+      queryClient.invalidateQueries({ queryKey: ["adminLeaderboard"] });
     },
   });
 
@@ -1301,10 +1318,45 @@ export default function Admin() {
                     <History className="w-5 h-5" />
                     All Analyses History
                   </span>
-                  <Badge variant="outline">
-                    {analyses?.items?.length || 0} shown / {analyses?.total || 0} total
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setRefreshMarketResult(null);
+                        refreshMarketDataMutation.mutate();
+                      }}
+                      disabled={refreshMarketDataMutation.isPending}
+                      className="h-8 text-xs"
+                    >
+                      {refreshMarketDataMutation.isPending ? (
+                        <>
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                          Refreshing...
+                        </>
+                      ) : (
+                        <>
+                          <Coins className="w-3 h-3 mr-1" />
+                          Refresh Missing Prices
+                        </>
+                      )}
+                    </Button>
+                    <Badge variant="outline">
+                      {analyses?.items?.length || 0} shown / {analyses?.total || 0} total
+                    </Badge>
+                  </div>
                 </CardTitle>
+                {refreshMarketResult && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Updated pricing for {refreshMarketResult.updated}/{refreshMarketResult.total} analyses with missing data
+                  </p>
+                )}
+                {refreshMarketDataMutation.isError && (
+                  <p className="text-xs text-red-400 mt-1">
+                    Error: {refreshMarketDataMutation.error instanceof Error ? refreshMarketDataMutation.error.message : "Failed to refresh"}
+                  </p>
+                )}
               </CardHeader>
               <CardContent>
                 {/* Search filter */}

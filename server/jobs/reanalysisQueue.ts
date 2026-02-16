@@ -325,13 +325,14 @@ async function triggerGumloopAnalysis(
     }
     cgPlatforms = platforms;
 
-    // Create analysis record
+    // Create analysis record (use resolved chain/contractAddress, not just item values)
     const analysis = await storage.createAnalysis({
       tokenId: item.tokenId,
       tokenSymbol: item.tokenSymbol,
       tokenName: item.tokenName,
       tokenImage: item.tokenImage,
-      chain: item.chain,
+      chain: chain || item.chain,
+      contractAddress: contractAddress || item.contractAddress,
       userId: "system-reanalysis", // System-triggered
       status: "processing",
       finalScore: "0",

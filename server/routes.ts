@@ -3395,7 +3395,48 @@ async function processGumloopCompletion(
   console.log(`Analysis ${analysisId}: Parsed - score: ${parsed.finalScore}, tier: ${parsed.tier}, narrative: ${parsed.narrative}`);
 
   // Fetch existing analysis to get FDV for score capping (fall back to market cap)
-  const existingAnalysis = await storage.getAnalysis(analysisId);
+  let existingAnalysis = await storage.getAnalysis(analysisId);
+
+  // Re-fetch market data if ALL pricing fields are null (initial fetch may have failed due to rate limiting)
+  if (existingAnalysis && !existingAnalysis.currentPrice && !existingAnalysis.fdv && !existingAnalysis.marketCap) {
+    console.log(`Analysis ${analysisId}: Market data is empty, re-fetching from CoinGecko/DexScreener...`);
+    try {
+      const { fetchMarketData, extractTokenIdParts } = await import("./market-data");
+      // Resolve contractAddress and chain from the analysis record or tokenId
+      let refetchContract = existingAnalysis.contractAddress || "";
+      let refetchChain = existingAnalysis.chain || "";
+      if (!refetchContract || !refetchChain) {
+        const parts = extractTokenIdParts(existingAnalysis.tokenId);
+        if (parts) {
+          if (!refetchContract) refetchContract = parts.contractAddress;
+          if (!refetchChain) refetchChain = parts.chain;
+        }
+      }
+      const { data: refetchedData } = await fetchMarketData(
+        existingAnalysis.tokenId,
+        refetchContract || null,
+        refetchChain || null
+      );
+      if (refetchedData) {
+        console.log(`Analysis ${analysisId}: Re-fetch succeeded (source: ${refetchedData.source}) - price: $${refetchedData.currentPrice}, FDV: $${refetchedData.fdv}`);
+        // Update the analysis record with the freshly fetched market data
+        await storage.updateAnalysis(analysisId, {
+          currentPrice: refetchedData.currentPrice,
+          marketCap: refetchedData.marketCap,
+          fdv: refetchedData.fdv,
+          volume24h: refetchedData.volume24h,
+          priceChange24h: refetchedData.priceChange24h,
+          priceChange7d: refetchedData.priceChange7d,
+        });
+        // Re-read the analysis so downstream logic sees the updated values
+        existingAnalysis = await storage.getAnalysis(analysisId);
+      } else {
+        console.warn(`Analysis ${analysisId}: Market data re-fetch failed - all sources returned null`);
+      }
+    } catch (refetchErr) {
+      console.warn(`Analysis ${analysisId}: Error re-fetching market data:`, refetchErr);
+    }
+  }
 
   // Helper to parse currency strings like "$5M", "$100,000", "$0.0001234" into numeric values
   const parseCurrencyValue = (value: string | undefined): number | null => {
