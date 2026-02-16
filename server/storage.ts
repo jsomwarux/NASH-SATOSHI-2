@@ -845,18 +845,8 @@ export class PostgresStorage implements IStorage {
     if (filters?.chain) {
       conditions.push(eq(tokenAnalyses.chain, filters.chain));
     }
-    // Search filter - token name/symbol shouldn't change
-    if (filters?.search) {
-      conditions.push(
-        or(
-          ilike(tokenAnalyses.tokenName, `%${filters.search}%`),
-          ilike(tokenAnalyses.tokenSymbol, `%${filters.search}%`)
-        )!
-      );
-    }
-    // Note: tier, narrative, tokenType, marketCapTier, upsideTier filters are applied
-    // post-aggregation to filter by LATEST analysis properties while preserving
-    // trend calculation from historical analyses
+    // Note: search, tier, narrative, tokenType, marketCapTier, upsideTier filters are applied
+    // post-aggregation so that overallRank is computed from the full dataset first
 
     // Get aggregated data per token with time-based metrics
     const now = new Date();
@@ -1085,9 +1075,23 @@ export class PostgresStorage implements IStorage {
       items.push(cleanItem);
     }
 
+    // Assign overallRank based on latestScore descending (before any filters/sorting)
+    // This is the token's true position in the global rankings
+    const itemsByScore = [...items].sort((a, b) => (b.latestScore || 0) - (a.latestScore || 0));
+    for (let i = 0; i < itemsByScore.length; i++) {
+      itemsByScore[i].overallRank = i + 1;
+    }
+
     // Post-aggregation filters: filter by latest analysis's properties
-    // This preserves trend calculation while filtering by current token state
+    // Applied after overallRank assignment so filtered items retain their true global rank
     let filteredItems = items;
+    if (filters?.search) {
+      const searchLower = filters.search.toLowerCase();
+      filteredItems = filteredItems.filter(item =>
+        item.tokenName.toLowerCase().includes(searchLower) ||
+        item.tokenSymbol.toLowerCase().includes(searchLower)
+      );
+    }
     if (filters?.tier) {
       filteredItems = filteredItems.filter(item => item.latestTier === filters.tier);
     }

@@ -385,7 +385,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                       className="border-primary/5 relative group"
                     >
                       <TableCell className="text-center font-mono text-muted-foreground/50 text-xs blur-[2px]">
-                        {String(index + 1).padStart(2, '0')}
+                        {String(item.overallRank || index + 1).padStart(2, '0')}
                       </TableCell>
                       <TableCell className="min-w-[140px] max-w-[200px]">
                         <div className="flex items-center gap-2 blur-[3px] select-none">
@@ -447,7 +447,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                     className="border-primary/5 relative group"
                   >
                     <TableCell className="text-center font-mono text-muted-foreground/50 text-xs blur-[2px]">
-                      {String(index + 1).padStart(2, '0')}
+                      {String(item.overallRank || index + 1).padStart(2, '0')}
                     </TableCell>
                     <TableCell className="min-w-[140px] max-w-[200px]">
                       <div className="flex items-center gap-2 blur-[3px] select-none">
@@ -507,7 +507,7 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                   onClick={() => window.location.href = `/token/${item.tokenSymbol}`}
                 >
                   <TableCell className="text-center font-mono text-muted-foreground text-xs">
-                    {String(index + 1).padStart(2, '0')}
+                    {String(item.overallRank || index + 1).padStart(2, '0')}
                   </TableCell>
                   <TableCell className="min-w-[140px] max-w-[200px]">
                     <div className="flex items-center gap-2">

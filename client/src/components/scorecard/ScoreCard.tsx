@@ -61,6 +61,8 @@ interface ScoreCardProps {
   currentNode?: string;
   // Token stats for showing average score
   tokenStats?: TokenStats;
+  // Overall leaderboard rank
+  rank?: number | null;
 }
 
 // Score color helpers based on spec: red (<40), yellow (40-54), light green (55-69), green (70-84), gold (85+)
@@ -804,7 +806,7 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
   );
 }
 
-export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted, currentNode, tokenStats }: ScoreCardProps) {
+export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted, currentNode, tokenStats, rank }: ScoreCardProps) {
   const [showReasoning, setShowReasoning] = useState(false);
   const [loadingStartTime] = useState(Date.now());
   const [showShareModal, setShowShareModal] = useState(false);
@@ -1111,6 +1113,11 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                     <Badge className={`${isMemecoin ? 'bg-orange-500/20 text-orange-400 border-orange-500/50' : 'bg-blue-500/20 text-blue-400 border-blue-500/50'} border font-medium text-[10px] sm:text-xs px-1.5 sm:px-2`}>
                       {isMemecoin ? '🎭 MEME' : '⚙️ UTIL'}
                     </Badge>
+                    {rank && (
+                      <Badge className="bg-primary/10 text-primary border-primary/30 border font-mono font-bold text-[10px] sm:text-xs px-1.5 sm:px-2">
+                        #{rank}
+                      </Badge>
+                    )}
                   </div>
                   {/* Action buttons row */}
                   <div className="flex items-center gap-2 mt-3">
@@ -2541,6 +2548,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
         analysis={analysis}
+        rank={rank}
       />
 
       {/* Model Analysis Modal */}

@@ -31,4 +31,6 @@ export interface AggregatedLeaderboardItem {
   // Upside potential
   upsideTier: '<5x' | '5-10x' | '10-25x' | '25-50x' | '50-100x' | '100x+' | null;
   upsideMultiple: string | null; // e.g., "10x", "50x", "100x"
+  // Overall rank (by latestScore desc, unaffected by filters/sorting)
+  overallRank: number;
 }

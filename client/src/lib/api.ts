@@ -215,6 +215,11 @@ export async function getLeaderboardStats(): Promise<LeaderboardStats> {
   return fetchApi<LeaderboardStats>("/api/leaderboard/stats");
 }
 
+// Get Token Rank
+export async function getTokenRank(tokenSymbol: string): Promise<{ rank: number | null; total: number }> {
+  return fetchApi<{ rank: number | null; total: number }>(`/api/leaderboard/rank/${encodeURIComponent(tokenSymbol)}`);
+}
+
 // Get User's Analyses (requires auth)
 export interface UserAnalysesOptions {
   limit?: number;

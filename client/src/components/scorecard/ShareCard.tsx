@@ -6,6 +6,7 @@ import { formatScore } from "@/lib/utils";
 interface ShareCardProps {
   analysis: TokenAnalysis;
   preloadedImageBase64?: string | null;
+  rank?: number | null;
 }
 
 // Get tier style for the share card
@@ -101,7 +102,7 @@ function NashSatoshiLogo({ size = 24 }: { size?: number }) {
 }
 
 export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
-  ({ analysis, preloadedImageBase64 }, ref) => {
+  ({ analysis, preloadedImageBase64, rank }, ref) => {
     const [imageError, setImageError] = useState(false);
     const finalScore = parseFloat(analysis.finalScore as string) || 0;
     const tierStyle = getTierStyle(analysis.tier);
@@ -173,6 +174,11 @@ export const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
                   <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isMemecoin ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'}`}>
                     {isMemecoin ? 'MEME' : 'UTIL'}
                   </span>
+                  {rank && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-cyan-500/20 text-cyan-400">
+                      RANK #{rank}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

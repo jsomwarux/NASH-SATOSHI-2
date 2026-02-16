@@ -19,9 +19,10 @@ interface ShareModalProps {
   isOpen: boolean;
   onClose: () => void;
   analysis: TokenAnalysis;
+  rank?: number | null;
 }
 
-export function ShareModal({ isOpen, onClose, analysis }: ShareModalProps) {
+export function ShareModal({ isOpen, onClose, analysis, rank }: ShareModalProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -449,6 +450,7 @@ ${shareUrl}`;
                     ref={shareCardRef}
                     analysis={analysis}
                     preloadedImageBase64={tokenImageBase64}
+                    rank={rank}
                   />
                 </div>
               </div>

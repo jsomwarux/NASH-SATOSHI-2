@@ -5,6 +5,7 @@ import { Layout } from "@/components/common/Layout";
 import { ScoreCard } from "@/components/scorecard/ScoreCard";
 import { Button } from "@/components/ui/button";
 import { useAnalysisBySymbol, useTokenStats } from "@/hooks/useAnalysis";
+import { useTokenRank } from "@/hooks/useLeaderboard";
 import { ApiError } from "@/lib/api";
 
 export default function Token() {
@@ -21,6 +22,11 @@ export default function Token() {
   // Fetch token stats only when analysis is completed
   const { data: tokenStats } = useTokenStats(
     analysis?.status === "completed" ? analysis.tokenId : null
+  );
+
+  // Fetch token rank
+  const { data: rankData } = useTokenRank(
+    analysis?.status === "completed" ? analysis.tokenSymbol : null
   );
 
   return (
@@ -118,6 +124,7 @@ export default function Token() {
             analysis={analysis}
             isPolling={false}
             tokenStats={tokenStats}
+            rank={rankData?.rank}
           />
         )}
       </div>

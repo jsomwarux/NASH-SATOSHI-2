@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getLeaderboard, getFilterOptions, getLeaderboardStats, type LeaderboardOptions } from "@/lib/api";
+import { getLeaderboard, getFilterOptions, getLeaderboardStats, getTokenRank, type LeaderboardOptions } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 export function useLeaderboard(options?: LeaderboardOptions) {
@@ -35,6 +35,17 @@ export function useLeaderboardStats() {
     staleTime: 60 * 1000, // Cache for 1 minute
     refetchOnWindowFocus: true,
     retry: 3,
+    retryDelay: (attemptIndex) => Math.min(500 * Math.pow(2, attemptIndex), 3000),
+  });
+}
+
+export function useTokenRank(tokenSymbol: string | null) {
+  return useQuery({
+    queryKey: ["tokenRank", tokenSymbol],
+    queryFn: () => getTokenRank(tokenSymbol!),
+    enabled: !!tokenSymbol,
+    staleTime: 60 * 1000, // Cache for 1 minute
+    retry: 2,
     retryDelay: (attemptIndex) => Math.min(500 * Math.pow(2, attemptIndex), 3000),
   });
 }

@@ -1769,6 +1769,46 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== TOKEN RANK (Public) ====================
+  app.get("/api/leaderboard/rank/:tokenSymbol", async (req: Request, res: Response) => {
+    try {
+      const { tokenSymbol } = req.params;
+      if (!tokenSymbol) {
+        return res.status(400).json({ message: "Token symbol is required" });
+      }
+
+      // Use cached leaderboard data (sorted by latestScore desc, no filters)
+      const { getCachedOrFetch, CACHE_KEYS, CACHE_TTL } = await import("./redis");
+      const cacheKey = `${CACHE_KEYS.LEADERBOARD}:10000:0:latestScore:desc:{}`;
+
+      const result = await getCachedOrFetch(
+        cacheKey,
+        CACHE_TTL.LEADERBOARD,
+        () => storage.getLeaderboard({
+          limit: 10000,
+          offset: 0,
+          sortBy: "latestScore",
+          order: "desc",
+        })
+      );
+
+      // Find the token by symbol (case-insensitive)
+      const symbolUpper = tokenSymbol.toUpperCase();
+      const item = result.items.find(
+        (i: any) => i.tokenSymbol?.toUpperCase() === symbolUpper
+      );
+
+      if (!item) {
+        return res.json({ rank: null, total: result.total });
+      }
+
+      res.json({ rank: item.overallRank, total: result.total });
+    } catch (error) {
+      console.error("Error getting token rank:", error);
+      res.status(500).json({ message: "Failed to get token rank" });
+    }
+  });
+
   // ==================== PERFORMANCE TRACKING (Public) ====================
 
   // Get latest cached performance metrics summary
