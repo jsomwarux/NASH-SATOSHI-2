@@ -19,6 +19,7 @@ import {
 import { CREDIT_PACKS, SUBSCRIPTION_TIERS, type CreditPackId, type SubscriptionTierId } from "@shared/schema";
 import { onAnalysisComplete } from "./jobs/reanalysisQueue";
 import { getTokenByContract as getDexscreenerToken, getSupportedChains as getDexscreenerChains, DEXSCREENER_CHAINS } from "./dexscreener";
+import { fetchMarketData, extractTokenIdParts } from "./market-data";
 
 // ==================== BETA MODE ====================
 // When true, all users get full access (beta_free tier) bypassing paywalls
@@ -821,6 +822,13 @@ export async function registerRoutes(
           displaySummary: `Analysis ${state.toLowerCase()}. Please try again.`,
         });
 
+        // Notify reanalysis queue of failure so next item can start
+        try {
+          await onAnalysisComplete(analysisId, false);
+        } catch (err) {
+          console.warn(`Gumloop webhook: Failed to notify reanalysis queue for ${analysisId}:`, err);
+        }
+
         // Publish completion event to Redis for real-time updates
         const { publishAnalysisComplete, invalidateCache, CACHE_KEYS } = await import("./redis");
         await publishAnalysisComplete(analysisId);
@@ -863,6 +871,7 @@ export async function registerRoutes(
 
   // Admin: Trigger a new analysis (supports both CoinGecko and Dexscreener sources)
   app.post("/api/admin/analyze", requireAdmin, async (req: Request, res: Response) => {
+    let createdAnalysisId: number | null = null;
     try {
       const {
         tokenId,
@@ -939,91 +948,47 @@ export async function registerRoutes(
         categories?: string[];
       } = {};
 
+      // If submitted via DexScreener, fetch metadata (symbol, name, image) from DexScreener
       if (source === 'dexscreener') {
-        // Fetch from Dexscreener
         try {
           const dexData = await getDexscreenerToken(contractAddress, chain);
           if (dexData) {
             effectiveSymbol = effectiveSymbol || dexData.symbol;
             effectiveName = effectiveName || dexData.name;
             effectiveImage = effectiveImage || dexData.imageUrl || undefined;
-            marketData = {
-              currentPrice: dexData.priceUsd || undefined,
-              marketCap: dexData.marketCap?.toString(),
-              fdv: dexData.fdv?.toString(),
-              volume24h: dexData.volume24h?.toString(),
-              priceChange24h: dexData.priceChange24h?.toString(),
-              // Dexscreener doesn't have 7d price change or categories
-            };
-            console.log(`Admin: Fetched Dexscreener data for ${effectiveSymbol} - FDV: $${marketData.fdv}`);
+            console.log(`Admin: Fetched Dexscreener metadata for ${effectiveSymbol}`);
           } else {
             console.warn(`Admin: No Dexscreener data found for ${contractAddress} on ${chain}`);
           }
         } catch (err) {
-          console.warn(`Admin: Dexscreener fetch error for ${contractAddress}:`, err);
+          console.warn(`Admin: Dexscreener metadata fetch error for ${contractAddress}:`, err);
         }
+      }
+
+      // Fetch market data using CoinGecko-first strategy (tries CoinGecko for ALL tokens first)
+      const { data: fetchedMarketData } = await fetchMarketData(
+        effectiveTokenId,
+        contractAddress,
+        chain
+      );
+
+      if (fetchedMarketData) {
+        marketData = {
+          currentPrice: fetchedMarketData.currentPrice,
+          marketCap: fetchedMarketData.marketCap,
+          fdv: fetchedMarketData.fdv,
+          volume24h: fetchedMarketData.volume24h,
+          priceChange24h: fetchedMarketData.priceChange24h,
+          priceChange7d: fetchedMarketData.priceChange7d,
+          categories: fetchedMarketData.categories,
+        };
+        // Use metadata from the same API response (no second call needed)
+        effectiveSymbol = effectiveSymbol || fetchedMarketData.tokenSymbol;
+        effectiveName = effectiveName || fetchedMarketData.tokenName;
+        effectiveImage = effectiveImage || fetchedMarketData.tokenImage;
+        console.log(`Admin: Fetched ${fetchedMarketData.source} market data for ${effectiveSymbol || contractAddress} - FDV: $${marketData.fdv}`);
       } else {
-        // Fetch from CoinGecko using contract address
-        try {
-          const cgApiKey = process.env.COINGECKO_API_KEY;
-          const cgApiType = process.env.COINGECKO_API_TYPE || 'demo';
-          const cgBaseUrl = cgApiType === 'pro' ? 'https://pro-api.coingecko.com/api/v3' : 'https://api.coingecko.com/api/v3';
-
-          const headers: Record<string, string> = { 'Accept': 'application/json' };
-          if (cgApiKey) {
-            headers[cgApiType === 'pro' ? 'x-cg-pro-api-key' : 'x-cg-demo-api-key'] = cgApiKey;
-          }
-
-          // Map chain to CoinGecko platform ID
-          const COINGECKO_PLATFORM_IDS: Record<string, string> = {
-            'ethereum': 'ethereum',
-            'polygon': 'polygon-pos',
-            'arbitrum': 'arbitrum-one',
-            'optimism': 'optimistic-ethereum',
-            'base': 'base',
-            'avalanche': 'avalanche',
-            'bsc': 'binance-smart-chain',
-            'fantom': 'fantom',
-            'solana': 'solana',
-            'sui': 'sui',
-            'aptos': 'aptos',
-            'near': 'near-protocol',
-            'tron': 'tron',
-          };
-
-          const platformId = COINGECKO_PLATFORM_IDS[chain.toLowerCase()];
-          if (!platformId) {
-            console.warn(`Admin: Unknown CoinGecko platform for chain "${chain}"`);
-          }
-
-          // Use contract address lookup endpoint
-          const cgResponse = await fetch(
-            `${cgBaseUrl}/coins/${platformId}/contract/${contractAddress}`,
-            { headers }
-          );
-
-          if (cgResponse.ok) {
-            const data = await cgResponse.json();
-            effectiveSymbol = effectiveSymbol || data.symbol?.toUpperCase();
-            effectiveName = effectiveName || data.name;
-            effectiveImage = effectiveImage || data.image?.large || data.image?.small;
-            marketData = {
-              currentPrice: data.market_data?.current_price?.usd?.toString(),
-              marketCap: data.market_data?.market_cap?.usd?.toString(),
-              fdv: data.market_data?.fully_diluted_valuation?.usd?.toString(),
-              volume24h: data.market_data?.total_volume?.usd?.toString(),
-              priceChange24h: data.market_data?.price_change_percentage_24h?.toString(),
-              priceChange7d: data.market_data?.price_change_percentage_7d?.toString(),
-              categories: data.categories || [],
-            };
-            console.log(`Admin: Fetched CoinGecko data for ${effectiveSymbol} - FDV: $${marketData.fdv}`);
-          } else {
-            const errorText = await cgResponse.text();
-            console.warn(`Admin: Failed to fetch CoinGecko data for ${contractAddress} on ${chain}: ${cgResponse.status} - ${errorText}`);
-          }
-        } catch (err) {
-          console.warn(`Admin: CoinGecko fetch error for ${contractAddress}:`, err);
-        }
+        console.warn(`Admin: No market data found for ${contractAddress} on ${chain}`);
       }
 
       // Ensure we have required token info
@@ -1033,6 +998,17 @@ export async function registerRoutes(
       }
       if (!effectiveName) {
         effectiveName = effectiveSymbol; // Fallback to symbol
+      }
+
+      // Check Gumloop capacity before starting a new analysis
+      // Admin-triggered analyses also count toward the 4 concurrent run limit
+      const totalRunning = await storage.getTotalRunningAnalyses();
+      if (totalRunning >= 4) {
+        console.log(`Admin: Gumloop at capacity (${totalRunning}/4 running), rejecting admin analysis for ${effectiveSymbol}`);
+        res.status(429).json({
+          message: `Gumloop is at capacity (${totalRunning}/4 concurrent runs). Please wait for current analyses to complete.`,
+        });
+        return;
       }
 
       // Create the analysis record with defaults and market data
@@ -1057,6 +1033,7 @@ export async function registerRoutes(
         categories: marketData.categories,
       });
 
+      createdAnalysisId = analysis.id;
       console.log(`Admin: Created analysis ${analysis.id} for ${effectiveSymbol} (source: ${source})`);
 
       // Call Gumloop API to start the pipeline
@@ -1152,6 +1129,18 @@ export async function registerRoutes(
       });
     } catch (error) {
       console.error("Admin analyze error:", error);
+      // Clean up the analysis record if one was created before the error
+      if (createdAnalysisId) {
+        try {
+          await storage.updateAnalysis(createdAnalysisId, {
+            status: "failed",
+            errorCode: "EXCEPTION",
+            errorMessage: `Unexpected error: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        } catch (cleanupErr) {
+          console.warn(`Admin: Failed to clean up analysis ${createdAnalysisId}:`, cleanupErr);
+        }
+      }
       res.status(500).json({ message: error instanceof Error ? error.message : "Analysis error" });
     }
   });
@@ -1196,7 +1185,7 @@ export async function registerRoutes(
   // Admin: Get all analyses history
   app.get("/api/admin/analyses", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const limit = parseInt(req.query.limit as string) || 50;
+      const limit = parseInt(req.query.limit as string) || 200;
       const offset = parseInt(req.query.offset as string) || 0;
       const status = req.query.status as string | undefined;
       const symbol = req.query.symbol as string | undefined;
@@ -1230,35 +1219,88 @@ export async function registerRoutes(
 
       const updates: Record<string, any> = {};
 
-      // Re-fetch market data from CoinGecko
-      try {
-        const cgApiKey = process.env.COINGECKO_API_KEY;
-        const cgApiType = process.env.COINGECKO_API_TYPE || 'demo';
-        const cgBaseUrl = cgApiType === 'pro' ? 'https://pro-api.coingecko.com/api/v3' : 'https://api.coingecko.com/api/v3';
+      let contractAddress = analysis.contractAddress as string | undefined;
+      let chain = analysis.chain as string | undefined;
 
-        const headers: Record<string, string> = { 'Accept': 'application/json' };
-        if (cgApiKey) {
-          headers[cgApiType === 'pro' ? 'x-cg-pro-api-key' : 'x-cg-demo-api-key'] = cgApiKey;
+      // Extract contract address and chain from tokenId if not stored
+      if (!contractAddress && analysis.tokenId) {
+        const idParts = extractTokenIdParts(analysis.tokenId);
+        if (idParts) {
+          chain = idParts.chain;
+          contractAddress = idParts.contractAddress;
         }
+      }
 
-        const cgResponse = await fetch(
-          `${cgBaseUrl}/coins/${analysis.tokenId}?localization=false&tickers=false&community_data=false&developer_data=false`,
-          { headers }
-        );
+      // Re-fetch market data using CoinGecko-first strategy (tries CoinGecko for ALL tokens first)
+      let marketDataFetched = false;
 
-        if (cgResponse.ok) {
-          const data = await cgResponse.json();
-          updates.currentPrice = data.market_data?.current_price?.usd?.toString();
-          updates.marketCap = data.market_data?.market_cap?.usd?.toString();
-          updates.fdv = data.market_data?.fully_diluted_valuation?.usd?.toString();
-          updates.volume24h = data.market_data?.total_volume?.usd?.toString();
-          updates.priceChange24h = data.market_data?.price_change_percentage_24h?.toString();
-          updates.priceChange7d = data.market_data?.price_change_percentage_7d?.toString();
-          updates.categories = data.categories || [];
-          console.log(`Admin: Re-fetched market data for ${analysis.tokenSymbol} - FDV: $${updates.fdv}`);
+      const { data: fetchedData } = await fetchMarketData(
+        analysis.tokenId,
+        contractAddress || null,
+        chain || null
+      );
+
+      if (fetchedData) {
+        updates.currentPrice = fetchedData.currentPrice;
+        updates.marketCap = fetchedData.marketCap;
+        updates.fdv = fetchedData.fdv;
+        updates.volume24h = fetchedData.volume24h;
+        updates.priceChange24h = fetchedData.priceChange24h;
+        if (fetchedData.priceChange7d !== undefined) {
+          updates.priceChange7d = fetchedData.priceChange7d;
         }
-      } catch (err) {
-        console.warn(`Admin: CoinGecko fetch error:`, err);
+        if (fetchedData.categories) {
+          updates.categories = fetchedData.categories;
+        }
+        // Also update token image if the analysis is missing one
+        if (!analysis.tokenImage && fetchedData.tokenImage) {
+          updates.tokenImage = fetchedData.tokenImage;
+        }
+        marketDataFetched = true;
+        console.log(`Admin: Re-fetched ${fetchedData.source} market data for ${analysis.tokenSymbol} - FDV: $${updates.fdv}`);
+      }
+
+      // If still no market data, try Gumloop fallback values
+      if (!marketDataFetched && analysis.rawGumloopResponse) {
+        try {
+          const { parseGumloopOutputs } = await import("./gumloop-parser");
+          const outputs = JSON.parse(analysis.rawGumloopResponse as string);
+          const parsed = parseGumloopOutputs(outputs);
+
+          // Helper to parse currency strings
+          const parseCurrencyValue = (value: string | undefined): string | null => {
+            if (!value) return null;
+            let cleaned = value.replace(/[$,]/g, '').trim();
+            const suffixMultipliers: Record<string, number> = { 'k': 1_000, 'm': 1_000_000, 'b': 1_000_000_000, 't': 1_000_000_000_000 };
+            const match = cleaned.match(/^([\d.]+)\s*([kmbt])?$/i);
+            if (match) {
+              const num = parseFloat(match[1]);
+              const suffix = match[2]?.toLowerCase();
+              if (!isNaN(num)) return (suffix ? num * (suffixMultipliers[suffix] || 1) : num).toString();
+            }
+            const direct = parseFloat(cleaned);
+            return isNaN(direct) ? null : direct.toString();
+          };
+
+          if (parsed.gumloopPrice) {
+            const priceVal = parseCurrencyValue(parsed.gumloopPrice);
+            if (priceVal) updates.currentPrice = priceVal;
+          }
+          if (parsed.gumloopMarketCap) {
+            const mcVal = parseCurrencyValue(parsed.gumloopMarketCap);
+            if (mcVal) updates.marketCap = mcVal;
+          }
+          if (parsed.gumloopFdv) {
+            const fdvVal = parseCurrencyValue(parsed.gumloopFdv);
+            if (fdvVal) updates.fdv = fdvVal;
+          }
+
+          if (updates.currentPrice || updates.marketCap || updates.fdv) {
+            console.log(`Admin: Using Gumloop fallback market data for ${analysis.tokenSymbol} - FDV: $${updates.fdv}`);
+          }
+        } catch (err) {
+          console.warn(`Admin: Gumloop fallback parse error:`, err);
+        }
       }
 
       // Re-parse raw output if available to extract upside fields
@@ -1354,6 +1396,124 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Admin reprocess error:", error);
       res.status(500).json({ message: error instanceof Error ? error.message : "Reprocess error" });
+    }
+  });
+
+  // Admin: Bulk refresh market data for analyses missing it
+  app.post("/api/admin/refresh-market-data", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { symbols, limit = 20 } = req.body;
+
+      console.log(`Admin ${req.userEmail}: Bulk refreshing market data (symbols: ${symbols?.join(', ') || 'all missing'}, limit: ${limit})`);
+
+      // Get analyses to refresh
+      let analysesToRefresh: { id: number; tokenId: string; tokenSymbol: string; chain: string | null; contractAddress: string | null }[];
+
+      if (symbols && Array.isArray(symbols) && symbols.length > 0) {
+        // Refresh specific symbols
+        analysesToRefresh = [];
+        for (const symbol of symbols.slice(0, limit)) {
+          const analysis = await storage.getLatestAnalysisBySymbol(symbol);
+          if (analysis) {
+            analysesToRefresh.push({
+              id: analysis.id,
+              tokenId: analysis.tokenId,
+              tokenSymbol: analysis.tokenSymbol,
+              chain: analysis.chain,
+              contractAddress: analysis.contractAddress,
+            });
+          }
+        }
+      } else {
+        // Get all completed analyses missing market data
+        const db = (await import("./db")).getDb();
+        const { tokenAnalyses } = await import("@shared/schema");
+        const { eq, isNull, or, and, desc } = await import("drizzle-orm");
+
+        const results = await db
+          .select({
+            id: tokenAnalyses.id,
+            tokenId: tokenAnalyses.tokenId,
+            tokenSymbol: tokenAnalyses.tokenSymbol,
+            chain: tokenAnalyses.chain,
+            contractAddress: tokenAnalyses.contractAddress,
+          })
+          .from(tokenAnalyses)
+          .where(and(
+            eq(tokenAnalyses.status, "completed"),
+            or(
+              isNull(tokenAnalyses.currentPrice),
+              isNull(tokenAnalyses.fdv)
+            )
+          ))
+          .orderBy(desc(tokenAnalyses.createdAt))
+          .limit(limit);
+
+        analysesToRefresh = results;
+      }
+
+      console.log(`Admin: Found ${analysesToRefresh.length} analyses to refresh`);
+
+      const results: { symbol: string; status: string; fdv?: string }[] = [];
+
+      for (const analysis of analysesToRefresh) {
+        const updates: Record<string, any> = {};
+
+        // Extract contract address from tokenId if needed
+        let contractAddress = analysis.contractAddress;
+        let chain = analysis.chain;
+
+        if (!contractAddress && analysis.tokenId) {
+          const idParts = extractTokenIdParts(analysis.tokenId);
+          if (idParts) {
+            chain = idParts.chain;
+            contractAddress = idParts.contractAddress;
+          }
+        }
+
+        // Use CoinGecko-first strategy for ALL tokens
+        const { data: fetchedData } = await fetchMarketData(
+          analysis.tokenId,
+          contractAddress || null,
+          chain || null
+        );
+
+        if (fetchedData) {
+          updates.currentPrice = fetchedData.currentPrice;
+          updates.marketCap = fetchedData.marketCap;
+          updates.fdv = fetchedData.fdv;
+          updates.volume24h = fetchedData.volume24h;
+          updates.priceChange24h = fetchedData.priceChange24h;
+          if (fetchedData.priceChange7d !== undefined) {
+            updates.priceChange7d = fetchedData.priceChange7d;
+          }
+          if (fetchedData.categories) {
+            updates.categories = fetchedData.categories;
+          }
+        }
+
+        if (Object.keys(updates).length > 0) {
+          await storage.updateAnalysis(analysis.id, updates);
+          results.push({ symbol: analysis.tokenSymbol, status: 'updated', fdv: updates.fdv });
+        } else {
+          results.push({ symbol: analysis.tokenSymbol, status: 'no_data_found' });
+        }
+
+        // Rate limit: wait 500ms between API calls
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      // Invalidate leaderboard cache
+      const { invalidateCache, CACHE_KEYS } = await import("./redis");
+      await invalidateCache(CACHE_KEYS.LEADERBOARD);
+
+      res.json({
+        message: `Refreshed market data for ${results.filter(r => r.status === 'updated').length}/${results.length} analyses`,
+        results,
+      });
+    } catch (error) {
+      console.error("Admin bulk refresh error:", error);
+      res.status(500).json({ message: error instanceof Error ? error.message : "Bulk refresh error" });
     }
   });
 
@@ -1909,6 +2069,32 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error deleting queue item:", error);
       res.status(500).json({ message: "Failed to delete item" });
+    }
+  });
+
+  // Retry ALL failed items at once (useful for bulk recovery)
+  app.post("/api/admin/reanalysis-queue/retry-all-failed", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const { items } = await storage.getReanalysisQueueItems({ status: "failed", limit: 200 });
+      let resetCount = 0;
+
+      for (const item of items) {
+        await storage.updateReanalysisQueueItem(item.id, {
+          status: "pending",
+          startedAt: null,
+          gumloopRunId: null,
+          analysisId: null,
+          errorMessage: null,
+          retryCount: 0,
+        });
+        resetCount++;
+      }
+
+      console.log(`[Admin] Reset ${resetCount} failed queue items for retry`);
+      res.json({ message: `Reset ${resetCount} failed items for retry` });
+    } catch (error) {
+      console.error("Error retrying all failed items:", error);
+      res.status(500).json({ message: "Failed to retry items" });
     }
   });
 
@@ -3110,6 +3296,11 @@ async function processGumloopCompletion(
     return;
   }
 
+  // Wrap all parsing/processing in try-catch to ensure onAnalysisComplete is ALWAYS called.
+  // Without this, a parsing exception would leave the analysis in "processing" and the
+  // reanalysis queue would never be notified, blocking the slot until the 45-min cleanup.
+  try {
+
   // Import the parser functions
   const { parseGumloopResponse, parseGumloopOutputs, hasDirectOutputFields, stripFieldLabelPrefix, isFieldNameAsValue } = await import("./gumloop-parser");
 
@@ -3466,6 +3657,26 @@ async function processGumloopCompletion(
   } catch (err) {
     console.warn(`Analysis ${analysisId}: Failed to notify reanalysis queue:`, err);
   }
+
+  } catch (processingError) {
+    // Safety net: if any exception occurs during parsing/processing,
+    // mark the analysis as failed and notify the queue so the slot is freed.
+    console.error(`Analysis ${analysisId}: Unexpected error during processing:`, processingError);
+    try {
+      await storage.updateAnalysis(analysisId, {
+        status: "failed",
+        errorCode: "PROCESSING_ERROR",
+        errorMessage: `Unexpected error during analysis processing: ${processingError instanceof Error ? processingError.message : String(processingError)}`,
+      });
+    } catch (updateErr) {
+      console.error(`Analysis ${analysisId}: Failed to mark as failed:`, updateErr);
+    }
+    try {
+      await onAnalysisComplete(analysisId, false);
+    } catch (notifyErr) {
+      console.warn(`Analysis ${analysisId}: Failed to notify reanalysis queue after error:`, notifyErr);
+    }
+  }
 }
 
 // Helper function to charge user on successful analysis completion
@@ -3596,6 +3807,14 @@ async function syncAnalysisWithGumloop(analysis: { id: number; gumloopRunId: str
       errorMessage: `Analysis pipeline ${runStatus.state.toLowerCase()}. Synced from Gumloop.`,
       displaySummary: `Analysis ${runStatus.state.toLowerCase()}.`,
     });
+
+    // Notify reanalysis queue of failure so next item can start
+    try {
+      await onAnalysisComplete(analysis.id, false);
+    } catch (err) {
+      console.warn(`Gumloop sync: Failed to notify reanalysis queue for ${analysis.id}:`, err);
+    }
+
     return true;
   }
 

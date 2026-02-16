@@ -206,6 +206,7 @@ export interface IStorage {
   getAnalysisByRunId(runId: string): Promise<TokenAnalysis | null>;
   getUserAnalyses(userId: string, limit?: number, offset?: number): Promise<{ items: TokenAnalysis[]; total: number }>;
   updateAnalysis(id: number, data: Partial<InsertTokenAnalysis>): Promise<TokenAnalysis | null>;
+  deleteAnalysis(id: number): Promise<boolean>;
   getRunningAnalysesCount(userId: string): Promise<number>;
   getTotalRunningAnalyses(): Promise<number>;
   getStuckAnalyses(maxAgeMinutes?: number): Promise<TokenAnalysis[]>;
@@ -301,7 +302,7 @@ export interface IStorage {
   getPendingReanalysisItems(limit: number): Promise<ReanalysisQueueItem[]>;
   getProcessingReanalysisCount(): Promise<number>;
   updateReanalysisQueueItem(id: number, data: Partial<InsertReanalysisQueue>): Promise<ReanalysisQueueItem | null>;
-  isTokenInReanalysisQueue(tokenId: string, tokenSymbol?: string): Promise<boolean>;
+  isTokenInReanalysisQueue(tokenId: string, tokenSymbol?: string, batchId?: string): Promise<boolean>;
   getTopTokensForReanalysis(count: number): Promise<{ tokenId: string; tokenSymbol: string; tokenName: string; tokenImage: string | null; chain: string | null; contractAddress: string | null; score: number }[]>;
   getReanalysisQueueStats(): Promise<{ pending: number; processing: number; completed: number; failed: number }>;
   getReanalysisQueueItems(options: { status?: ReanalysisQueueStatus; limit?: number; offset?: number }): Promise<{ items: ReanalysisQueueItem[]; total: number }>;
@@ -626,6 +627,17 @@ export class PostgresStorage implements IStorage {
     });
   }
 
+  async deleteAnalysis(id: number): Promise<boolean> {
+    return withRetry(async () => {
+      const db = getDb();
+      const result = await db
+        .delete(tokenAnalyses)
+        .where(eq(tokenAnalyses.id, id))
+        .returning({ id: tokenAnalyses.id });
+      return result.length > 0;
+    });
+  }
+
   async getRunningAnalysesCount(userId: string): Promise<number> {
     const db = getDb();
     const result = await db
@@ -645,13 +657,21 @@ export class PostgresStorage implements IStorage {
 
   async getTotalRunningAnalyses(): Promise<number> {
     const db = getDb();
+    // Only count analyses created in the last 45 minutes as "running".
+    // Older records are definitely stuck (not actually running in Gumloop)
+    // and should not block new analyses from being started.
+    // The periodic cleanup in processQueue() will force-fail these stale records.
+    const cutoffTime = new Date(Date.now() - 45 * 60 * 1000);
     const result = await db
       .select({ count: count() })
       .from(tokenAnalyses)
       .where(
-        or(
-          eq(tokenAnalyses.status, "pending"),
-          eq(tokenAnalyses.status, "processing")
+        and(
+          or(
+            eq(tokenAnalyses.status, "pending"),
+            eq(tokenAnalyses.status, "processing")
+          ),
+          gte(tokenAnalyses.createdAt, cutoffTime)
         )
       );
     return result[0]?.count || 0;
@@ -2357,12 +2377,12 @@ export class PostgresStorage implements IStorage {
     });
   }
 
-  async isTokenInReanalysisQueue(tokenId: string, tokenSymbol?: string): Promise<boolean> {
+  async isTokenInReanalysisQueue(tokenId: string, tokenSymbol?: string, batchId?: string): Promise<boolean> {
     return withRetry(async () => {
       const db = getDb();
-      // Check if token is pending/processing OR was completed within the last 7 days
-      // Also checks by symbol (case-insensitive) to catch same token with different IDs
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      // Check if token is pending/processing in ANY batch, OR completed in the SAME batch.
+      // This allows tokens from a previous week's batch to be re-queued in a new batch.
+      // Also checks by symbol (case-insensitive) to catch same token with different IDs.
 
       // Build the token matching condition - match by tokenId OR by symbol (case-insensitive)
       const tokenMatch = tokenSymbol
@@ -2372,20 +2392,28 @@ export class PostgresStorage implements IStorage {
           )
         : eq(reanalysisQueue.tokenId, tokenId);
 
+      // Build status condition: pending/processing in any batch, or completed in same batch
+      const statusConditions = [
+        eq(reanalysisQueue.status, "pending"),
+        eq(reanalysisQueue.status, "processing"),
+      ];
+
+      // Only skip completed items if they're from the same batch
+      if (batchId) {
+        statusConditions.push(
+          and(
+            eq(reanalysisQueue.status, "completed"),
+            eq(reanalysisQueue.batchId, batchId)
+          )!
+        );
+      }
+
       const result = await db
         .select({ id: reanalysisQueue.id })
         .from(reanalysisQueue)
         .where(and(
           tokenMatch,
-          or(
-            eq(reanalysisQueue.status, "pending"),
-            eq(reanalysisQueue.status, "processing"),
-            // Also check for recently completed (within last 7 days) to avoid re-adding same week
-            and(
-              eq(reanalysisQueue.status, "completed"),
-              gte(reanalysisQueue.completedAt, sevenDaysAgo)
-            )
-          )
+          or(...statusConditions)
         ))
         .limit(1);
       return result.length > 0;
@@ -2749,6 +2777,10 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
+  async deleteAnalysis(id: number): Promise<boolean> {
+    return this.analyses.delete(id);
+  }
+
   async getRunningAnalysesCount(userId: string): Promise<number> {
     return Array.from(this.analyses.values())
       .filter((a) => a.userId === userId && (a.status === "pending" || a.status === "processing"))
@@ -2756,8 +2788,12 @@ export class MemStorage implements IStorage {
   }
 
   async getTotalRunningAnalyses(): Promise<number> {
+    const cutoffTime = new Date(Date.now() - 45 * 60 * 1000);
     return Array.from(this.analyses.values())
-      .filter((a) => a.status === "pending" || a.status === "processing")
+      .filter((a) =>
+        (a.status === "pending" || a.status === "processing") &&
+        a.createdAt >= cutoffTime
+      )
       .length;
   }
 
@@ -3131,7 +3167,7 @@ export class MemStorage implements IStorage {
     return null;
   }
 
-  async isTokenInReanalysisQueue(_tokenId: string, _tokenSymbol?: string): Promise<boolean> {
+  async isTokenInReanalysisQueue(_tokenId: string, _tokenSymbol?: string, _batchId?: string): Promise<boolean> {
     return false;
   }
 

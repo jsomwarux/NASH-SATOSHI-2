@@ -773,13 +773,14 @@ export interface AdminAnalysesResponse {
 }
 
 export async function getAdminAnalyses(
-  options: { limit?: number; offset?: number; status?: string },
+  options: { limit?: number; offset?: number; status?: string; symbol?: string },
   authToken: string
 ): Promise<AdminAnalysesResponse> {
   const params = new URLSearchParams();
   if (options.limit) params.set("limit", String(options.limit));
   if (options.offset) params.set("offset", String(options.offset));
   if (options.status) params.set("status", options.status);
+  if (options.symbol) params.set("symbol", options.symbol);
 
   const queryString = params.toString();
   const url = queryString ? `/api/admin/analyses?${queryString}` : "/api/admin/analyses";

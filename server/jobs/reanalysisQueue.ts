@@ -15,6 +15,7 @@ import {
   type InsertReanalysisQueue,
   type ReanalysisQueueItem,
 } from "@shared/schema";
+import { fetchMarketData, extractTokenIdParts, resolveContractFromPlatforms } from "../market-data";
 
 // Maximum concurrent Gumloop runs
 const MAX_CONCURRENT_RUNS = 4;
@@ -22,14 +23,31 @@ const MAX_CONCURRENT_RUNS = 4;
 // Worker interval (3 minutes)
 const WORKER_INTERVAL_MS = 3 * 60 * 1000;
 
-// Maximum retries for failed items
-const MAX_RETRIES = 2;
+// Maximum retries for failed items (increased from 2 to 5 for better resilience)
+const MAX_RETRIES = 5;
+
+// Errors that indicate Gumloop is at capacity (should wait, not retry)
+const CAPACITY_ERROR_PATTERNS = [
+  "concurrent",
+  "rate limit",
+  "too many",
+  "capacity",
+  "429",
+  "throttl",
+];
 
 // Timeout for stuck "processing" items (40 minutes)
 const STUCK_TIMEOUT_MS = 40 * 60 * 1000;
 
+// Maximum age for analysis records to count as "running" (45 minutes)
+// Anything older than this is definitely stuck and should not block slots
+const MAX_ANALYSIS_AGE_MS = 45 * 60 * 1000;
+
 // Job name for tracking in job_runs table
 const JOB_NAME = "reanalysis_weekly";
+
+// Mutex flag to prevent concurrent processQueue() calls
+let isProcessingQueue = false;
 
 // ==================== HELPERS ====================
 
@@ -104,6 +122,13 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Check if an error indicates Gumloop is at capacity
+function isCapacityError(error: string | undefined): boolean {
+  if (!error) return false;
+  const lowerError = error.toLowerCase();
+  return CAPACITY_ERROR_PATTERNS.some(pattern => lowerError.includes(pattern));
+}
+
 // ==================== SCHEDULE LOGIC ====================
 
 /**
@@ -173,8 +198,8 @@ async function scheduleWeeklyReanalysis(): Promise<void> {
       const token = topTokens[i];
       const rank = i + 1;
 
-      // Check if already in queue (by tokenId or symbol to catch duplicates with different IDs)
-      const inQueue = await storage.isTokenInReanalysisQueue(token.tokenId, token.tokenSymbol);
+      // Check if already in queue for this batch (by tokenId or symbol to catch duplicates with different IDs)
+      const inQueue = await storage.isTokenInReanalysisQueue(token.tokenId, token.tokenSymbol, batchId);
       if (inQueue) {
         skipped++;
         continue;
@@ -236,6 +261,9 @@ async function triggerGumloopAnalysis(
     return { success: false, error: "Gumloop not configured" };
   }
 
+  // Track analysis ID so we can clean it up if an exception occurs after creation
+  let createdAnalysisId: number | null = null;
+
   try {
     // Check for existing pending/processing analysis
     const existingAnalysis = await storage.getLatestAnalysisByTokenId(item.tokenId);
@@ -247,7 +275,21 @@ async function triggerGumloopAnalysis(
       return { success: false, error: "Analysis already in progress" };
     }
 
-    // Fetch market data from CoinGecko (also extract platforms for contract address fallback)
+    // Determine source and extract contract address/chain from tokenId
+    let source = item.source || "coingecko";
+    let contractAddress = item.contractAddress || "";
+    let chain = item.chain || "";
+
+    // Extract source/chain/contract from tokenId format
+    const idParts = extractTokenIdParts(item.tokenId);
+    if (idParts) {
+      if (item.tokenId.startsWith("dex_")) source = "dexscreener";
+      else if (item.tokenId.startsWith("cg_")) source = "coingecko";
+      if (!contractAddress) contractAddress = idParts.contractAddress;
+      if (!chain) chain = idParts.chain;
+    }
+
+    // Fetch market data using CoinGecko-first strategy (all tokens try CoinGecko first)
     let marketData: {
       currentPrice?: string;
       marketCap?: string;
@@ -259,43 +301,29 @@ async function triggerGumloopAnalysis(
     } = {};
     let cgPlatforms: Record<string, string> | null = null;
 
-    try {
-      const cgApiKey = process.env.COINGECKO_API_KEY;
-      const cgApiType = process.env.COINGECKO_API_TYPE || "demo";
-      const cgBaseUrl =
-        cgApiType === "pro"
-          ? "https://pro-api.coingecko.com/api/v3"
-          : "https://api.coingecko.com/api/v3";
+    const { data: fetchedData, cgPlatforms: platforms } = await fetchMarketData(
+      item.tokenId,
+      contractAddress || null,
+      chain || null
+    );
 
-      const headers: Record<string, string> = { Accept: "application/json" };
-      if (cgApiKey) {
-        headers[cgApiType === "pro" ? "x-cg-pro-api-key" : "x-cg-demo-api-key"] = cgApiKey;
+    if (fetchedData) {
+      marketData = {
+        currentPrice: fetchedData.currentPrice,
+        marketCap: fetchedData.marketCap,
+        fdv: fetchedData.fdv,
+        volume24h: fetchedData.volume24h,
+        priceChange24h: fetchedData.priceChange24h,
+        priceChange7d: fetchedData.priceChange7d,
+        categories: fetchedData.categories,
+      };
+      // If CoinGecko was the source, update source tracking
+      if (fetchedData.source === "coingecko") {
+        source = "coingecko";
       }
-
-      const cgResponse = await fetch(
-        `${cgBaseUrl}/coins/${item.tokenId}?localization=false&tickers=false&community_data=false&developer_data=false`,
-        { headers }
-      );
-
-      if (cgResponse.ok) {
-        const data = await cgResponse.json();
-        marketData = {
-          currentPrice: data.market_data?.current_price?.usd?.toString(),
-          marketCap: data.market_data?.market_cap?.usd?.toString(),
-          fdv: data.market_data?.fully_diluted_valuation?.usd?.toString(),
-          volume24h: data.market_data?.total_volume?.usd?.toString(),
-          priceChange24h: data.market_data?.price_change_percentage_24h?.toString(),
-          priceChange7d: data.market_data?.price_change_percentage_7d?.toString(),
-          categories: data.categories || [],
-        };
-        // Store platforms for contract address fallback
-        if (data.platforms && typeof data.platforms === "object") {
-          cgPlatforms = data.platforms;
-        }
-      }
-    } catch {
-      console.warn(`[ReanalysisQueue] CoinGecko fetch failed for ${item.tokenId}`);
+      console.log(`[ReanalysisQueue] Fetched ${fetchedData.source} market data for ${item.tokenSymbol} - FDV: $${marketData.fdv}`);
     }
+    cgPlatforms = platforms;
 
     // Create analysis record
     const analysis = await storage.createAnalysis({
@@ -316,78 +344,21 @@ async function triggerGumloopAnalysis(
       priceChange7d: marketData.priceChange7d,
       categories: marketData.categories,
     });
+    createdAnalysisId = analysis.id;
 
     // Call Gumloop API
     const gumloopUrl = new URL("https://api.gumloop.com/api/v1/start_pipeline");
     gumloopUrl.searchParams.set("user_id", gumloopUserId);
     gumloopUrl.searchParams.set("saved_item_id", gumloopPipelineId);
 
-    // Determine source and contract address
-    // If not stored directly, try to extract from tokenId format: dex_{chain}_{address} or cg_{chain}_{address}
-    let source = item.source || "coingecko";
-    let contractAddress = item.contractAddress || "";
-    let chain = item.chain || "";
-
-    if (!contractAddress && item.tokenId) {
-      // Try to extract from tokenId format
-      if (item.tokenId.startsWith("dex_")) {
-        source = "dexscreener";
-        const parts = item.tokenId.split("_");
-        if (parts.length >= 3) {
-          chain = parts[1];
-          contractAddress = parts.slice(2).join("_"); // Handle addresses that might have underscores
-        }
-      } else if (item.tokenId.startsWith("cg_")) {
-        source = "coingecko";
-        const parts = item.tokenId.split("_");
-        if (parts.length >= 3) {
-          chain = parts[1];
-          contractAddress = parts.slice(2).join("_");
-        }
-      }
-    }
-
-    // Fallback: Use CoinGecko platforms data if contract address still missing
+    // Use CoinGecko platforms data if contract address still missing
     if (!contractAddress && cgPlatforms) {
-      // Map CoinGecko platform names to our chain names
-      const platformMapping: Record<string, string> = {
-        "ethereum": "ethereum",
-        "polygon-pos": "polygon",
-        "arbitrum-one": "arbitrum",
-        "base": "base",
-        "optimistic-ethereum": "optimism",
-        "avalanche": "avalanche",
-        "binance-smart-chain": "bsc",
-        "solana": "solana",
-        "fantom": "fantom",
-      };
-
-      // Prioritize certain chains (ethereum first, then popular L2s)
-      const chainPriority = ["ethereum", "base", "arbitrum-one", "optimistic-ethereum", "polygon-pos", "solana", "binance-smart-chain", "avalanche"];
-
-      // Try chains in priority order first
-      for (const platformKey of chainPriority) {
-        const addr = cgPlatforms[platformKey];
-        if (addr && addr.length > 0) {
-          contractAddress = addr;
-          chain = platformMapping[platformKey] || platformKey;
-          source = "coingecko";
-          console.log(`[ReanalysisQueue] Using CoinGecko platforms fallback for ${item.tokenSymbol}: chain=${chain}, address=${contractAddress.slice(0, 10)}...`);
-          break;
-        }
-      }
-
-      // If no priority chain found, try any available platform
-      if (!contractAddress) {
-        for (const [platformKey, addr] of Object.entries(cgPlatforms)) {
-          if (addr && addr.length > 0 && platformKey !== "") {
-            contractAddress = addr;
-            chain = platformMapping[platformKey] || platformKey;
-            source = "coingecko";
-            console.log(`[ReanalysisQueue] Using CoinGecko platforms fallback (non-priority) for ${item.tokenSymbol}: chain=${chain}, address=${contractAddress.slice(0, 10)}...`);
-            break;
-          }
-        }
+      const resolved = resolveContractFromPlatforms(cgPlatforms);
+      if (resolved) {
+        contractAddress = resolved.contractAddress;
+        chain = resolved.chain;
+        source = "coingecko";
+        console.log(`[ReanalysisQueue] Using CoinGecko platforms fallback for ${item.tokenSymbol}: chain=${chain}, address=${contractAddress.slice(0, 10)}...`);
       }
     }
 
@@ -440,6 +411,20 @@ async function triggerGumloopAnalysis(
         // Keep raw text if not JSON
       }
 
+      // Check if this is a rate limit / capacity error (429 or error message indicates capacity)
+      const isRateLimit = gumloopResponse.status === 429 ||
+        errorDetail.toLowerCase().includes("concurrent") ||
+        errorDetail.toLowerCase().includes("rate limit") ||
+        errorDetail.toLowerCase().includes("too many");
+
+      if (isRateLimit) {
+        // For capacity errors, delete the analysis record we created (it never started)
+        // and return a special error so the queue doesn't count this as a failure
+        console.log(`[ReanalysisQueue] Gumloop at capacity for ${item.tokenSymbol}, cleaning up and will retry`);
+        await storage.deleteAnalysis(analysis.id);
+        return { success: false, error: `Gumloop concurrent limit reached (429)` };
+      }
+
       await storage.updateAnalysis(analysis.id, {
         status: "failed",
         errorCode: "API_ERROR",
@@ -469,6 +454,21 @@ async function triggerGumloopAnalysis(
     return { success: true, runId, analysisId: analysis.id };
   } catch (err) {
     console.error(`[ReanalysisQueue] Error triggering analysis for ${item.tokenSymbol}:`, err);
+    // Clean up the analysis record if one was created before the error.
+    // Without this, a network error during the Gumloop API call would leave the
+    // analysis in "processing" status and block a Gumloop slot for up to 45 minutes.
+    if (createdAnalysisId) {
+      try {
+        await storage.updateAnalysis(createdAnalysisId, {
+          status: "failed",
+          errorCode: "EXCEPTION",
+          errorMessage: `Unexpected error: ${String(err)}`,
+        });
+        console.log(`[ReanalysisQueue] Cleaned up analysis ${createdAnalysisId} after exception`);
+      } catch (cleanupErr) {
+        console.warn(`[ReanalysisQueue] Failed to clean up analysis ${createdAnalysisId}:`, cleanupErr);
+      }
+    }
     return { success: false, error: String(err) };
   }
 }
@@ -476,6 +476,7 @@ async function triggerGumloopAnalysis(
 /**
  * Handles stuck "processing" items that never completed.
  * Resets them to pending for retry if under max retries.
+ * ALSO cleans up the corresponding analysis record to free the Gumloop slot.
  */
 async function handleStuckItems(): Promise<void> {
   try {
@@ -486,6 +487,34 @@ async function handleStuckItems(): Promise<void> {
 
       const elapsed = Date.now() - new Date(item.startedAt).getTime();
       if (elapsed > STUCK_TIMEOUT_MS) {
+        // CRITICAL: Also clean up the corresponding analysis record.
+        // Without this, the analysis stays in "processing" and permanently blocks a Gumloop slot.
+        if (item.analysisId) {
+          try {
+            const analysis = await storage.getAnalysis(item.analysisId);
+            if (analysis && (analysis.status === "completed")) {
+              // Analysis actually completed but queue item wasn't updated (e.g., onAnalysisComplete failed).
+              // Mark queue item as completed instead of retrying.
+              await storage.updateReanalysisQueueItem(item.id, {
+                status: "completed",
+                completedAt: new Date(),
+              });
+              console.log(`[ReanalysisQueue] Queue item ${item.tokenSymbol} was stuck but analysis ${item.analysisId} already completed - marking queue item as completed`);
+              continue;
+            }
+            if (analysis && (analysis.status === "pending" || analysis.status === "processing")) {
+              await storage.updateAnalysis(item.analysisId, {
+                status: "failed",
+                errorCode: "TIMEOUT",
+                errorMessage: "Analysis timed out - stuck in processing for too long",
+              });
+              console.log(`[ReanalysisQueue] Force-failed stuck analysis ${item.analysisId} for ${item.tokenSymbol}`);
+            }
+          } catch (err) {
+            console.warn(`[ReanalysisQueue] Error cleaning up analysis ${item.analysisId}:`, err);
+          }
+        }
+
         const retryCount = (item.retryCount || 0) + 1;
 
         if (retryCount > MAX_RETRIES) {
@@ -515,26 +544,89 @@ async function handleStuckItems(): Promise<void> {
 }
 
 /**
+ * Periodic cleanup: Force-fail any analysis records that have been stuck
+ * in "processing" or "pending" for more than MAX_ANALYSIS_AGE_MS.
+ * This prevents permanently blocked Gumloop slots.
+ * Runs inside processQueue() to ensure regular execution.
+ */
+async function cleanupStaleAnalysisRecords(): Promise<void> {
+  try {
+    const stuckAnalyses = await storage.getStuckAnalyses(Math.floor(MAX_ANALYSIS_AGE_MS / 60000));
+    if (stuckAnalyses.length === 0) return;
+
+    console.log(`[ReanalysisQueue] Found ${stuckAnalyses.length} stale analysis records to clean up`);
+
+    for (const analysis of stuckAnalyses) {
+      const ageMinutes = Math.floor((Date.now() - analysis.createdAt.getTime()) / 60000);
+      await storage.updateAnalysis(analysis.id, {
+        status: "failed",
+        errorCode: "TIMEOUT",
+        errorMessage: `Analysis timed out after ${ageMinutes} minutes in processing`,
+      });
+      console.log(`[ReanalysisQueue] Force-failed stale analysis ${analysis.id} (${analysis.tokenSymbol}), age: ${ageMinutes}min`);
+
+      // Also notify the queue in case this was a queued item
+      try {
+        await onAnalysisComplete(analysis.id, false);
+      } catch {
+        // Ignore - may not be a queued item
+      }
+    }
+  } catch (err) {
+    console.error("[ReanalysisQueue] Error cleaning up stale analysis records:", err);
+  }
+}
+
+/**
  * Queue worker - runs every 3 minutes.
  * Processes pending items up to the concurrent limit.
+ *
+ * IMPORTANT: Uses getTotalRunningAnalyses() to check ALL active Gumloop runs,
+ * not just queue items. This prevents failures when admin, daily vote, or other
+ * sources have triggered analyses that count toward Gumloop's 4 concurrent limit.
+ *
+ * MUTEX: Only one processQueue() call can run at a time. Concurrent calls
+ * (from timer, onAnalysisComplete, cron) are safely skipped.
  */
 async function processQueue(): Promise<void> {
+  // MUTEX: Prevent concurrent execution. Multiple sources can trigger processQueue():
+  // - The 3-minute interval timer
+  // - onAnalysisComplete() callbacks (setTimeout 5s each)
+  // - The cron endpoint
+  // - Startup check
+  // Without this lock, concurrent calls can both see available slots and start
+  // more analyses than the limit allows.
+  if (isProcessingQueue) {
+    console.log("[ReanalysisQueue] processQueue already running, skipping concurrent call");
+    return;
+  }
+
+  isProcessingQueue = true;
+
   try {
-    // Handle any stuck items first
+    // Periodic cleanup: force-fail any analysis records stuck for too long
+    // This prevents permanently blocked Gumloop slots from stale records
+    await cleanupStaleAnalysisRecords();
+
+    // Handle any stuck queue items
     await handleStuckItems();
 
-    // Check how many are currently processing
-    const processingCount = await storage.getProcessingReanalysisCount();
+    // Check how many analyses are ACTUALLY running (from ALL sources, not just queue)
+    // This is critical: admin-triggered and daily-vote analyses also count toward Gumloop's limit
+    const totalRunning = await storage.getTotalRunningAnalyses();
+    const queueProcessing = await storage.getProcessingReanalysisCount();
 
-    if (processingCount >= MAX_CONCURRENT_RUNS) {
-      console.log(`[ReanalysisQueue] At capacity (${processingCount}/${MAX_CONCURRENT_RUNS}), waiting...`);
+    console.log(`[ReanalysisQueue] Total running analyses: ${totalRunning}, Queue processing: ${queueProcessing}`);
+
+    if (totalRunning >= MAX_CONCURRENT_RUNS) {
+      console.log(`[ReanalysisQueue] Gumloop at capacity (${totalRunning}/${MAX_CONCURRENT_RUNS} running), waiting...`);
       return;
     }
 
-    const availableSlots = MAX_CONCURRENT_RUNS - processingCount;
-    console.log(`[ReanalysisQueue] ${availableSlots} slots available (${processingCount} processing)`);
+    const availableSlots = MAX_CONCURRENT_RUNS - totalRunning;
+    console.log(`[ReanalysisQueue] ${availableSlots} Gumloop slots available`);
 
-    // Get pending items
+    // Get pending items (only as many as we have slots for)
     const pendingItems = await storage.getPendingReanalysisItems(availableSlots);
 
     if (pendingItems.length === 0) {
@@ -545,6 +637,13 @@ async function processQueue(): Promise<void> {
     console.log(`[ReanalysisQueue] Processing ${pendingItems.length} items...`);
 
     for (const item of pendingItems) {
+      // Re-check capacity before each item (another source could have started an analysis)
+      const currentRunning = await storage.getTotalRunningAnalyses();
+      if (currentRunning >= MAX_CONCURRENT_RUNS) {
+        console.log(`[ReanalysisQueue] Gumloop reached capacity during batch, pausing...`);
+        break; // Exit loop, will continue next cycle
+      }
+
       // Mark as processing
       await storage.updateReanalysisQueueItem(item.id, {
         status: "processing",
@@ -561,7 +660,34 @@ async function processQueue(): Promise<void> {
           analysisId: result.analysisId,
         });
       } else {
-        // Handle failure
+        // Check if this is a capacity/rate-limit error (don't count as retry)
+        if (isCapacityError(result.error)) {
+          // Don't increment retry count for capacity errors - just reset to pending
+          await storage.updateReanalysisQueueItem(item.id, {
+            status: "pending",
+            startedAt: null,
+            errorMessage: `Capacity limit hit, will retry: ${result.error}`,
+          });
+          console.log(`[ReanalysisQueue] ${item.tokenSymbol} hit capacity limit, will retry later (not counting as failure)`);
+          // Stop processing more items since Gumloop is at capacity
+          break;
+        }
+
+        // Check if this is an "already in progress" error - clean up the old analysis
+        if (result.error && result.error.includes("already in progress")) {
+          console.log(`[ReanalysisQueue] ${item.tokenSymbol} has a stuck old analysis, attempting cleanup...`);
+          // Force-fail any stuck analyses for this token so the next retry can succeed
+          await forceCleanupStuckAnalysesForToken(item.tokenId);
+          // Don't count as a failure - reset to pending for immediate retry
+          await storage.updateReanalysisQueueItem(item.id, {
+            status: "pending",
+            startedAt: null,
+            errorMessage: "Cleaned up stuck old analysis, will retry",
+          });
+          continue;
+        }
+
+        // Handle actual failures (increment retry count)
         const retryCount = (item.retryCount || 0) + 1;
 
         if (retryCount > MAX_RETRIES) {
@@ -570,7 +696,7 @@ async function processQueue(): Promise<void> {
             errorMessage: result.error || "Unknown error",
             retryCount,
           });
-          console.log(`[ReanalysisQueue] ${item.tokenSymbol} failed permanently: ${result.error}`);
+          console.log(`[ReanalysisQueue] ${item.tokenSymbol} failed permanently after ${retryCount} attempts: ${result.error}`);
         } else {
           // Schedule for retry (reset to pending)
           await storage.updateReanalysisQueueItem(item.id, {
@@ -579,7 +705,7 @@ async function processQueue(): Promise<void> {
             retryCount,
             errorMessage: result.error,
           });
-          console.log(`[ReanalysisQueue] ${item.tokenSymbol} will retry (attempt ${retryCount}): ${result.error}`);
+          console.log(`[ReanalysisQueue] ${item.tokenSymbol} will retry (attempt ${retryCount}/${MAX_RETRIES}): ${result.error}`);
         }
       }
 
@@ -588,6 +714,30 @@ async function processQueue(): Promise<void> {
     }
   } catch (err) {
     console.error("[ReanalysisQueue] Error processing queue:", err);
+  } finally {
+    // Always release the mutex
+    isProcessingQueue = false;
+  }
+}
+
+/**
+ * Force-cleanup any stuck "pending" or "processing" analyses for a specific token.
+ * Used when "Analysis already in progress" blocks a queue retry.
+ */
+async function forceCleanupStuckAnalysesForToken(tokenId: string): Promise<void> {
+  try {
+    const existingAnalysis = await storage.getLatestAnalysisByTokenId(tokenId);
+    if (existingAnalysis && (existingAnalysis.status === "pending" || existingAnalysis.status === "processing")) {
+      const ageMinutes = Math.floor((Date.now() - existingAnalysis.createdAt.getTime()) / 60000);
+      await storage.updateAnalysis(existingAnalysis.id, {
+        status: "failed",
+        errorCode: "TIMEOUT",
+        errorMessage: `Force-failed stuck analysis (age: ${ageMinutes}min) to allow queue retry`,
+      });
+      console.log(`[ReanalysisQueue] Force-failed stuck analysis ${existingAnalysis.id} for token ${tokenId} (age: ${ageMinutes}min)`);
+    }
+  } catch (err) {
+    console.error(`[ReanalysisQueue] Error cleaning up stuck analyses for token ${tokenId}:`, err);
   }
 }
 

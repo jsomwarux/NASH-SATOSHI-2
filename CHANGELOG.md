@@ -4,7 +4,183 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-01-19 - Rankings Search, Trend Display, and Navigation Fixes (Latest)
+## Session: 2026-02-16 - Fix Reanalysis Queue Concurrency Bugs (5 Root Causes) (Latest)
+
+### Summary
+Fixed five interrelated bugs causing the reanalysis queue to repeatedly exceed Gumloop's 4-concurrent-run limit, leading to cascading failures and tokens being permanently skipped.
+
+### Root Cause Analysis
+The system had no protection against concurrent `processQueue()` calls, stuck analysis records permanently blocked Gumloop slots without being cleaned up, and "already in progress" errors from stale records counted as permanent failures.
+
+### Changes Made
+
+#### 1. Added Mutex to processQueue() (server/jobs/reanalysisQueue.ts)
+- Added `isProcessingQueue` boolean flag to prevent concurrent execution
+- Multiple sources trigger processQueue() (3-min timer, onAnalysisComplete callbacks, cron endpoint, startup) — without the mutex, concurrent async calls could interleave at await points and both start analyses, exceeding the 4-run limit
+- The mutex is always released in a `finally` block
+
+#### 2. Fixed handleStuckItems() to Clean Up Analysis Records (server/jobs/reanalysisQueue.ts)
+- **Critical bug**: When a stuck queue item was reset to "pending" after 40 minutes, the corresponding `token_analyses` record was left in "processing" status
+- This permanently blocked a Gumloop slot (getTotalRunningAnalyses counted it as running)
+- When the queue retried the token, triggerGumloopAnalysis found the old analysis "in progress" and failed
+- Now handleStuckItems() also force-fails the corresponding analysis record before resetting the queue item
+
+#### 3. Added "Analysis Already in Progress" Recovery (server/jobs/reanalysisQueue.ts)
+- When a stuck old analysis blocks a queue retry, the error no longer counts toward MAX_RETRIES
+- Instead, the system force-fails the old stuck analysis and resets the queue item for immediate retry
+- New helper: `forceCleanupStuckAnalysesForToken()` handles the cleanup
+
+#### 4. Added Periodic Stale Analysis Record Cleanup (server/jobs/reanalysisQueue.ts)
+- New `cleanupStaleAnalysisRecords()` function runs inside processQueue() every 3 minutes
+- Force-fails any analysis records stuck in "processing" or "pending" for more than 45 minutes
+- Previously, `recoverStuckAnalyses()` only ran on server startup, so stuck records during a multi-hour batch were never cleaned up
+- Also notifies the queue via onAnalysisComplete so blocked items can proceed
+
+#### 5. Added Age Filter to getTotalRunningAnalyses() (server/storage.ts)
+- Now only counts analyses created in the last 45 minutes as "running"
+- Older records are definitely stuck (not actually running in Gumloop) and don't block new analyses
+- Updated both PostgresStorage and InMemoryStorage implementations
+
+#### 6. Added Capacity Check to Admin Analyze Endpoint (server/routes.ts)
+- Admin-triggered analyses now check Gumloop capacity before starting
+- Returns 429 if at capacity (4 concurrent runs) instead of silently exceeding the limit
+- Previously, an admin analysis during the automated batch could push concurrent runs past 4
+
+#### 7. Exception Cleanup in All Trigger Functions (all three files)
+- If a network error/exception occurs AFTER creating the analysis record but BEFORE the Gumloop call completes, the analysis record is now properly marked as "failed"
+- Previously, a `fetch()` exception (DNS failure, ECONNRESET) would leave the analysis in "processing" and block a slot for up to 45 minutes
+- Fixed in: reanalysisQueue.ts, autoAnalyzeTopVote.ts, routes.ts admin endpoint
+
+#### 8. Safety Wrapper in processGumloopCompletion (server/routes.ts)
+- Added try-catch around the entire parsing/processing section
+- If any exception occurs during parsing, the analysis is marked as failed and onAnalysisComplete is called
+- Previously, a parsing exception would leave the analysis in "processing" and the queue would never be notified
+
+#### 9. Completed-Analysis Detection in handleStuckItems (server/jobs/reanalysisQueue.ts)
+- When a queue item is stuck but its associated analysis already completed (e.g., onAnalysisComplete failed), the queue item is now marked as completed instead of reset for retry
+- Prevents unnecessary duplicate reanalyses
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/jobs/reanalysisQueue.ts` | Added mutex, fixed handleStuckItems cleanup + completed-analysis detection, added stale record cleanup, added "already in progress" recovery, exception cleanup in triggerGumloopAnalysis |
+| `server/jobs/autoAnalyzeTopVote.ts` | Exception cleanup in triggerGumloopAnalysis |
+| `server/storage.ts` | Added 45-minute age filter to getTotalRunningAnalyses() in both storage implementations |
+| `server/routes.ts` | Added capacity check to admin analyze endpoint, exception cleanup in admin analyze, safety wrapper in processGumloopCompletion |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed (multiple times)
+
+### How the Fixes Work Together
+1. **Mutex** prevents concurrent processQueue() calls from starting too many analyses
+2. **handleStuckItems cleanup** ensures stuck analysis records don't permanently block slots
+3. **Completed-analysis detection** prevents duplicate reanalyses when queue item is stuck but analysis succeeded
+4. **"Already in progress" recovery** prevents cascading failures from stale analysis records
+5. **Periodic stale cleanup** catches any analysis records that slip through other mechanisms
+6. **Age filter on getTotalRunningAnalyses()** ensures analyses stuck for >45min don't count as running
+7. **Admin capacity check** prevents admin triggers from pushing past the concurrent limit
+8. **Exception cleanup** ensures analysis records are properly failed on network errors
+9. **processGumloopCompletion safety wrapper** ensures queue is notified even on parsing errors
+
+### How to Recover Currently Failed Items
+1. Use the existing bulk retry endpoint: `POST /api/admin/reanalysis-queue/retry-all-failed`
+2. This resets all failed items to pending with retryCount=0
+3. The queue worker will process them with all the new protections in place
+
+### Current State
+- Queue now has mutex protection against concurrent execution
+- Stuck analysis records are actively cleaned up (every 3 minutes)
+- "Analysis already in progress" errors are recovered automatically
+- Admin analyses respect the capacity limit
+- System should now complete weekly reanalyses without exceeding Gumloop's concurrent limit
+
+---
+
+## Session: 2026-02-09 - Fix Reanalysis Queue Concurrent Run Tracking
+
+### Summary
+Fixed critical bug where the weekly reanalysis queue was failing because it only tracked its own processing items, not ALL active Gumloop runs. This caused failures when admin-triggered or daily-vote analyses were running concurrently, leading to tokens in the top 25 being marked as permanently failed.
+
+### Root Cause
+The `processQueue()` function in `reanalysisQueue.ts` used `storage.getProcessingReanalysisCount()` which only counted queue items with status "processing". This did NOT account for:
+1. Admin-triggered analyses from the admin panel
+2. Daily auto-analyze top vote analyses
+3. Any other direct Gumloop runs
+
+When Gumloop was at capacity (4 concurrent runs) due to non-queue analyses, the queue would try to start new runs, get API errors, and count them as failures. After 3 attempts (initial + 2 retries), items were permanently marked as failed.
+
+### Changes Made
+
+#### 1. Fixed Concurrent Run Tracking (server/jobs/reanalysisQueue.ts)
+- Replaced `storage.getProcessingReanalysisCount()` with `storage.getTotalRunningAnalyses()`
+- This now counts ALL pending/processing analyses in the database, not just queue items
+- Added re-check of capacity before each item in a batch (prevents race conditions)
+
+#### 2. Improved Error Handling
+- Added `isCapacityError()` helper to detect rate-limit/capacity errors
+- Capacity errors (429, "concurrent", "rate limit", "too many") don't count toward retry limit
+- When capacity error detected, the analysis record is deleted (cleanup) and item goes back to pending
+- Increased MAX_RETRIES from 2 to 5 for better resilience against transient errors
+
+#### 3. Added Capacity Check to Daily Vote Job (server/jobs/autoAnalyzeTopVote.ts)
+- Daily job now checks `getTotalRunningAnalyses()` before triggering
+- Skips if Gumloop is at capacity (queue will handle it later)
+
+#### 4. Added deleteAnalysis Storage Method (server/storage.ts)
+- New method to delete analysis records (used for cleanup when capacity errors occur)
+- Added to both PostgresStorage and InMemoryStorage
+
+#### 5. Added Bulk Retry Admin Endpoint (server/routes.ts)
+- New endpoint: `POST /api/admin/reanalysis-queue/retry-all-failed`
+- Resets ALL failed queue items back to pending with retry count = 0
+- Use this to recover from the current batch of failed reanalyses
+
+#### 6. Fixed Queue Not Releasing Slots on Failed Analyses (server/routes.ts)
+- **Critical bug found**: When analyses failed (FAILED/TERMINATED), `onAnalysisComplete()` was not being called
+- This meant the queue wouldn't know to start the next item when an analysis failed
+- Fixed in both webhook handler and sync polling function
+- Now when ANY analysis completes (success or failure), `onAnalysisComplete()` is called
+- This triggers `processQueue()` 5 seconds later to start the next item
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/jobs/reanalysisQueue.ts` | Use getTotalRunningAnalyses(), add capacity error detection, increase MAX_RETRIES |
+| `server/jobs/autoAnalyzeTopVote.ts` | Add capacity check before triggering |
+| `server/storage.ts` | Add deleteAnalysis() method |
+| `server/routes.ts` | Add bulk retry endpoint, fix onAnalysisComplete() not called on failures |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### How to Recover Failed Items
+To recover the tokens that failed during this week's batch:
+1. Go to Admin panel or use curl: `POST /api/admin/reanalysis-queue/retry-all-failed`
+2. This resets all failed items to pending with retryCount=0
+3. The queue worker will automatically process them (runs every 3 minutes)
+
+### How Weekly Reanalysis Count Works
+The `getReanalysisCount()` function determines how many tokens to reanalyze based on week of month:
+- **Week 1 (days 1-7)**: Top 100 tokens (monthly batch)
+- **Week 2 (days 8-14)**: Top 25 tokens (weekly batch)
+- **Week 3 (days 15-21)**: Top 50 tokens (bi-weekly batch)
+- **Week 4+ (days 22+)**: Top 25 tokens (weekly batch)
+
+The cron job `POST /api/cron/weekly-reanalysis` triggers `scheduleWeeklyReanalysis()` which:
+1. Calls `getReanalysisCount()` to determine batch size
+2. Gets top N tokens from leaderboard
+3. Adds them to the reanalysis_queue table with appropriate priority
+4. The queue worker processes them respecting the 4-concurrent Gumloop limit
+
+### Current State
+- Queue now correctly tracks ALL active Gumloop runs (admin, vote, queue)
+- Capacity errors are handled gracefully without counting as failures
+- Failed items can be bulk-retried via admin endpoint
+- System should now complete weekly reanalyses without issue
+
+---
+
+## Session: 2026-01-19 - Rankings Search, Trend Display, and Navigation Fixes
 
 ### Summary
 Fixed multiple UX issues: search input requiring letter-by-letter typing, trend column showing blank for reanalyzed tokens, "Yesterday's Top Voted" showing stale data, and navigation bar flashing Pricing tab on load.

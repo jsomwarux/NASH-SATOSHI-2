@@ -147,6 +147,7 @@ export default function Admin() {
   const [filters, setFilters] = useState<LeaderboardFilters>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  const [analysesSearch, setAnalysesSearch] = useState("");
 
   // CoinGecko input state (for established coins)
   const [cgInput, setCgInput] = useState<TokenInputState>({
@@ -237,11 +238,14 @@ export default function Admin() {
 
   // Get all analyses
   const { data: analyses, isLoading: loadingAnalyses } = useQuery({
-    queryKey: ["adminAnalyses"],
+    queryKey: ["adminAnalyses", analysesSearch],
     queryFn: async () => {
       const token = await getAccessToken();
       if (!token) throw new Error("No auth token");
-      return getAdminAnalyses({}, token);
+      return getAdminAnalyses({
+        limit: 200,
+        symbol: analysesSearch || undefined
+      }, token);
     },
     enabled: !!adminStatus?.isAdmin,
   });
@@ -1298,11 +1302,23 @@ export default function Admin() {
                     All Analyses History
                   </span>
                   <Badge variant="outline">
-                    {analyses?.total || 0} total
+                    {analyses?.items?.length || 0} shown / {analyses?.total || 0} total
                   </Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent>
+                {/* Search filter */}
+                <div className="mb-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search by symbol (e.g., SIRE, FED)..."
+                      value={analysesSearch}
+                      onChange={(e) => setAnalysesSearch(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                </div>
                 {loadingAnalyses ? (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="w-8 h-8 animate-spin text-primary" />

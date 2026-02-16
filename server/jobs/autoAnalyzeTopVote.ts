@@ -3,10 +3,16 @@
  *
  * Runs at midnight EST each day to automatically analyze the top voted token
  * from the previous day.
+ *
+ * IMPORTANT: Checks Gumloop capacity before triggering to avoid conflicts with
+ * reanalysis queue and admin-triggered analyses.
  */
 
 import { storage } from "../storage";
 import type { TokenVoteRequest } from "@shared/schema";
+
+// Maximum concurrent Gumloop runs (must match reanalysisQueue.ts)
+const MAX_CONCURRENT_RUNS = 4;
 
 // ==================== HELPERS ====================
 
@@ -60,6 +66,9 @@ async function triggerGumloopAnalysis(
     console.error(`[AutoAnalyzeTopVote] Missing required data for ${voteRequest.tokenSymbol}`);
     return { success: false, error: "Missing contract address, chain, or source" };
   }
+
+  // Track analysis ID so we can clean it up if an exception occurs after creation
+  let createdAnalysisId: number | null = null;
 
   try {
     // Check for existing pending/processing analysis
@@ -151,6 +160,7 @@ async function triggerGumloopAnalysis(
       priceChange7d: marketData.priceChange7d,
       categories: marketData.categories,
     });
+    createdAnalysisId = analysis.id;
 
     // Call Gumloop API
     const gumloopUrl = new URL("https://api.gumloop.com/api/v1/start_pipeline");
@@ -224,6 +234,18 @@ async function triggerGumloopAnalysis(
     return { success: true, analysisId: analysis.id };
   } catch (err) {
     console.error(`[AutoAnalyzeTopVote] Error triggering analysis for ${voteRequest.tokenSymbol}:`, err);
+    // Clean up the analysis record if one was created before the error
+    if (createdAnalysisId) {
+      try {
+        await storage.updateAnalysis(createdAnalysisId, {
+          status: "failed",
+          errorCode: "EXCEPTION",
+          errorMessage: `Unexpected error: ${String(err)}`,
+        });
+      } catch (cleanupErr) {
+        console.warn(`[AutoAnalyzeTopVote] Failed to clean up analysis ${createdAnalysisId}:`, cleanupErr);
+      }
+    }
     return { success: false, error: String(err) };
   }
 }
@@ -232,12 +254,22 @@ async function triggerGumloopAnalysis(
 
 /**
  * Runs at midnight EST to analyze the top voted token from yesterday.
+ * Checks Gumloop capacity first to avoid conflicts with reanalysis queue.
  */
 async function analyzeYesterdaysTopVote(): Promise<void> {
   const dateStr = getESTDateString();
   console.log(`[AutoAnalyzeTopVote] Running daily job for ${dateStr}`);
 
   try {
+    // Check Gumloop capacity first
+    const totalRunning = await storage.getTotalRunningAnalyses();
+    console.log(`[AutoAnalyzeTopVote] Current running analyses: ${totalRunning}/${MAX_CONCURRENT_RUNS}`);
+
+    if (totalRunning >= MAX_CONCURRENT_RUNS) {
+      console.log("[AutoAnalyzeTopVote] Gumloop at capacity, skipping today's auto-analyze (queue will handle remaining)");
+      return;
+    }
+
     // Get yesterday's top voted token with contract info
     const topVotedToken = await storage.getYesterdayTopVotedToken();
 
