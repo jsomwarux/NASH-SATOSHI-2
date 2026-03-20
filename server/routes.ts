@@ -1475,6 +1475,32 @@ export async function registerRoutes(
   });
 
   // Admin: Recover a failed analysis by re-syncing with Gumloop
+  // Admin: Force-reset a stuck analysis back to failed so it can be rerun
+  app.post("/api/admin/analyze/:id/force-reset", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const analysisId = parseInt(req.params.id, 10);
+      if (isNaN(analysisId)) {
+        res.status(400).json({ message: "Invalid analysis ID" });
+        return;
+      }
+      const analysis = await storage.getAnalysis(analysisId);
+      if (!analysis) {
+        res.status(404).json({ message: "Analysis not found" });
+        return;
+      }
+      console.log(`Admin ${req.userEmail}: Force-resetting stuck analysis ${analysisId} (${analysis.tokenSymbol}) from ${analysis.status} to failed`);
+      await storage.updateAnalysis(analysisId, {
+        status: "failed",
+        errorCode: "FORCE_RESET",
+        errorMessage: "Manually reset by admin — n8n webhook never received completion callback",
+      });
+      res.json({ message: `Analysis ${analysisId} reset to failed. You can now rerun it.`, status: "failed" });
+    } catch (error) {
+      console.error("Admin force-reset error:", error);
+      res.status(500).json({ message: error instanceof Error ? error.message : "Force-reset error" });
+    }
+  });
+
   app.post("/api/admin/analyze/:id/recover", requireAdmin, async (req: Request, res: Response) => {
     try {
       const analysisId = parseInt(req.params.id, 10);
