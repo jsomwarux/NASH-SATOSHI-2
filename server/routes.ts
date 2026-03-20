@@ -916,13 +916,11 @@ export async function registerRoutes(
 
       console.log(`Admin ${req.userEmail}: Starting ${source} analysis for ${contractAddress} on ${chain}`);
 
-      // Check Gumloop configuration
-      const gumloopApiKey = process.env.GUMLOOP_API_KEY;
-      const gumloopPipelineId = process.env.GUMLOOP_PIPELINE_ID;
-      const gumloopUserId = process.env.GUMLOOP_USER_ID;
+      // Check n8n configuration
+      const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
 
-      if (!gumloopApiKey || !gumloopPipelineId || !gumloopUserId) {
-        res.status(503).json({ message: "Gumloop not configured. Set GUMLOOP_API_KEY, GUMLOOP_PIPELINE_ID, and GUMLOOP_USER_ID." });
+      if (!n8nWebhookUrl) {
+        res.status(503).json({ message: "n8n not configured. Set N8N_WEBHOOK_URL." });
         return;
       }
 
@@ -1000,13 +998,12 @@ export async function registerRoutes(
         effectiveName = effectiveSymbol; // Fallback to symbol
       }
 
-      // Check Gumloop capacity before starting a new analysis
-      // Admin-triggered analyses also count toward the 4 concurrent run limit
+      // Check concurrent analysis capacity
       const totalRunning = await storage.getTotalRunningAnalyses();
       if (totalRunning >= 4) {
-        console.log(`Admin: Gumloop at capacity (${totalRunning}/4 running), rejecting admin analysis for ${effectiveSymbol}`);
+        console.log(`Admin: At capacity (${totalRunning}/4 running), rejecting admin analysis for ${effectiveSymbol}`);
         res.status(429).json({
-          message: `Gumloop is at capacity (${totalRunning}/4 concurrent runs). Please wait for current analyses to complete.`,
+          message: `Pipeline is at capacity (${totalRunning}/4 concurrent runs). Please wait for current analyses to complete.`,
         });
         return;
       }
@@ -1036,89 +1033,49 @@ export async function registerRoutes(
       createdAnalysisId = analysis.id;
       console.log(`Admin: Created analysis ${analysis.id} for ${effectiveSymbol} (source: ${source})`);
 
-      // Call Gumloop API to start the pipeline
-      const gumloopUrl = new URL("https://api.gumloop.com/api/v1/start_pipeline");
-      gumloopUrl.searchParams.set("user_id", gumloopUserId);
-      gumloopUrl.searchParams.set("saved_item_id", gumloopPipelineId);
-
-      // Build pipeline inputs
-      // Gumloop has 3 input nodes:
-      // 1. "Source" - determines which lookup path to use ("coingecko" or "dexscreener")
-      // 2. "Contract Address" - the token contract address
-      // 3. "Chain" - the blockchain network
-      const pipelineInputs: { input_name: string; value: string }[] = [
-        { input_name: "Source", value: source },
-        { input_name: "Contract Address", value: contractAddress },
-        { input_name: "Chain", value: chain },
-      ];
-
-      const gumloopPayload = {
-        pipeline_inputs: pipelineInputs,
+      // Call n8n webhook to start the pipeline
+      // We pass analysis.id as run_id — n8n echoes it back in the completion webhook
+      const n8nPayload = {
+        source,
+        contract_address: contractAddress,
+        chain,
+        run_id: analysis.id,
       };
 
-      console.log(`Admin: Calling Gumloop API for ${effectiveSymbol} with source=${source}, inputs:`, pipelineInputs);
+      console.log(`Admin: Calling n8n webhook for ${effectiveSymbol} with source=${source}`);
 
-      const gumloopResponse = await fetch(gumloopUrl.toString(), {
+      const n8nResponse = await fetch(n8nWebhookUrl, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${gumloopApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(gumloopPayload),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(n8nPayload),
       });
 
-      if (!gumloopResponse.ok) {
-        const errorText = await gumloopResponse.text();
-        console.error(`Admin: Gumloop API error: ${gumloopResponse.status}`);
-        console.error(`Admin: Gumloop error details: ${errorText}`);
-        console.error(`Admin: Request params - user_id: ${gumloopUserId}, saved_item_id: ${gumloopPipelineId}`);
+      if (!n8nResponse.ok) {
+        const errorText = await n8nResponse.text();
+        console.error(`Admin: n8n webhook error: ${n8nResponse.status} - ${errorText}`);
 
-        // Try to parse error for more details
-        let errorDetail = errorText;
-        try {
-          const errorJson = JSON.parse(errorText);
-          errorDetail = errorJson.message || errorJson.error || errorJson.detail || errorText;
-        } catch {
-          // Keep raw text if not JSON
-        }
-
-        // Mark analysis as failed
         await storage.updateAnalysis(analysis.id, {
           status: "failed",
           errorCode: "API_ERROR",
-          errorMessage: `Gumloop API error: ${gumloopResponse.status} - ${errorDetail}`,
+          errorMessage: `n8n webhook error: ${n8nResponse.status} - ${errorText}`,
         });
 
         res.status(502).json({
-          message: `Gumloop API error: ${gumloopResponse.status}`,
-          detail: errorDetail,
-          hint: gumloopResponse.status === 403
-            ? "Check that GUMLOOP_API_KEY, GUMLOOP_USER_ID, and GUMLOOP_PIPELINE_ID are correct and the API key has access to this pipeline."
-            : undefined
+          message: `n8n webhook error: ${n8nResponse.status}`,
+          detail: errorText,
         });
         return;
       }
 
-      const gumloopData = await gumloopResponse.json();
-      const runId = gumloopData.run_id;
-
-      if (!runId) {
-        console.error("Admin: No run_id returned from Gumloop");
-        await storage.updateAnalysis(analysis.id, {
-          status: "failed",
-          errorCode: "API_ERROR",
-          errorMessage: "No run_id returned from Gumloop",
-        });
-        res.status(502).json({ message: "No run_id returned from Gumloop" });
-        return;
-      }
+      // Use analysis.id as the run_id (we passed it in, n8n echoes it back)
+      const runId = analysis.id;
 
       // Save the run_id for webhook matching
       await storage.updateAnalysis(analysis.id, {
         gumloopRunId: runId,
       });
 
-      console.log(`Admin: Started Gumloop run ${runId} for analysis ${analysis.id}`);
+      console.log(`Admin: Started n8n analysis run ${runId} for ${effectiveSymbol}`);
 
       res.json({
         message: `Analysis started for ${effectiveSymbol}`,
