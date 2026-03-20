@@ -4007,29 +4007,34 @@ async function syncAnalysisWithGumloop(analysis: { id: number; gumloopRunId: str
 
 export async function syncStuckAnalysesWithGumloop(): Promise<{ synced: number; checked: number }> {
   try {
-    // Get analyses stuck for more than 5 minutes that have a gumloopRunId
-    const stuckAnalyses = await storage.getStuckAnalysesWithRunId(5);
+    // Auto-timeout: mark any analysis stuck in "processing" for 15+ minutes as failed
+    // n8n webhooks are fire-and-forget — if the completion callback never arrives, we need to self-heal
+    const stuckAnalyses = await storage.getStuckAnalyses(15);
 
     if (stuckAnalyses.length === 0) {
-      console.log("Gumloop sync: No stuck analyses to check");
       return { synced: 0, checked: 0 };
     }
 
-    console.log(`Gumloop sync: Checking ${stuckAnalyses.length} stuck analyses`);
+    console.log(`n8n timeout check: ${stuckAnalyses.length} analyses stuck >15min, marking as failed`);
 
     let synced = 0;
     for (const analysis of stuckAnalyses) {
-      const wasSynced = await syncAnalysisWithGumloop(analysis);
-      if (wasSynced) synced++;
-
-      // Small delay between API calls to avoid rate limiting
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      try {
+        await storage.updateAnalysis(analysis.id, {
+          status: "failed",
+          errorCode: "N8N_TIMEOUT",
+          errorMessage: "Analysis timed out — n8n webhook completion was never received. Safe to retry.",
+        });
+        console.log(`n8n timeout: auto-failed analysis ${analysis.id} (${analysis.tokenSymbol})`);
+        synced++;
+      } catch (err) {
+        console.error(`n8n timeout: failed to update analysis ${analysis.id}:`, err);
+      }
     }
 
-    console.log(`Gumloop sync: Synced ${synced}/${stuckAnalyses.length} analyses`);
     return { synced, checked: stuckAnalyses.length };
   } catch (error) {
-    console.error("Gumloop sync: Error syncing stuck analyses:", error);
+    console.error("n8n timeout check error:", error);
     return { synced: 0, checked: 0 };
   }
 }
