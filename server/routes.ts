@@ -916,11 +916,13 @@ export async function registerRoutes(
 
       console.log(`Admin ${req.userEmail}: Starting ${source} analysis for ${contractAddress} on ${chain}`);
 
-      // Check n8n configuration
-      const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
+      // Check Gumloop configuration
+      const gumloopApiKey = process.env.GUMLOOP_API_KEY;
+      const gumloopPipelineId = process.env.GUMLOOP_PIPELINE_ID;
+      const gumloopUserId = process.env.GUMLOOP_USER_ID;
 
-      if (!n8nWebhookUrl) {
-        res.status(503).json({ message: "n8n not configured. Set N8N_WEBHOOK_URL." });
+      if (!gumloopApiKey || !gumloopPipelineId || !gumloopUserId) {
+        res.status(503).json({ message: "Gumloop not configured. Set GUMLOOP_API_KEY, GUMLOOP_PIPELINE_ID, and GUMLOOP_USER_ID." });
         return;
       }
 
@@ -998,12 +1000,13 @@ export async function registerRoutes(
         effectiveName = effectiveSymbol; // Fallback to symbol
       }
 
-      // Check concurrent analysis capacity
+      // Check Gumloop capacity before starting a new analysis
+      // Admin-triggered analyses also count toward the 4 concurrent run limit
       const totalRunning = await storage.getTotalRunningAnalyses();
       if (totalRunning >= 4) {
-        console.log(`Admin: At capacity (${totalRunning}/4 running), rejecting admin analysis for ${effectiveSymbol}`);
+        console.log(`Admin: Gumloop at capacity (${totalRunning}/4 running), rejecting admin analysis for ${effectiveSymbol}`);
         res.status(429).json({
-          message: `Pipeline is at capacity (${totalRunning}/4 concurrent runs). Please wait for current analyses to complete.`,
+          message: `Gumloop is at capacity (${totalRunning}/4 concurrent runs). Please wait for current analyses to complete.`,
         });
         return;
       }
@@ -1033,61 +1036,89 @@ export async function registerRoutes(
       createdAnalysisId = analysis.id;
       console.log(`Admin: Created analysis ${analysis.id} for ${effectiveSymbol} (source: ${source})`);
 
-      // Call n8n webhook to start the pipeline
-      // We pass analysis.id as run_id — n8n echoes it back in the completion webhook
-      const n8nPayload = {
-        source,
-        contract_address: contractAddress,
-        chain,
-        run_id: analysis.id,
-        // Token identity
-        ticker: effectiveSymbol,
-        name: effectiveName,
-        token_image: effectiveImage || null,
-        // Market data (already fetched by site)
-        price: marketData.currentPrice || "0",
-        market_cap: marketData.marketCap || "0",
-        fdv: marketData.fdv || "0",
-        volume_24h: marketData.volume24h || "0",
-        price_change_24h: marketData.priceChange24h || "0",
-        price_change_7d: marketData.priceChange7d || "0",
-        categories: marketData.categories || [],
+      // Call Gumloop API to start the pipeline
+      const gumloopUrl = new URL("https://api.gumloop.com/api/v1/start_pipeline");
+      gumloopUrl.searchParams.set("user_id", gumloopUserId);
+      gumloopUrl.searchParams.set("saved_item_id", gumloopPipelineId);
+
+      // Build pipeline inputs
+      // Gumloop has 3 input nodes:
+      // 1. "Source" - determines which lookup path to use ("coingecko" or "dexscreener")
+      // 2. "Contract Address" - the token contract address
+      // 3. "Chain" - the blockchain network
+      const pipelineInputs: { input_name: string; value: string }[] = [
+        { input_name: "Source", value: source },
+        { input_name: "Contract Address", value: contractAddress },
+        { input_name: "Chain", value: chain },
+      ];
+
+      const gumloopPayload = {
+        pipeline_inputs: pipelineInputs,
       };
 
-      console.log(`Admin: Calling n8n webhook for ${effectiveSymbol} with source=${source}`);
+      console.log(`Admin: Calling Gumloop API for ${effectiveSymbol} with source=${source}, inputs:`, pipelineInputs);
 
-      const n8nResponse = await fetch(n8nWebhookUrl, {
+      const gumloopResponse = await fetch(gumloopUrl.toString(), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(n8nPayload),
+        headers: {
+          "Authorization": `Bearer ${gumloopApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(gumloopPayload),
       });
 
-      if (!n8nResponse.ok) {
-        const errorText = await n8nResponse.text();
-        console.error(`Admin: n8n webhook error: ${n8nResponse.status} - ${errorText}`);
+      if (!gumloopResponse.ok) {
+        const errorText = await gumloopResponse.text();
+        console.error(`Admin: Gumloop API error: ${gumloopResponse.status}`);
+        console.error(`Admin: Gumloop error details: ${errorText}`);
+        console.error(`Admin: Request params - user_id: ${gumloopUserId}, saved_item_id: ${gumloopPipelineId}`);
 
+        // Try to parse error for more details
+        let errorDetail = errorText;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorDetail = errorJson.message || errorJson.error || errorJson.detail || errorText;
+        } catch {
+          // Keep raw text if not JSON
+        }
+
+        // Mark analysis as failed
         await storage.updateAnalysis(analysis.id, {
           status: "failed",
           errorCode: "API_ERROR",
-          errorMessage: `n8n webhook error: ${n8nResponse.status} - ${errorText}`,
+          errorMessage: `Gumloop API error: ${gumloopResponse.status} - ${errorDetail}`,
         });
 
         res.status(502).json({
-          message: `n8n webhook error: ${n8nResponse.status}`,
-          detail: errorText,
+          message: `Gumloop API error: ${gumloopResponse.status}`,
+          detail: errorDetail,
+          hint: gumloopResponse.status === 403
+            ? "Check that GUMLOOP_API_KEY, GUMLOOP_USER_ID, and GUMLOOP_PIPELINE_ID are correct and the API key has access to this pipeline."
+            : undefined
         });
         return;
       }
 
-      // Use analysis.id as the run_id (we passed it in, n8n echoes it back)
-      const runId = analysis.id;
+      const gumloopData = await gumloopResponse.json();
+      const runId = gumloopData.run_id;
+
+      if (!runId) {
+        console.error("Admin: No run_id returned from Gumloop");
+        await storage.updateAnalysis(analysis.id, {
+          status: "failed",
+          errorCode: "API_ERROR",
+          errorMessage: "No run_id returned from Gumloop",
+        });
+        res.status(502).json({ message: "No run_id returned from Gumloop" });
+        return;
+      }
 
       // Save the run_id for webhook matching
       await storage.updateAnalysis(analysis.id, {
         gumloopRunId: runId,
       });
 
-      console.log(`Admin: Started n8n analysis run ${runId} for ${effectiveSymbol}`);
+      console.log(`Admin: Started Gumloop run ${runId} for analysis ${analysis.id}`);
 
       res.json({
         message: `Analysis started for ${effectiveSymbol}`,
@@ -1487,32 +1518,6 @@ export async function registerRoutes(
   });
 
   // Admin: Recover a failed analysis by re-syncing with Gumloop
-  // Admin: Force-reset a stuck analysis back to failed so it can be rerun
-  app.post("/api/admin/analyze/:id/force-reset", requireAdmin, async (req: Request, res: Response) => {
-    try {
-      const analysisId = parseInt(req.params.id, 10);
-      if (isNaN(analysisId)) {
-        res.status(400).json({ message: "Invalid analysis ID" });
-        return;
-      }
-      const analysis = await storage.getAnalysis(analysisId);
-      if (!analysis) {
-        res.status(404).json({ message: "Analysis not found" });
-        return;
-      }
-      console.log(`Admin ${req.userEmail}: Force-resetting stuck analysis ${analysisId} (${analysis.tokenSymbol}) from ${analysis.status} to failed`);
-      await storage.updateAnalysis(analysisId, {
-        status: "failed",
-        errorCode: "FORCE_RESET",
-        errorMessage: "Manually reset by admin — n8n webhook never received completion callback",
-      });
-      res.json({ message: `Analysis ${analysisId} reset to failed. You can now rerun it.`, status: "failed" });
-    } catch (error) {
-      console.error("Admin force-reset error:", error);
-      res.status(500).json({ message: error instanceof Error ? error.message : "Force-reset error" });
-    }
-  });
-
   app.post("/api/admin/analyze/:id/recover", requireAdmin, async (req: Request, res: Response) => {
     try {
       const analysisId = parseInt(req.params.id, 10);
@@ -4019,34 +4024,29 @@ async function syncAnalysisWithGumloop(analysis: { id: number; gumloopRunId: str
 
 export async function syncStuckAnalysesWithGumloop(): Promise<{ synced: number; checked: number }> {
   try {
-    // Auto-timeout: mark any analysis stuck in "processing" for 15+ minutes as failed
-    // n8n webhooks are fire-and-forget — if the completion callback never arrives, we need to self-heal
-    const stuckAnalyses = await storage.getStuckAnalyses(15);
+    // Get analyses stuck for more than 5 minutes that have a gumloopRunId
+    const stuckAnalyses = await storage.getStuckAnalysesWithRunId(5);
 
     if (stuckAnalyses.length === 0) {
+      console.log("Gumloop sync: No stuck analyses to check");
       return { synced: 0, checked: 0 };
     }
 
-    console.log(`n8n timeout check: ${stuckAnalyses.length} analyses stuck >15min, marking as failed`);
+    console.log(`Gumloop sync: Checking ${stuckAnalyses.length} stuck analyses`);
 
     let synced = 0;
     for (const analysis of stuckAnalyses) {
-      try {
-        await storage.updateAnalysis(analysis.id, {
-          status: "failed",
-          errorCode: "N8N_TIMEOUT",
-          errorMessage: "Analysis timed out — n8n webhook completion was never received. Safe to retry.",
-        });
-        console.log(`n8n timeout: auto-failed analysis ${analysis.id} (${analysis.tokenSymbol})`);
-        synced++;
-      } catch (err) {
-        console.error(`n8n timeout: failed to update analysis ${analysis.id}:`, err);
-      }
+      const wasSynced = await syncAnalysisWithGumloop(analysis);
+      if (wasSynced) synced++;
+
+      // Small delay between API calls to avoid rate limiting
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
+    console.log(`Gumloop sync: Synced ${synced}/${stuckAnalyses.length} analyses`);
     return { synced, checked: stuckAnalyses.length };
   } catch (error) {
-    console.error("n8n timeout check error:", error);
+    console.error("Gumloop sync: Error syncing stuck analyses:", error);
     return { synced: 0, checked: 0 };
   }
 }
