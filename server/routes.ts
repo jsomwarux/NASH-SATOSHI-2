@@ -1040,6 +1040,18 @@ export async function registerRoutes(
         contract_address: contractAddress,
         chain,
         run_id: analysis.id,
+        // Token identity
+        ticker: effectiveSymbol,
+        name: effectiveName,
+        token_image: effectiveImage || null,
+        // Market data (already fetched by site)
+        price: marketData.currentPrice || "0",
+        market_cap: marketData.marketCap || "0",
+        fdv: marketData.fdv || "0",
+        volume_24h: marketData.volume24h || "0",
+        price_change_24h: marketData.priceChange24h || "0",
+        price_change_7d: marketData.priceChange7d || "0",
+        categories: marketData.categories || [],
       };
 
       console.log(`Admin: Calling n8n webhook for ${effectiveSymbol} with source=${source}`);
