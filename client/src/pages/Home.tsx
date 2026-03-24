@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 // AI Model data with cyber aesthetic
 const aiModels = [
   {
-    name: "ChatGPT-5.2",
+    name: "ChatGPT-5.4",
     color: "text-green-400",
     bgColor: "bg-green-500/10",
     borderColor: "border-green-500/30",
@@ -33,7 +33,7 @@ const aiModels = [
     icon: Brain,
   },
   {
-    name: "Claude Opus 4.5",
+    name: "Claude Opus 4.6",
     color: "text-orange-400",
     bgColor: "bg-orange-500/10",
     borderColor: "border-orange-500/30",
@@ -41,7 +41,7 @@ const aiModels = [
     icon: Target,
   },
   {
-    name: "Gemini 3 Pro",
+    name: "Gemini 3.1 Pro",
     color: "text-blue-400",
     bgColor: "bg-blue-500/10",
     borderColor: "border-blue-500/30",

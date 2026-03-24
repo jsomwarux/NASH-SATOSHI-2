@@ -549,7 +549,7 @@ export default function Pricing() {
             {[
               {
                 q: "How does the scoring system work?",
-                a: "Each token is analyzed by 4 independent LLMs (GPT, Claude, Gemini, Grok) using game theory principles. The final score (0-100) is a weighted consensus. 70+ = BUY, 40-69 = HOLD, <40 = SELL.",
+                a: "Each token is analyzed by 4 independent LLMs (ChatGPT-5.4, Claude Opus 4.6, Gemini 3.1 Pro, Grok 4) using game theory principles. The final score (0-100) is a weighted consensus. 70+ = BUY, 40-69 = HOLD, <40 = SELL.",
               },
               {
                 q: "What data sources are used?",
