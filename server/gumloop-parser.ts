@@ -147,6 +147,60 @@ function cleanText(text: string | undefined | null): string {
     .trim();
 }
 
+// Clean upside multiple - extract just the "Xx" value from calculation text
+// Handles cases like "150000000 ÷ 574800 = 260.96x" -> "260.96x"
+// Also handles "10x", "50x", "100x+" already clean values
+function cleanUpsideMultiple(text: string): string {
+  if (!text) return "";
+  // If it already looks clean (just a number followed by x), return as-is
+  if (/^\d+(\.\d+)?x\+?$/i.test(text.trim())) {
+    return text.trim();
+  }
+  // Look for the "= Xx" pattern (result of calculation)
+  const calcResultMatch = text.match(/=\s*(\d+(?:\.\d+)?)\s*x/i);
+  if (calcResultMatch) {
+    return calcResultMatch[1] + 'x';
+  }
+  // Look for any "Xx" pattern in the text (last one is likely the result)
+  const allMultiples = text.match(/(\d+(?:\.\d+)?)\s*x/gi);
+  if (allMultiples && allMultiples.length > 0) {
+    // Use the last match (most likely the calculated result)
+    const lastMatch = allMultiples[allMultiples.length - 1];
+    const numMatch = lastMatch.match(/(\d+(?:\.\d+)?)\s*x/i);
+    if (numMatch) {
+      return numMatch[1] + 'x';
+    }
+  }
+  // Fallback: return original cleaned text
+  return text.trim();
+}
+
+// Clean FDV value - extract just the dollar amount from calculation text
+// Handles cases like "(60000000 + 40000000 + ...) = 600000000 ÷ 4 = 150000000" -> "$150,000,000"
+// Also handles "$5M", "$44.33M", "$574,800" already clean values
+function cleanFdvValue(text: string): string {
+  if (!text) return "";
+  const trimmed = text.trim();
+  // If it already looks clean (starts with $ or is a short value), return as-is
+  if (/^\$[\d,.]+[KMBTkmbt]?$/.test(trimmed) || trimmed.length < 30) {
+    return trimmed;
+  }
+  // Look for the last "= number" pattern (result of calculation)
+  const calcResults = trimmed.match(/=\s*(\d[\d,]*(?:\.\d+)?)/g);
+  if (calcResults && calcResults.length > 0) {
+    const lastResult = calcResults[calcResults.length - 1];
+    const numMatch = lastResult.match(/=\s*(\d[\d,]*(?:\.\d+)?)/);
+    if (numMatch) {
+      const num = parseFloat(numMatch[1].replace(/,/g, ''));
+      if (!isNaN(num)) {
+        return '$' + num.toLocaleString('en-US');
+      }
+    }
+  }
+  // Fallback: return original
+  return trimmed;
+}
+
 // Sanitize field names by stripping asterisks (e.g., **final_score:** -> final_score:)
 // This handles Stage 4 outputs that may have asterisks around field names
 function sanitizeFieldText(text: string): string {
@@ -1641,19 +1695,19 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
   // Upside Assessment (from Stage 4)
   const currentFdv = extractField(parseText, 'current_fdv');
   if (currentFdv) {
-    result.currentFdv = cleanText(currentFdv);
+    result.currentFdv = cleanFdvValue(cleanText(currentFdv));
     console.log(`Parser: Extracted currentFdv: "${result.currentFdv}"`);
   }
 
   const realisticPeakFdv = extractField(parseText, 'realistic_peak_fdv');
   if (realisticPeakFdv) {
-    result.realisticPeakFdv = cleanText(realisticPeakFdv);
+    result.realisticPeakFdv = cleanFdvValue(cleanText(realisticPeakFdv));
     console.log(`Parser: Extracted realisticPeakFdv: "${result.realisticPeakFdv}"`);
   }
 
   const upsideMultiple = extractField(parseText, 'upside_multiple');
   if (upsideMultiple) {
-    result.upsideMultiple = cleanText(upsideMultiple);
+    result.upsideMultiple = cleanUpsideMultiple(cleanText(upsideMultiple));
     console.log(`Parser: Extracted upsideMultiple: "${result.upsideMultiple}"`);
   }
 
@@ -2626,7 +2680,20 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
     const value = fieldSource[key] || fieldSource[`output ${key}`] || fieldSource[`output_${key}`] || outputs[key] || outputs[`output ${key}`];
     if (typeof value === 'number') return value;
     if (typeof value === 'string') {
-      const num = parseFloat(value);
+      const trimmed = value.trim();
+      // If the string contains calculation operators (÷, +, =, /), try to extract the final result
+      if (trimmed.includes('÷') || trimmed.includes('=') || (trimmed.includes('+') && trimmed.includes('/'))) {
+        // Look for the last "= number" pattern
+        const resultMatch = trimmed.match(/=\s*(\d+(?:\.\d+)?)\s*$/);
+        if (resultMatch) {
+          const num = parseFloat(resultMatch[1]);
+          if (!isNaN(num)) {
+            console.log(`getNumber('${key}'): Extracted ${num} from calculation text: "${trimmed.substring(0, 60)}..."`);
+            return num;
+          }
+        }
+      }
+      const num = parseFloat(trimmed);
       if (!isNaN(num)) return num;
     }
     return undefined;
@@ -3112,6 +3179,38 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
       reasoning: grokReasoning,
       risks: parseRisksFromString(grokRisksStr),
     };
+  }
+
+  // Upside Assessment fields (from Stage 4)
+  const currentFdv = getString('current_fdv');
+  if (currentFdv) {
+    result.currentFdv = cleanFdvValue(currentFdv);
+    console.log(`Parser (outputs): Extracted currentFdv: "${result.currentFdv}"`);
+  }
+
+  const realisticPeakFdv = getString('realistic_peak_fdv') || getString('peak_fdv');
+  if (realisticPeakFdv) {
+    result.realisticPeakFdv = cleanFdvValue(realisticPeakFdv);
+    console.log(`Parser (outputs): Extracted realisticPeakFdv: "${result.realisticPeakFdv}"`);
+  }
+
+  const upsideMultipleVal = getString('upside_multiple') || getString('multiple');
+  if (upsideMultipleVal) {
+    result.upsideMultiple = cleanUpsideMultiple(upsideMultipleVal);
+    console.log(`Parser (outputs): Extracted upsideMultiple: "${result.upsideMultiple}" (raw: "${upsideMultipleVal}")`);
+  }
+
+  const upsideTierVal = getString('upside_tier');
+  if (upsideTierVal) {
+    result.upsideTier = upsideTierVal;
+    console.log(`Parser (outputs): Extracted upsideTier: "${result.upsideTier}"`);
+  }
+
+  // Score calculation (for debugging/verification)
+  const scoreCalculation = getString('score_calculation') || getString('final_score_calculation');
+  if (scoreCalculation) {
+    result.scoreCalculation = scoreCalculation;
+    console.log(`Parser (outputs): Extracted scoreCalculation: "${result.scoreCalculation}"`);
   }
 
   // Calculate tier from score if not set

@@ -1369,6 +1369,27 @@ export async function registerRoutes(
           if (parsed.asymmetryCeiling) updates.asymmetryCeiling = parsed.asymmetryCeiling;
           if (parsed.asymmetryScore) updates.asymmetryScore = parsed.asymmetryScore?.toString();
 
+          // Recalculate tier from score to fix any mismatches
+          if (parsed.finalScore > 0) {
+            // Validate final score against model scores
+            const modelVals = Object.values(parsed.modelScores).filter(s => typeof s === 'number' && s > 0);
+            if (modelVals.length >= 2) {
+              const modelAvg = modelVals.reduce((sum, s) => sum + s, 0) / modelVals.length;
+              const diff = Math.abs(parsed.finalScore - modelAvg);
+              if (diff > 20) {
+                const correctedScore = Math.round(modelAvg * 100) / 100;
+                console.log(`Admin reprocess: Score ${parsed.finalScore} deviates ${diff.toFixed(1)}pts from model avg ${modelAvg.toFixed(2)}. Correcting to ${correctedScore}.`);
+                updates.finalScore = correctedScore.toString();
+                parsed.finalScore = correctedScore;
+              }
+            }
+            const recalcTier = parsed.finalScore >= 85 ? 'S+' : parsed.finalScore >= 70 ? 'S' : parsed.finalScore >= 55 ? 'A' : parsed.finalScore >= 40 ? 'B' : 'C';
+            if (analysis.tier !== recalcTier) {
+              console.log(`Admin reprocess: Tier mismatch - was "${analysis.tier}" but score ${parsed.finalScore} maps to "${recalcTier}". Fixing.`);
+              updates.tier = recalcTier;
+            }
+          }
+
           console.log(`Admin: Re-parsed upside fields - multiple: ${updates.upsideMultiple}, tier: ${updates.upsideTier}`);
           console.log(`Admin: Re-parsed narrative fields - narrative: ${updates.narrative}, subNarrative: ${updates.subNarrative}, primaryNarrative: ${updates.primaryNarrative}`);
           console.log(`Admin: Re-parsed asymmetry fields - floor: ${updates.asymmetryFloor}, ceiling: ${updates.asymmetryCeiling}`);
@@ -3551,6 +3572,26 @@ async function processGumloopCompletion(
     console.log(`Analysis ${analysisId}: Using fallback narrative: ${parsed.narrative}`);
   }
 
+  // SANITY CHECK: Validate final score against model scores
+  // If model scores are available and the final score is drastically different, recalculate
+  const modelScoreValues = Object.values(parsed.modelScores).filter(s => typeof s === 'number' && s > 0);
+  if (modelScoreValues.length >= 2 && parsed.finalScore > 0) {
+    const modelAvg = modelScoreValues.reduce((sum, s) => sum + s, 0) / modelScoreValues.length;
+    const scoreDiff = Math.abs(parsed.finalScore - modelAvg);
+    // If the final score deviates by more than 20 points from model average, it's likely a parsing error
+    if (scoreDiff > 20) {
+      console.warn(`Analysis ${analysisId}: Final score ${parsed.finalScore} deviates ${scoreDiff.toFixed(1)} points from model average ${modelAvg.toFixed(2)} (models: ${JSON.stringify(parsed.modelScores)}). Using model average as final score.`);
+      parsed.finalScore = Math.round(modelAvg * 100) / 100;
+      parsed.tier = (() => {
+        if (parsed.finalScore >= 85) return 'S+';
+        if (parsed.finalScore >= 70) return 'S';
+        if (parsed.finalScore >= 55) return 'A';
+        if (parsed.finalScore >= 40) return 'B';
+        return 'C';
+      })();
+    }
+  }
+
   console.log(`Analysis ${analysisId}: Parsed - score: ${parsed.finalScore}, tier: ${parsed.tier}, narrative: ${parsed.narrative}`);
 
   // Fetch existing analysis to get FDV for score capping (fall back to market cap)
@@ -3699,11 +3740,25 @@ async function processGumloopCompletion(
     console.log(`Analysis ${analysisId}: Score capped from ${uncappedScore} to ${cappedScore} (${fdvTier} cap, FDV: $${fdvValue?.toLocaleString()}, modifier: ${finalFdvModifier})`);
   }
 
+  // Always recalculate tier from the actual capped score to ensure consistency
+  // Gumloop sometimes returns a tier that doesn't match its own score
+  const calculateTier = (score: number): string => {
+    if (score >= 85) return 'S+';
+    if (score >= 70) return 'S';
+    if (score >= 55) return 'A';
+    if (score >= 40) return 'B';
+    return 'C';
+  };
+  const calculatedTier = calculateTier(cappedScore);
+  if (parsed.tier && parsed.tier !== calculatedTier) {
+    console.log(`Analysis ${analysisId}: Tier mismatch - Gumloop said "${parsed.tier}" but score ${cappedScore} maps to "${calculatedTier}". Using calculated tier.`);
+  }
+
   // Update the analysis with parsed results
   await storage.updateAnalysis(analysisId, {
     status: "completed",
     finalScore: cappedScore.toString(),
-    tier: parsed.tier,
+    tier: calculatedTier,
     tokenType: parsed.tokenType || 'UTILITY',
     phase: parsed.phase,
     phaseName: parsed.phaseName,

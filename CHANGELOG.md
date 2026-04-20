@@ -4,6 +4,66 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
+## Session: 2026-04-20 - Fix Tier Mismatch, Wrong Final Scores, and Upside Display (Latest)
+
+### Summary
+Fixed three issues surfacing in the latest reanalysis batch: (1) tokens with scores >=85 showing as S tier instead of S+, (2) final scores wildly inconsistent with model scores (e.g., 63.61 when models scored 84-93), and (3) the Upside Assessment section displaying raw calculation math instead of just the upside multiple.
+
+### Root Cause Analysis
+1. **Tier mismatch**: `processGumloopCompletion` stored whatever tier Gumloop returned (`parsed.tier`) without recalculating it from the actual stored score. If Gumloop's LLM output said "S" but the score was 88.55, the wrong tier was persisted.
+2. **Wrong final score**: When Gumloop returns `final_score` as a string containing calculation text (e.g., arithmetic work), `parseFloat()` could extract the wrong number. No sanity check existed to validate the final score against the individual model scores.
+3. **Upside display showing math**: Gumloop's latest batch started returning calculation text in `upside_multiple` (e.g., "150000000 ÷ 574800 = 260.96x") and `realistic_peak_fdv` fields. The parser stored these verbatim without extracting just the result.
+
+### Changes Made
+
+#### 1. Always Recalculate Tier from Score (server/routes.ts)
+- `processGumloopCompletion` now calculates tier from the capped score using the official thresholds (S+ ≥85, S ≥70, A ≥55, B ≥40, C <40)
+- Logs a warning when Gumloop's tier disagrees with the calculated tier
+- Admin reprocess endpoint also recalculates tier and fixes mismatches
+
+#### 2. Final Score Sanity Check (server/routes.ts)
+- Before storing, validates that `finalScore` doesn't deviate more than 20 points from the model score average
+- If it does, logs a warning and uses the model score average instead
+- Applied in both `processGumloopCompletion` and admin reprocess paths
+
+#### 3. Clean Upside Multiple Values (server/gumloop-parser.ts)
+- Added `cleanUpsideMultiple()` function that extracts just the "Xx" value from calculation text
+- Handles patterns like "150000000 ÷ 574800 = 260.96x" → "260.96x"
+- Applied in both `parseStructuredOutput` and `parseGumloopOutputs` paths
+
+#### 4. Clean FDV Values (server/gumloop-parser.ts)
+- Added `cleanFdvValue()` function that extracts dollar amounts from calculation text
+- Handles patterns like "(60M + 40M + 100M + 400M) = 600M ÷ 4 = 150000000" → "$150,000,000"
+- Applied to `currentFdv` and `realisticPeakFdv` fields in both parser paths
+
+#### 5. Better getNumber() Parsing (server/gumloop-parser.ts)
+- `getNumber()` in `parseGumloopOutputs` now detects calculation text (containing ÷, =, +)
+- Extracts the final result after the last "=" sign instead of blindly using parseFloat
+
+#### 6. Added Upside Fields to parseGumloopOutputs (server/gumloop-parser.ts)
+- `parseGumloopOutputs` was missing extraction of `currentFdv`, `realisticPeakFdv`, `upsideMultiple`, `upsideTier`, and `scoreCalculation`
+- These fields were only extracted in the text-based parser path, not the direct outputs path
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/routes.ts` | Tier recalculation from score, final score sanity check vs model scores, admin reprocess tier/score fixes |
+| `server/gumloop-parser.ts` | `cleanUpsideMultiple()`, `cleanFdvValue()`, improved `getNumber()`, added upside field extraction to `parseGumloopOutputs` |
+
+### Commands Run
+- `npx tsc --noEmit` - TypeScript check passed
+
+### Current State
+- New analyses will have correct tiers matching their scores
+- Upside assessment will display clean "Xx" values instead of calculation math
+- Final scores will be validated against model scores to catch parsing errors
+- **To fix existing broken data**: Run "Reprocess All" from the admin panel, which will re-parse raw responses and fix tiers, scores, and upside fields
+
+### Still Broken
+- Existing analyses in the database still have wrong tiers/scores/upside values until admin reprocesses them
+
+---
+
 ## Session: 2026-02-16 - Fix Retry Logic: Skip Already-Completed Tokens (Latest)
 
 ### Summary
