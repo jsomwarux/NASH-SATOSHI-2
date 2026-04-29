@@ -48,7 +48,8 @@
       "Bash(git config:*)",
       "Bash(git push:*)",
       "Bash(TZ=\"America/New_York\" date:*)",
-      "Bash(awk 'NR>=2900 && NR<=3100' server/gumloop-parser.ts)"
+      "Bash(awk 'NR>=2900 && NR<=3100' server/gumloop-parser.ts)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
