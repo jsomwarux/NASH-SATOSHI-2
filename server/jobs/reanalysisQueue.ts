@@ -134,26 +134,26 @@ function isCapacityError(error: string | undefined): boolean {
 /**
  * Determines how many tokens to reanalyze based on the week of the month.
  *
- * Schedule:
- * - Week 1: Top 100 (monthly includes all tiers)
- * - Week 2: Top 25 (weekly tier only)
- * - Week 3: Top 50 (bi-weekly includes top 25)
- * - Week 4: Top 25 (weekly tier only)
- * - Week 5 (if exists): Top 25
+ * Schedule (rotation re-ordered 2026-04-29 to push the heavy 100-token batch
+ * to the end of the month so it lands on a known credit-replenish cadence):
+ * - Week 1 (days 1-7):  Top 25  (weekly)
+ * - Week 2 (days 8-14): Top 50  (bi-weekly includes top 25)
+ * - Week 3 (days 15-21):Top 25  (weekly)
+ * - Week 4+ (days 22+): Top 100 (monthly includes all tiers)
  */
 function getReanalysisCount(): { count: number; batchType: string } {
   const week = getWeekOfMonth();
 
   switch (week) {
     case 1:
-      return { count: 100, batchType: "monthly" };
-    case 2:
       return { count: 25, batchType: "weekly" };
-    case 3:
+    case 2:
       return { count: 50, batchType: "bi-weekly" };
+    case 3:
+      return { count: 25, batchType: "weekly" };
     case 4:
     default:
-      return { count: 25, batchType: "weekly" };
+      return { count: 100, batchType: "monthly" };
   }
 }
 
@@ -172,10 +172,37 @@ function getPriorityForRank(rank: number): number {
 /**
  * Weekly scheduler - runs Monday at midnight EST.
  * Adds tokens to the reanalysis queue based on the week of the month.
+ *
+ * Skip mechanism: set REANALYSIS_SKIP_DATES env var to a comma-separated list
+ * of YYYY-MM-DD EST dates (the Monday the batch fires on) to no-op that run.
+ * Used when Gumloop credits are tight or to pause for a maintenance window.
+ * Example: REANALYSIS_SKIP_DATES=2026-05-04,2026-05-11
  */
 async function scheduleWeeklyReanalysis(): Promise<void> {
+  const todayEST = getESTDateString();
+
+  // Honor REANALYSIS_SKIP_DATES — read at fire-time so it can be toggled without restart.
+  const skipDates = (process.env.REANALYSIS_SKIP_DATES || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (skipDates.includes(todayEST)) {
+    console.log(`[ReanalysisQueue] SKIPPING scheduled run for ${todayEST} (matched REANALYSIS_SKIP_DATES). No tokens queued.`);
+    // Still record the run so we don't backfill it as a missed Monday on next boot.
+    try {
+      await storage.upsertJobRun(JOB_NAME, {
+        lastRunAt: new Date(),
+        lastScheduledDate: getMostRecentMondayEST(),
+        lastRunMetadata: { skipped: true, reason: "REANALYSIS_SKIP_DATES" },
+      });
+    } catch (err) {
+      console.warn("[ReanalysisQueue] Failed to record skipped run:", err);
+    }
+    return;
+  }
+
   const { count, batchType } = getReanalysisCount();
-  const batchId = `${getESTDateString()}-${batchType}`;
+  const batchId = `${todayEST}-${batchType}`;
 
   console.log(`[ReanalysisQueue] Scheduling ${batchType} reanalysis for top ${count} tokens (batch: ${batchId})`);
 
