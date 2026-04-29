@@ -25,7 +25,7 @@ export interface AggregatedLeaderboardItem {
   previousScore: number | null; // Score from second most recent analysis
   scoreTrend: number | null; // Difference: latestScore - previousScore
   // Token type and asymmetry
-  tokenType: 'UTILITY' | 'MEMECOIN' | null;
+  tokenType: 'UTILITY' | 'MEMECOIN' | 'HYBRID' | null;
   asymmetryScore: number | null;
   marketCapTier: 'mega' | 'large' | 'mid' | 'small' | null;
   // Upside potential

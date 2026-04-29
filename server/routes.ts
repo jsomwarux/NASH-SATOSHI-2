@@ -1369,6 +1369,16 @@ export async function registerRoutes(
           if (parsed.asymmetryCeiling) updates.asymmetryCeiling = parsed.asymmetryCeiling;
           if (parsed.asymmetryScore) updates.asymmetryScore = parsed.asymmetryScore?.toString();
 
+          // Aggregation v2 fields (re-parsed when admin reprocesses an old analysis)
+          if (parsed.vaporCapApplied) updates.vaporCapApplied = parsed.vaporCapApplied;
+          if (parsed.teamActivity) updates.teamActivity = parsed.teamActivity;
+          if (parsed.fudSignals) updates.fudSignals = parsed.fudSignals;
+          if (parsed.consensusPenaltyModifier !== undefined) updates.consensusPenaltyModifier = parsed.consensusPenaltyModifier.toString();
+          if (parsed.relativeSpread) updates.relativeSpread = parsed.relativeSpread;
+          if (parsed.ceilingConfidence) updates.ceilingConfidence = parsed.ceilingConfidence;
+          if (parsed.ceilingDivergence) updates.ceilingDivergence = parsed.ceilingDivergence;
+          if (parsed.bearCase) updates.bearCase = parsed.bearCase;
+
           // Recalculate tier from score to fix any mismatches
           if (parsed.finalScore > 0) {
             // Validate final score against model scores
@@ -3869,6 +3879,15 @@ async function processGumloopCompletion(
     scoreSpread: parsed.scoreSpread?.toString(),
     divergenceFlag: parsed.divergenceFlag,
     divergenceNote: parsed.divergenceNote,
+    // Aggregation v2 fields (Final Aggregation upgrade)
+    vaporCapApplied: parsed.vaporCapApplied,
+    teamActivity: parsed.teamActivity,
+    fudSignals: parsed.fudSignals,
+    consensusPenaltyModifier: parsed.consensusPenaltyModifier?.toString(),
+    relativeSpread: parsed.relativeSpread,
+    ceilingConfidence: parsed.ceilingConfidence,
+    ceilingDivergence: parsed.ceilingDivergence,
+    bearCase: parsed.bearCase,
     // Market data fallbacks from Gumloop (only set if CoinGecko data was missing)
     ...(fallbackPrice && { currentPrice: fallbackPrice }),
     ...(fallbackMarketCap && { marketCap: fallbackMarketCap }),

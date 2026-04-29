@@ -830,9 +830,13 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
   const modelScores = analysis.modelScores as ModelScores | null;
   const modelAnalyses = analysis.modelAnalyses as ModelAnalyses | null;
 
-  // Token type - UTILITY or MEMECOIN (default to UTILITY)
+  // Token type - UTILITY, MEMECOIN, or HYBRID (Aggregation v2 added HYBRID).
+  // HYBRID = meme branding AND functional product. We treat it as memecoin-styled
+  // for catalyst/risk labels (since the meme-side dynamics dominate user-facing copy)
+  // but the badge shows HYBRID distinctly so users can see both signals apply.
   const tokenType = (analysis.tokenType as string) || 'UTILITY';
-  const isMemecoin = tokenType === 'MEMECOIN';
+  const isHybrid = tokenType === 'HYBRID';
+  const isMemecoin = tokenType === 'MEMECOIN' || isHybrid;
 
   // Component scores - show all 6 components
   const scoreComponents = [
@@ -854,6 +858,9 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
   // All modifiers for the detailed display
   // Exit Liquidity modifier is hidden when value is 0/missing (Dexscreener data unavailable)
   const exitLiquidityValue = parseFloat(analysis.exitLiquidityModifier as string) || 0;
+  // Aggregation v2 adds consensusPenaltyModifier — captures aggregation-stage penalties
+  // (low consensus, exit liquidity flags) separately from per-model averaged modifiers.
+  const consensusPenaltyValue = parseFloat(analysis.consensusPenaltyModifier as string) || 0;
   const allModifiers = [
     { label: "Phase", value: parseFloat(analysis.phaseModifier as string) || 0 },
     { label: isMemecoin ? "Meta" : "Narrative", value: parseFloat(analysis.narrativeModifier as string) || 0 },
@@ -861,6 +868,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
     { label: "Peak Proximity", value: parseFloat(analysis.peakProximityModifier as string) || 0 },
     { label: "Data Quality", value: parseFloat(analysis.dataQualityModifier as string) || 0 },
     { label: "FDV", value: parseFloat((analysis.fdvModifier || analysis.marketCapModifier) as string) || 0 },
+    { label: "Consensus", value: consensusPenaltyValue, hideWhenZero: true },
   ];
 
   // Filter out Exit Liquidity when it's 0 (Dexscreener data missing/unavailable)
@@ -1375,6 +1383,42 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
               </div>
             )}
 
+            {/* Aggregation v2: Shipping Cap (vapor_cap_applied)
+                "YES: score capped at 45" → render distinct shipping-cap badge with explanation. */}
+            {(() => {
+              const raw = (analysis.vaporCapApplied as string | null | undefined) ?? "";
+              if (!raw || !raw.trim().toUpperCase().startsWith("YES")) return null;
+              const colonIdx = raw.indexOf(":");
+              const description = colonIdx >= 0 ? raw.substring(colonIdx + 1).trim() : "";
+              return (
+                <div className="mt-4 p-4 rounded-lg bg-purple-500/5 border border-purple-500/20">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                      <AlertTriangle className="w-4 h-4 text-purple-400" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-purple-400 mb-1 flex items-center gap-2">
+                        Shipping Cap Applied
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <HelpCircle className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-[280px] cyber-card border-primary/20">
+                            <p className="text-xs">
+                              The aggregator capped this score because the project shows weak shipping signals (no recent product progress, low team activity).
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {description || "Score limited due to weak shipping signals."}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* FDV Scaling Explanation - show when score is capped */}
             {scoreCapped && uncappedScore !== null && fdvTier && (
               <div className="mt-4 p-4 rounded-lg bg-blue-500/5 border border-blue-500/20">
@@ -1749,10 +1793,15 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                         </span>
                       </div>
 
-                      {/* Score Spread */}
+                      {/* Score Spread (absolute points) + Aggregation v2 relative_spread (percentage) */}
                       {scoreSpread !== null && (
                         <div className="text-sm text-muted-foreground">
                           Score spread: <span className="font-mono font-medium">{scoreSpread.toFixed(2)}</span> points
+                          {analysis.relativeSpread && (
+                            <span className="ml-2 text-muted-foreground/70">
+                              (<span className="font-mono">{analysis.relativeSpread as string}</span> relative)
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1907,6 +1956,17 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                 <p className="text-muted-foreground leading-relaxed">{analysis.thesis}</p>
               )}
 
+              {/* Aggregation v2: bear_case — "What would kill this" / dissenting view */}
+              {analysis.bearCase && (
+                <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
+                  <div className="text-xs uppercase tracking-wide mb-1 flex items-center gap-1.5 text-red-400">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    What would kill this
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{analysis.bearCase as string}</p>
+                </div>
+              )}
+
               {/* Game Theory Context Row */}
               <div className="pt-4 border-t border-white/10">
                 <div className="text-xs text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
@@ -1914,13 +1974,21 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   Game Theory Context
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {/* Schelling Position */}
+                  {/* Schelling Position — Aggregation v2: color-code by narrative rank.
+                      1st = gold, 2nd = silver, 3rd = bronze, lower = neutral. */}
                   <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
                     <div className="text-xs text-muted-foreground mb-1">Schelling Position</div>
-                    <div className="text-sm">
-                      {analysis.schellingPosition?.toLowerCase() === 'lower' ? '4th+' :
-                       analysis.schellingPosition || '—'}
-                    </div>
+                    {(() => {
+                      const raw = analysis.schellingPosition || '';
+                      const lower = raw.toLowerCase();
+                      const display = lower === 'lower' ? '4th+' : (raw || '—');
+                      const colorClass =
+                        lower.includes('1st') ? 'text-yellow-300' :
+                        lower.includes('2nd') ? 'text-slate-300' :
+                        lower.includes('3rd') ? 'text-amber-600' :
+                        'text-foreground';
+                      return <div className={`text-sm font-medium ${colorClass}`}>{display}</div>;
+                    })()}
                   </div>
 
                   {/* Market Equilibrium */}
@@ -2012,13 +2080,40 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
               </div>
 
               {/* Upside Assessment - from Stage 4 */}
-              {(analysis.upsideMultiple || analysis.upsideTier) && (
+              {(analysis.upsideMultiple || analysis.upsideTier) && (() => {
+                // Aggregation v2: ceiling_confidence (High | Medium | Low) + ceiling_divergence (HIGH | absent).
+                // When confidence is Low, dim the upside number to signal lower trust.
+                const ceilingConfRaw = (analysis.ceilingConfidence as string | null | undefined) ?? "";
+                const colonIdx = ceilingConfRaw.indexOf(":");
+                const ceilingConfLevel = (colonIdx >= 0 ? ceilingConfRaw.substring(0, colonIdx) : ceilingConfRaw).trim();
+                const ceilingConfReasoning = colonIdx >= 0 ? ceilingConfRaw.substring(colonIdx + 1).trim() : "";
+                const ceilingConfLower = ceilingConfLevel.toLowerCase();
+                const isLowConfidence = ceilingConfLower === "low";
+                const ceilingDivergent = ((analysis.ceilingDivergence as string | null | undefined) ?? "").toUpperCase() === "HIGH";
+                return (
                 <div className="pt-4 border-t border-white/10">
                   <div className="text-xs text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
                     <TrendingUp className="w-3 h-3" />
                     Upside Assessment
+                    {ceilingConfLevel && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Badge variant="outline" className={`text-[10px] uppercase ${
+                            ceilingConfLower === "high" ? "text-green-400 border-green-500/30" :
+                            ceilingConfLower === "medium" ? "text-yellow-400 border-yellow-500/30" :
+                            ceilingConfLower === "low" ? "text-orange-400 border-orange-500/30" :
+                            "text-muted-foreground"
+                          }`}>{ceilingConfLevel} confidence</Badge>
+                        </TooltipTrigger>
+                        {ceilingConfReasoning && (
+                          <TooltipContent className="max-w-[280px] cyber-card border-primary/20">
+                            <p className="text-xs">{ceilingConfReasoning}</p>
+                          </TooltipContent>
+                        )}
+                      </Tooltip>
+                    )}
                   </div>
-                  <div className="p-4 rounded-lg bg-gradient-to-r from-primary/5 to-accent/5 border border-primary/20">
+                  <div className={`p-4 rounded-lg bg-gradient-to-r from-primary/5 to-accent/5 border border-primary/20 ${isLowConfidence ? 'opacity-75' : ''}`}>
                     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                       {/* Upside Multiple - Prominent Display */}
                       {analysis.upsideMultiple && (
@@ -2094,12 +2189,21 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                         </Tooltip>
                       </div>
                     )}
+
+                    {/* Aggregation v2: Ceiling divergence — models disagreed on this token's ceiling. */}
+                    {ceilingDivergent && (
+                      <div className="mt-2 flex items-start gap-2 text-xs text-yellow-400">
+                        <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                        <span>Models disagree on this token&apos;s ceiling — estimate uses conservative median.</span>
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
+                );
+              })()}
 
               {/* Team/Project Info Row */}
-              {(analysis.teamStatus || analysis.notableBackers) && (
+              {(analysis.teamStatus || analysis.notableBackers || analysis.teamActivity) && (
                 <div className="pt-4 border-t border-white/10 grid grid-cols-2 md:grid-cols-4 gap-3">
                   {analysis.teamStatus && (
                     <div className="flex items-center gap-2">
@@ -2114,8 +2218,25 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                       </div>
                     </div>
                   )}
+                  {/* Aggregation v2: team_activity (Active | Regular | Quiet | Abandoned) */}
+                  {analysis.teamActivity && (
+                    <div className="flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-muted-foreground" />
+                      <div>
+                        <div className="text-[10px] text-muted-foreground uppercase">Activity</div>
+                        <div className={`text-sm font-medium ${(() => {
+                          const a = (analysis.teamActivity as string).toLowerCase();
+                          if (a.includes('abandoned')) return 'text-red-400';
+                          if (a.includes('quiet')) return 'text-yellow-400';
+                          if (a.includes('regular')) return 'text-emerald-400';
+                          if (a.includes('active')) return 'text-green-400';
+                          return '';
+                        })()}`}>{analysis.teamActivity as string}</div>
+                      </div>
+                    </div>
+                  )}
                   {analysis.notableBackers && analysis.notableBackers.toLowerCase() !== 'none known' && (
-                    <div className="flex items-center gap-2 col-span-1 md:col-span-3">
+                    <div className={`flex items-center gap-2 ${analysis.teamActivity ? 'col-span-1 md:col-span-2' : 'col-span-1 md:col-span-3'}`}>
                       <Award className="w-4 h-4 text-muted-foreground" />
                       <div>
                         <div className="text-[10px] text-muted-foreground uppercase">Backers</div>
@@ -2130,28 +2251,58 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         </motion.div>
       )}
 
-      {/* Unlock Warning - NEW (if present) */}
-      {analysis.unlockWarning && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.13 }}
-        >
-          <Card className="glass-card border-orange-500/30 bg-orange-500/5">
-            <CardContent className="p-4">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center shrink-0">
-                  <Unlock className="w-4 h-4 text-orange-400" />
+      {/* Unlock Warning — Aggregation v2: graded enum NONE | MINOR | MODERATE: ... | SEVERE: ...
+          Hidden entirely when severity is NONE (or absent). Color matches severity. */}
+      {(() => {
+        const raw = (analysis.unlockWarning as string | null | undefined) ?? "";
+        if (!raw) return null;
+        // Split on first ":" — left is severity, right is human description.
+        const colonIdx = raw.indexOf(":");
+        const severityRaw = (colonIdx >= 0 ? raw.substring(0, colonIdx) : raw).trim();
+        const description = colonIdx >= 0 ? raw.substring(colonIdx + 1).trim() : "";
+        const severity = severityRaw.toUpperCase();
+        // NONE = no warning to show. Empty severity also renders nothing.
+        if (!severity || severity === "NONE") return null;
+        // Legacy outputs: "WARNING: 25% unlock on..." → render as MODERATE-styled.
+        const isLegacyWarning = severity === "WARNING";
+        const palette = (() => {
+          if (severity === "MINOR") {
+            return { ring: "border-yellow-500/30 bg-yellow-500/5", chipBg: "bg-yellow-500/20", icon: "text-yellow-400", label: "text-yellow-400" };
+          }
+          if (severity === "SEVERE") {
+            return { ring: "border-red-500/40 bg-red-500/10", chipBg: "bg-red-500/20", icon: "text-red-400", label: "text-red-400" };
+          }
+          // MODERATE or legacy WARNING → orange.
+          return { ring: "border-orange-500/30 bg-orange-500/5", chipBg: "bg-orange-500/20", icon: "text-orange-400", label: "text-orange-400" };
+        })();
+        const displaySeverity = isLegacyWarning ? "MODERATE" : severity;
+        return (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.13 }}
+          >
+            <Card className={`glass-card ${palette.ring}`}>
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className={`w-8 h-8 rounded-full ${palette.chipBg} flex items-center justify-center shrink-0`}>
+                    <Unlock className={`w-4 h-4 ${palette.icon}`} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className={`text-sm font-medium ${palette.label}`}>Upcoming Token Unlock</div>
+                      <Badge variant="outline" className={`text-[10px] uppercase ${palette.label}`}>{displaySeverity}</Badge>
+                    </div>
+                    {description && (
+                      <div className="text-sm text-muted-foreground">{description}</div>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <div className="text-sm font-medium text-orange-400 mb-1">Upcoming Token Unlock</div>
-                  <div className="text-sm text-muted-foreground">{analysis.unlockWarning}</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        );
+      })()}
 
       {/* Catalysts & Risks - NEW */}
       {(analysis.catalyst1 || analysis.catalyst2 || analysis.catalyst3 ||
@@ -2438,6 +2589,61 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   })()}
                 </div>
               )}
+
+              {/* Aggregation v2: KOL Mention Recency.
+                  Show warning indicator if KOL mentions are stale. */}
+              {analysis.kolMentionRecency && (
+                <div className="p-3 rounded-lg bg-secondary/30 border border-white/5">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">KOL Recency</div>
+                  {(() => {
+                    const recency = (analysis.kolMentionRecency as string);
+                    const lower = recency.toLowerCase();
+                    const isStale = lower.includes('older than 3 months') || lower.includes('no kol mentions');
+                    const colorClass =
+                      lower.includes('last 7 days') ? 'text-green-400' :
+                      lower.includes('last 30 days') ? 'text-emerald-400' :
+                      lower.includes('1-3 months') ? 'text-yellow-400' :
+                      isStale ? 'text-orange-400' :
+                      'text-muted-foreground';
+                    return (
+                      <div className={`text-sm font-medium ${colorClass} flex items-center gap-1.5`}>
+                        {isStale && <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
+                        <span>{recency}</span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Aggregation v2: FUD Signals — None observed | Minor (...) | Material (...) */}
+              {analysis.fudSignals && (() => {
+                const raw = (analysis.fudSignals as string);
+                const lower = raw.toLowerCase();
+                if (lower.includes('none')) return null;
+                // Severity may use either "Minor: ..." / "Material: ..." or "Minor (...)" / "Material (...)" — try both.
+                const colonIdx = raw.indexOf(":");
+                const parenIdx = raw.indexOf("(");
+                let severity = raw;
+                let description = "";
+                if (colonIdx > 0 && (parenIdx < 0 || colonIdx < parenIdx)) {
+                  severity = raw.substring(0, colonIdx).trim();
+                  description = raw.substring(colonIdx + 1).trim();
+                } else if (parenIdx > 0) {
+                  severity = raw.substring(0, parenIdx).trim();
+                  const closeParen = raw.lastIndexOf(")");
+                  description = (closeParen > parenIdx ? raw.substring(parenIdx + 1, closeParen) : raw.substring(parenIdx + 1)).trim();
+                }
+                const isMaterial = severity.toLowerCase().includes('material');
+                return (
+                  <div className={`p-3 rounded-lg border col-span-2 sm:col-span-3 md:col-span-2 ${isMaterial ? 'bg-red-500/10 border-red-500/30' : 'bg-yellow-500/10 border-yellow-500/30'}`}>
+                    <div className="text-xs uppercase tracking-wide mb-1 flex items-center gap-1.5">
+                      <AlertTriangle className={`w-3.5 h-3.5 ${isMaterial ? 'text-red-400' : 'text-yellow-400'}`} />
+                      <span className={isMaterial ? 'text-red-400' : 'text-yellow-400'}>{severity || 'FUD'} signal</span>
+                    </div>
+                    {description && <div className="text-sm text-muted-foreground">{description}</div>}
+                  </div>
+                );
+              })()}
 
               {/* Cult vs Mercenary - with optional ratio */}
               {analysis.cultVsMercenary && (

@@ -34,7 +34,7 @@ export interface ParsedGumloopResponse {
   xSentiment?: string; // positive/mixed/negative (deprecated, often N/A)
   xTopKols?: string; // Notable KOLs
   communityStatus?: string; // Very Active/Active/Moderate/Low/Dead
-  accountQuality?: string; // Builders/Researchers, Traders/Degens, Mixed Quality, Promoters/Shills
+  accountQuality?: string; // Aggregation v2: Builders-Researchers, Traders-Degens, Mixed Quality, Promoters-Shills, Bots-Spam (hyphenated)
 
   // X Research qualitative fields (NEW - replacing numeric versions)
   engagementQuality?: string; // "High", "Moderate", "Low", "Bot-Heavy"
@@ -131,6 +131,17 @@ export interface ParsedGumloopResponse {
   scoreSpread?: number; // Difference between highest and lowest model scores
   divergenceFlag?: string; // "HIGH" (>15 pts), "MODERATE" (10-15 pts), "LOW" (<10 pts)
   divergenceNote?: string; // Explanation when divergence is HIGH
+
+  // Aggregation v2 fields (Final Aggregation upgrade)
+  vaporCapApplied?: string;          // "YES: score capped at 45" or "NO"
+  teamActivity?: string;             // Active | Regular | Quiet | Abandoned
+  fudSignals?: string;               // "None observed" | "Minor (description)" | "Material (description)"
+  consensusPenaltyModifier?: number; // Aggregation-stage penalties (e.g., -5.00, -10.00)
+  relativeSpread?: string;           // Percentage string (e.g., "18.5%") complementing absolute scoreSpread
+  ceilingConfidence?: string;        // High | Medium | Low (with optional reasoning)
+  ceilingDivergence?: string;        // "HIGH" or absent
+  // Per-model field (Stage 1/2) — not currently rendered, kept for future use
+  bearCase?: string;                 // 1-2 sentence bear case from per-model analysis
 }
 
 // Clean text - remove markdown formatting
@@ -214,7 +225,73 @@ function sanitizeFieldText(text: string): string {
 const COMMUNITY_STATUS_CATEGORIES = ["Very Active", "Active", "Moderate", "Low", "Dead"];
 
 // Valid categories for account quality parsing
-const ACCOUNT_QUALITY_CATEGORIES = ["Builders/Researchers", "Traders/Degens", "Mixed Quality", "Promoters/Shills", "Bots/Spam"];
+// Aggregation v2 (2026-04-29) switched forward slashes to hyphens. Accept BOTH old and new
+// formats so legacy outputs still parse. The canonical (returned) form is the new hyphenated value.
+const ACCOUNT_QUALITY_CATEGORIES = ["Builders-Researchers", "Traders-Degens", "Mixed Quality", "Promoters-Shills", "Bots-Spam"];
+const ACCOUNT_QUALITY_LEGACY_TO_CANONICAL: Record<string, string> = {
+  "builders/researchers": "Builders-Researchers",
+  "traders/degens": "Traders-Degens",
+  "promoters/shills": "Promoters-Shills",
+  "bots/spam": "Bots-Spam",
+};
+
+// Phase names — accept the original 5-value enum AND the expanded 7-value enum.
+// Aggregation v2 may emit any of these; UI must render all.
+const PHASE_NAMES = [
+  "Stealth",
+  "Early Expansion",
+  "Late Expansion",
+  "Expansion",
+  "Early Mania",
+  "Late Mania",
+  "Mania",
+  "Distribution",
+  "Dead",
+];
+
+// Token type values — UTILITY, MEMECOIN, plus HYBRID added in Aggregation v2.
+const TOKEN_TYPES = ["UTILITY", "MEMECOIN", "HYBRID"];
+
+// Unlock warning severity levels for graded enum (Aggregation v2).
+const UNLOCK_WARNING_SEVERITIES = ["NONE", "MINOR", "MODERATE", "SEVERE"];
+
+// Severity-with-description parser (Part 4.4). Splits values like:
+//   "MODERATE: 12% unlock on March 15 2026"  -> { severity: "MODERATE", description: "12% unlock on March 15 2026" }
+//   "Minor (low volume past week)"            -> { severity: "Minor",    description: "low volume past week" }
+//   "NONE"                                     -> { severity: "NONE",     description: null }
+export function parseSeverityWithDescription(value: string | null | undefined): { severity: string; description: string | null } {
+  if (!value) return { severity: "", description: null };
+  const trimmed = value.trim();
+  if (!trimmed) return { severity: "", description: null };
+
+  let severity = trimmed;
+  let description: string | null = null;
+
+  const colonIdx = trimmed.indexOf(":");
+  const parenIdx = trimmed.indexOf("(");
+
+  if (colonIdx > 0 && (parenIdx < 0 || colonIdx < parenIdx)) {
+    severity = trimmed.substring(0, colonIdx).trim();
+    description = trimmed.substring(colonIdx + 1).trim();
+  } else if (parenIdx > 0) {
+    severity = trimmed.substring(0, parenIdx).trim();
+    const closeParen = trimmed.lastIndexOf(")");
+    const inner = closeParen > parenIdx
+      ? trimmed.substring(parenIdx + 1, closeParen)
+      : trimmed.substring(parenIdx + 1);
+    description = inner.trim();
+  }
+
+  if (description !== null && description.length === 0) description = null;
+  return { severity, description };
+}
+
+// Normalize a raw field name by stripping markdown asterisks and trailing colons (Part 4.5).
+// Defensive against `**field_name:**`, `field_name:`, or `**field_name**` shapes.
+export function normalizeRawKey(rawKey: string): string {
+  if (!rawKey) return "";
+  return rawKey.trim().replace(/\*\*/g, "").replace(/:+\s*$/, "").trim();
+}
 
 // Extract valid category from a longer string (e.g., "Active. The community shows..." -> "Active")
 // Handles verbose responses with keyword-based matching
@@ -269,44 +346,54 @@ function extractCommunityStatusCategory(value: string): string {
 
 // Extract valid category from account quality string
 // Handles verbose responses with keyword-based matching
+// Aggregation v2: canonical values are hyphenated (Builders-Researchers, etc.).
+// Legacy slashed values (Builders/Researchers) still parse correctly via mapping.
 function extractAccountQualityCategory(value: string): string {
   if (!value) return "Unknown";
   const cleanValue = cleanText(value);
   const lowerValue = cleanValue.toLowerCase();
 
-  // Step 1: Check for exact match with any valid category
+  // Step 1: Check for exact match against legacy (slash) values first
+  for (const [legacy, canonical] of Object.entries(ACCOUNT_QUALITY_LEGACY_TO_CANONICAL)) {
+    if (lowerValue === legacy) return canonical;
+  }
+
+  // Step 2: Check for exact match with any canonical category
   for (const category of ACCOUNT_QUALITY_CATEGORIES) {
     if (lowerValue === category.toLowerCase()) {
       return category;
     }
   }
 
-  // Step 2: Check if value starts with any valid category
+  // Step 3: Check if value starts with legacy or canonical category
+  for (const [legacy, canonical] of Object.entries(ACCOUNT_QUALITY_LEGACY_TO_CANONICAL)) {
+    if (lowerValue.startsWith(legacy)) return canonical;
+  }
   for (const category of ACCOUNT_QUALITY_CATEGORIES) {
     if (lowerValue.startsWith(category.toLowerCase())) {
       return category;
     }
   }
 
-  // Step 3: Keyword-based matching for verbose responses
+  // Step 4: Keyword-based matching for verbose responses
   if (lowerValue.includes("builder") || lowerValue.includes("researcher") ||
       lowerValue.includes("developer") || lowerValue.includes("technical")) {
-    return "Builders/Researchers";
+    return "Builders-Researchers";
   }
   if (lowerValue.includes("trader") || lowerValue.includes("degen")) {
-    return "Traders/Degens";
+    return "Traders-Degens";
   }
   if (lowerValue.includes("mixed")) {
     return "Mixed Quality";
   }
   if (lowerValue.includes("promoter") || lowerValue.includes("shill")) {
-    return "Promoters/Shills";
+    return "Promoters-Shills";
   }
   if (lowerValue.includes("bot") || lowerValue.includes("spam")) {
-    return "Bots/Spam";
+    return "Bots-Spam";
   }
 
-  // Step 4: Final fallback - check if any category is contained in the value
+  // Step 5: Final fallback - check if any canonical category is contained in the value
   for (const category of ACCOUNT_QUALITY_CATEGORIES) {
     if (lowerValue.includes(category.toLowerCase())) {
       return category;
@@ -453,6 +540,23 @@ const FIELD_LABEL_PREFIXES = [
   'schelling position:',
   'narrative_rank:',
   'narrative rank:',
+  // Aggregation v2 fields
+  'vapor_cap_applied:',
+  'vapor cap applied:',
+  'team_activity:',
+  'team activity:',
+  'fud_signals:',
+  'fud signals:',
+  'consensus_penalty_modifier:',
+  'consensus penalty modifier:',
+  'relative_spread:',
+  'relative spread:',
+  'ceiling_confidence:',
+  'ceiling confidence:',
+  'ceiling_divergence:',
+  'ceiling divergence:',
+  'bear_case:',
+  'bear case:',
 ];
 
 // Exported for use in routes.ts as final safety check
@@ -925,6 +1029,57 @@ const FIELD_ALIASES: Record<string, string> = {
   'sample_size': 'sentiment_sample_size',
   'sample size': 'sentiment_sample_size',
   'posts_analyzed': 'sentiment_sample_size',
+
+  // ===== Aggregation v2 fields =====
+  // Vapor cap applied — "YES: score capped at 45" or "NO"
+  'vapor_cap_applied': 'vapor_cap_applied',
+  'vapor cap applied': 'vapor_cap_applied',
+  'vaporcapapplied': 'vapor_cap_applied',
+  'shipping_cap_applied': 'vapor_cap_applied',
+  'shipping cap applied': 'vapor_cap_applied',
+
+  // Team activity — Active | Regular | Quiet | Abandoned
+  'team_activity': 'team_activity',
+  'team activity': 'team_activity',
+  'teamactivity': 'team_activity',
+
+  // FUD signals — None observed | Minor (...) | Material (...)
+  'fud_signals': 'fud_signals',
+  'fud signals': 'fud_signals',
+  'fudsignals': 'fud_signals',
+  'fud_signal': 'fud_signals',
+  'fud signal': 'fud_signals',
+
+  // Consensus penalty modifier — numeric, aggregation-stage penalty
+  'consensus_penalty_modifier': 'consensus_penalty_modifier',
+  'consensus penalty modifier': 'consensus_penalty_modifier',
+  'consensuspenaltymodifier': 'consensus_penalty_modifier',
+  'aggregation_penalty': 'consensus_penalty_modifier',
+  'aggregation penalty': 'consensus_penalty_modifier',
+
+  // Relative spread — percentage complementing absolute score_spread
+  'relative_spread': 'relative_spread',
+  'relative spread': 'relative_spread',
+  'relativespread': 'relative_spread',
+
+  // Narrative rank already mapped above; no change needed.
+
+  // Ceiling confidence — High | Medium | Low (with optional reasoning)
+  'ceiling_confidence': 'ceiling_confidence',
+  'ceiling confidence': 'ceiling_confidence',
+  'ceilingconfidence': 'ceiling_confidence',
+  'upside_confidence': 'ceiling_confidence',
+  'upside confidence': 'ceiling_confidence',
+
+  // Ceiling divergence — "HIGH" or absent
+  'ceiling_divergence': 'ceiling_divergence',
+  'ceiling divergence': 'ceiling_divergence',
+  'ceilingdivergence': 'ceiling_divergence',
+
+  // Bear case (per-model field)
+  'bear_case': 'bear_case',
+  'bear case': 'bear_case',
+  'bearcase': 'bear_case',
 };
 
 // Normalize a field name to its canonical form
@@ -1034,7 +1189,9 @@ function parseOutputSummaryToMap(summaryText: string): Map<string, string> {
           continue;
         }
 
-        const canonicalKey = normalizeFieldName(rawKey);
+        // Aggregation v2 (Part 4.5): defensive against `**field_name:**` and trailing colons
+        const cleanedRawKey = normalizeRawKey(rawKey);
+        const canonicalKey = normalizeFieldName(cleanedRawKey);
         // Clean the value (remove trailing markdown, extra quotes, brackets)
         let cleanedValue = rawValue
           .replace(/\*\*/g, '')
@@ -1340,16 +1497,19 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
     }
   }
 
-  // Token type - UTILITY or MEMECOIN
+  // Token type - UTILITY, MEMECOIN, or HYBRID (added in Aggregation v2).
+  // Check HYBRID first so a value like "HYBRID (utility + meme)" doesn't fall through to MEME/UTIL.
   const tokenType = extractField(parseText, 'token_type');
   if (tokenType) {
     const cleanType = tokenType.toUpperCase().trim();
-    if (cleanType.includes('MEME')) {
+    if (cleanType.includes('HYBRID')) {
+      result.tokenType = 'HYBRID';
+    } else if (cleanType.includes('MEME')) {
       result.tokenType = 'MEMECOIN';
     } else if (cleanType.includes('UTIL')) {
       result.tokenType = 'UTILITY';
     } else {
-      result.tokenType = cleanType === 'MEMECOIN' ? 'MEMECOIN' : 'UTILITY';
+      result.tokenType = 'UTILITY';
     }
   }
 
@@ -1744,6 +1904,59 @@ function parseStructuredOutput(text: string, result: ParsedGumloopResponse): voi
     }
   }
 
+  // ===== Aggregation v2 fields =====
+  const vaporCapApplied = extractField(parseText, 'vapor_cap_applied') || extractField(parseText, 'shipping_cap_applied');
+  if (vaporCapApplied) {
+    result.vaporCapApplied = cleanText(vaporCapApplied);
+    console.log(`Parser: Extracted vaporCapApplied: "${result.vaporCapApplied}"`);
+  }
+
+  const teamActivity = extractField(parseText, 'team_activity');
+  if (teamActivity) {
+    result.teamActivity = cleanText(teamActivity);
+    console.log(`Parser: Extracted teamActivity: "${result.teamActivity}"`);
+  }
+
+  const fudSignals = extractField(parseText, 'fud_signals');
+  if (fudSignals) {
+    result.fudSignals = cleanText(fudSignals);
+    console.log(`Parser: Extracted fudSignals: "${result.fudSignals}"`);
+  }
+
+  const consensusPenaltyModifier = extractNumericField(parseText, 'consensus_penalty_modifier');
+  if (consensusPenaltyModifier !== undefined && Number.isFinite(consensusPenaltyModifier)) {
+    result.consensusPenaltyModifier = consensusPenaltyModifier;
+    console.log(`Parser: Extracted consensusPenaltyModifier: ${result.consensusPenaltyModifier}`);
+  }
+
+  const relativeSpread = extractField(parseText, 'relative_spread');
+  if (relativeSpread) {
+    result.relativeSpread = cleanText(relativeSpread);
+    console.log(`Parser: Extracted relativeSpread: "${result.relativeSpread}"`);
+  }
+
+  const ceilingConfidence = extractField(parseText, 'ceiling_confidence');
+  if (ceilingConfidence) {
+    result.ceilingConfidence = cleanText(ceilingConfidence);
+    console.log(`Parser: Extracted ceilingConfidence: "${result.ceilingConfidence}"`);
+  }
+
+  const ceilingDivergence = extractField(parseText, 'ceiling_divergence');
+  if (ceilingDivergence) {
+    const upper = cleanText(ceilingDivergence).toUpperCase();
+    // Only persist if HIGH; per spec, anything else (or absence) is rendered as nothing.
+    if (upper === 'HIGH') {
+      result.ceilingDivergence = 'HIGH';
+      console.log(`Parser: Extracted ceilingDivergence: HIGH`);
+    }
+  }
+
+  const bearCase = extractField(parseText, 'bear_case');
+  if (bearCase && bearCase.length > 3) {
+    result.bearCase = cleanText(bearCase);
+    console.log(`Parser: Extracted bearCase (${result.bearCase.length} chars)`);
+  }
+
   // Score calculation (LLM arithmetic work for verification)
   const scoreCalculation = extractField(parseText, 'score_calculation');
   if (scoreCalculation) {
@@ -2080,7 +2293,9 @@ function parseLegacyFormat(rawText: string, result: ParsedGumloopResponse): void
     }
   }
 
-  // Phase name fallback
+  // Phase name fallback. Only fall back to the legacy 5-name lookup when no name was parsed
+  // at all (or when it's the default placeholder). Don't clobber expanded v2 names like
+  // "Late Expansion" / "Early Mania" — those come from `parsePhaseName`/extractField.
   if (!result.phaseName || result.phaseName === 'Expansion') {
     const phaseNames = ['Stealth', 'Expansion', 'Mania', 'Distribution', 'Dead'];
     if (result.phase >= 1 && result.phase <= 5) {
@@ -2338,7 +2553,13 @@ export function parseGumloopResponse(rawText: string): ParsedGumloopResponse {
       const summaryTokenType = getStringFromMap(summaryMap, 'token_type');
       if (summaryTokenType) {
         const cleanType = summaryTokenType.toUpperCase();
-        result.tokenType = cleanType.includes('MEME') ? 'MEMECOIN' : 'UTILITY';
+        if (cleanType.includes('HYBRID')) {
+          result.tokenType = 'HYBRID';
+        } else if (cleanType.includes('MEME')) {
+          result.tokenType = 'MEMECOIN';
+        } else {
+          result.tokenType = 'UTILITY';
+        }
       }
 
       const summaryPhase = getNumberFromMap(summaryMap, 'phase');
@@ -2713,16 +2934,18 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
     }
   }
 
-  // Token type - UTILITY or MEMECOIN
+  // Token type - UTILITY, MEMECOIN, or HYBRID (added in Aggregation v2).
   const tokenType = getString('token_type');
   if (tokenType) {
     const cleanType = tokenType.toUpperCase().trim();
-    if (cleanType.includes('MEME')) {
+    if (cleanType.includes('HYBRID')) {
+      result.tokenType = 'HYBRID';
+    } else if (cleanType.includes('MEME')) {
       result.tokenType = 'MEMECOIN';
     } else if (cleanType.includes('UTIL')) {
       result.tokenType = 'UTILITY';
     } else {
-      result.tokenType = cleanType === 'MEMECOIN' ? 'MEMECOIN' : 'UTILITY';
+      result.tokenType = 'UTILITY';
     }
   }
 
@@ -3211,6 +3434,55 @@ export function parseGumloopOutputs(outputs: Record<string, any>): ParsedGumloop
   if (scoreCalculation) {
     result.scoreCalculation = scoreCalculation;
     console.log(`Parser (outputs): Extracted scoreCalculation: "${result.scoreCalculation}"`);
+  }
+
+  // ===== Aggregation v2 fields =====
+  const vaporCapApplied = getString('vapor_cap_applied') || getString('shipping_cap_applied');
+  if (vaporCapApplied) {
+    result.vaporCapApplied = vaporCapApplied;
+    console.log(`Parser (outputs): Extracted vaporCapApplied: "${result.vaporCapApplied}"`);
+  }
+
+  const teamActivity = getString('team_activity');
+  if (teamActivity) {
+    result.teamActivity = teamActivity;
+    console.log(`Parser (outputs): Extracted teamActivity: "${result.teamActivity}"`);
+  }
+
+  const fudSignals = getString('fud_signals');
+  if (fudSignals) {
+    result.fudSignals = fudSignals;
+    console.log(`Parser (outputs): Extracted fudSignals: "${result.fudSignals}"`);
+  }
+
+  const consensusPenaltyModifier = getNumber('consensus_penalty_modifier');
+  if (consensusPenaltyModifier !== undefined && Number.isFinite(consensusPenaltyModifier)) {
+    result.consensusPenaltyModifier = consensusPenaltyModifier;
+    console.log(`Parser (outputs): Extracted consensusPenaltyModifier: ${result.consensusPenaltyModifier}`);
+  }
+
+  const relativeSpread = getString('relative_spread');
+  if (relativeSpread) {
+    result.relativeSpread = relativeSpread;
+    console.log(`Parser (outputs): Extracted relativeSpread: "${result.relativeSpread}"`);
+  }
+
+  const ceilingConfidence = getString('ceiling_confidence');
+  if (ceilingConfidence) {
+    result.ceilingConfidence = ceilingConfidence;
+    console.log(`Parser (outputs): Extracted ceilingConfidence: "${result.ceilingConfidence}"`);
+  }
+
+  const ceilingDivergence = getString('ceiling_divergence');
+  if (ceilingDivergence && ceilingDivergence.toUpperCase() === 'HIGH') {
+    result.ceilingDivergence = 'HIGH';
+    console.log(`Parser (outputs): Extracted ceilingDivergence: HIGH`);
+  }
+
+  const bearCase = getString('bear_case');
+  if (bearCase && bearCase.length > 3) {
+    result.bearCase = bearCase;
+    console.log(`Parser (outputs): Extracted bearCase (${result.bearCase.length} chars)`);
   }
 
   // Calculate tier from score if not set

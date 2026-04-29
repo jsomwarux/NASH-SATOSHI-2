@@ -4,7 +4,116 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
-## Session: 2026-04-20 - Fix Tier Mismatch, Wrong Final Scores, and Upside Display (Latest)
+## Session: 2026-04-29 - Aggregation v2 Schema Upgrade (Final Aggregation node) (Latest)
+
+### Summary
+Updated the parser, database schema, and frontend to consume the upgraded Final Aggregation node output. The new schema adds 8 fields, expands 4 enums (phase_name, account_quality, token_type, unlock_warning), and changes unlock_warning from binary to graded. All changes are backward-compatible: pre-upgrade rows render normally, post-upgrade rows render new fields conditionally.
+
+### Breaking Changes Handled (Part 1)
+1. **phase_name**: accept both 5-value (Stealth/Expansion/Mania/Distribution/Dead) and 7-value (adds Early/Late Expansion, Early/Late Mania) enums. Schema column is plain text — no enum migration required.
+2. **account_quality**: hyphenated values are canonical (Builders-Researchers, etc.); the old slashed values still parse via legacy mapping. ScoreCard color lookup matches both via keyword-based logic.
+3. **token_type**: added HYBRID. Parser checks HYBRID before MEME/UTIL. Frontend renders distinct purple HYBRID badge in LeaderboardTable; ScoreCard treats HYBRID as memecoin-styled for catalyst/risk labeling.
+4. **unlock_warning**: now graded NONE | MINOR | MODERATE: ... | SEVERE: ... — parser stores raw value; ScoreCard splits severity from description and renders color-coded card (yellow/orange/red). NONE hides the card. Legacy "WARNING:" prefix renders as MODERATE.
+
+### New Fields Added (Part 2)
+1. **vapor_cap_applied**: "Shipping Cap Applied" badge in hero section when value starts with YES.
+2. **team_activity**: rendered alongside team_status with color (Active green / Regular emerald / Quiet yellow / Abandoned red).
+3. **kol_mention_recency**: social signals card with stale-data warning if "Older than 3 months" or "No KOL mentions found".
+4. **fud_signals**: social signals card with severity badge (Material = red prominent, Minor = yellow); description parsed from `severity:desc` or `severity (desc)`.
+5. **consensus_penalty_modifier**: added to modifier breakdown as "Consensus" tile, hidden when zero.
+6. **relative_spread**: rendered alongside scoreSpread in divergence section.
+7. **narrative_rank**: Schelling Position now color-coded (1st gold, 2nd silver, 3rd bronze, lower neutral).
+8. **ceiling_confidence / ceiling_divergence**: confidence badge near Upside Assessment (High green / Medium yellow / Low orange + dimmed display when Low); divergence indicator shown when HIGH.
+9. **bear_case** (top-level): "What would kill this" card under Investment Thesis.
+
+### Parsing Robustness (Part 4)
+1. Added `parseSeverityWithDescription()` helper for severity-with-description fields.
+2. Added `normalizeRawKey()` to strip `**field_name:**` and trailing colons before alias lookup. Wired into `parseOutputSummaryToMap`.
+3. New fields validated (consensus_penalty_modifier checks Number.isFinite); unknown enum values fall back to neutral rendering rather than crashing.
+
+### Database Schema (Part 5)
+- Migration `0010_add_aggregation_v2_fields.sql` adds 8 nullable columns:
+  `vapor_cap_applied`, `team_activity`, `fud_signals`, `consensus_penalty_modifier numeric(5,2)`,
+  `relative_spread`, `ceiling_confidence`, `ceiling_divergence`, `bear_case`.
+- All enum-style columns remain plain TEXT — validation is application-level so the enum expansions need no migration.
+
+### Changes Made
+
+#### 1. Parser (`server/gumloop-parser.ts`)
+- Extended `ParsedGumloopResponse` interface with 8 new fields.
+- Added 30+ new entries to `FIELD_ALIASES` for v2 fields and aliases.
+- Updated `ACCOUNT_QUALITY_CATEGORIES` to hyphenated canonical values + legacy mapping.
+- Added `PHASE_NAMES` (7-value), `TOKEN_TYPES` (with HYBRID), `UNLOCK_WARNING_SEVERITIES` constants.
+- Added `parseSeverityWithDescription()` and `normalizeRawKey()` exported helpers.
+- Updated `extractAccountQualityCategory()` to recognize both old slashed and new hyphenated values.
+- Updated token_type extraction in `parseStructuredOutput`, OUTPUT SUMMARY map handler, and `parseGumloopOutputs` to detect HYBRID.
+- Added extraction blocks for all 8 new fields in both `parseStructuredOutput` and `parseGumloopOutputs`.
+- Added new fields to `FIELD_LABEL_PREFIXES` so values containing labels strip cleanly.
+
+#### 2. Database Schema (`shared/schema.ts`)
+- Added 8 new columns to `tokenAnalyses` table.
+- Updated `accountQuality` column comment to reflect canonical hyphenated values.
+
+#### 3. Migration (`migrations/0010_add_aggregation_v2_fields.sql`)
+- New migration: 8 ADD COLUMN IF NOT EXISTS statements.
+
+#### 4. Routes (`server/routes.ts`)
+- `processGumloopCompletion`: pass 8 new fields through to `updateAnalysis`.
+- Admin reprocess endpoint: re-extract 8 new fields from raw response.
+
+#### 5. Frontend types (`client/src/types/leaderboard.ts`)
+- Extended `tokenType` union to include `'HYBRID'`.
+
+#### 6. ScoreCard (`client/src/components/scorecard/ScoreCard.tsx`)
+- HYBRID detection in `tokenType`/`isMemecoin` derivation.
+- New "Consensus" modifier in modifier grid.
+- Graded unlock_warning rendering (severity-based color + badge, NONE hidden).
+- Shipping Cap (vapor_cap_applied) panel near scoreCapped explanation.
+- team_activity tile in Team/Project Info row with color coding.
+- Ceiling confidence badge + divergence indicator in Upside Assessment.
+- Schelling Position color-coded by rank (gold/silver/bronze/neutral).
+- relative_spread shown next to absolute scoreSpread in divergence section.
+- kol_mention_recency tile with stale-data warning.
+- fud_signals panel with severity-based styling.
+- bear_case "What would kill this" card in Investment Thesis section.
+
+#### 7. LeaderboardTable (`client/src/components/leaderboard/LeaderboardTable.tsx`)
+- HYBRID = third distinct purple badge style.
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/gumloop-parser.ts` | Interface + aliases + enum lists + severity helper + extraction for 8 new fields |
+| `shared/schema.ts` | 8 new columns; account_quality comment |
+| `migrations/0010_add_aggregation_v2_fields.sql` | New migration (8 ALTER TABLE) |
+| `server/routes.ts` | Wire new fields through processGumloopCompletion + admin reprocess |
+| `client/src/types/leaderboard.ts` | tokenType union adds HYBRID |
+| `client/src/components/scorecard/ScoreCard.tsx` | All v2 UI: badges, severity rendering, new tiles, color coding |
+| `client/src/components/leaderboard/LeaderboardTable.tsx` | HYBRID badge style |
+
+### Commands Run
+- `npx tsc --noEmit` — passed (exit 0)
+
+### Current State
+- Parsing handles BOTH old and new schemas defensively. Unknown enum values render with neutral fallback.
+- Frontend hides v2 UI elements when their fields are absent; pre-upgrade rows render exactly as before.
+- Migration `0010_add_aggregation_v2_fields.sql` ready to run on production DB. No backfill needed (columns are nullable).
+
+### Still Open (Part 8 questions for product owner)
+1. **HYBRID display**: chose third distinct (purple) badge style — confirm.
+2. **bear_case placement**: rendered as "What would kill this" card in Investment Thesis. Per-model bear_case (Part 2.10) deferred — requires extending `ModelAnalysis` interface and per-model parsing; not blocking.
+3. **vapor_cap_applied**: shown on detail page (ScoreCard) only; not added to leaderboard. Confirm whether it should also surface on rankings.
+4. **unlock_warning leaderboard sort**: NOT wired into leaderboard sort/filter; only badge on detail page. Confirm whether MODERATE/SEVERE should affect leaderboard ranking or filters.
+5. **Phase visualization**: only the phase name string is rendered — no progress-step UI exists for either 5 or 7 states. Decision deferred until/if a phase progress widget is added.
+
+### How to Deploy
+1. Run `migrations/0010_add_aggregation_v2_fields.sql` on production DB.
+2. Deploy code (defensive parsing handles both old and new prompt outputs — order doesn't matter).
+3. Optionally run "Reprocess All" from admin panel to populate v2 fields on existing analyses with raw responses.
+
+---
+
+## Session: 2026-04-20 - Fix Tier Mismatch, Wrong Final Scores, and Upside Display
 
 ### Summary
 Fixed three issues surfacing in the latest reanalysis batch: (1) tokens with scores >=85 showing as S tier instead of S+, (2) final scores wildly inconsistent with model scores (e.g., 63.61 when models scored 84-93), and (3) the Upside Assessment section displaying raw calculation math instead of just the upside multiple.

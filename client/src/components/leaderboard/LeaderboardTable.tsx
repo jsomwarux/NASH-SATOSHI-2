@@ -540,15 +540,19 @@ export function LeaderboardTable({ items, sortBy, order, onSort, accessLimit, to
                     </div>
                   </TableCell>
                   <TableCell className="text-center hidden sm:table-cell w-16 min-w-[64px]">
+                    {/* Aggregation v2: HYBRID = third distinct badge style.
+                        UTIL = blue, MEME = orange, HYBRID = purple. */}
                     <Badge
                       variant="outline"
                       className={`text-[9px] px-1.5 py-0 h-4 font-mono ${
-                        item.tokenType === 'MEMECOIN'
-                          ? 'bg-orange-500/10 text-orange-400 border-orange-500/30'
-                          : 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                        item.tokenType === 'HYBRID'
+                          ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                          : item.tokenType === 'MEMECOIN'
+                            ? 'bg-orange-500/10 text-orange-400 border-orange-500/30'
+                            : 'bg-blue-500/10 text-blue-400 border-blue-500/30'
                       }`}
                     >
-                      {item.tokenType === 'MEMECOIN' ? 'MEME' : 'UTIL'}
+                      {item.tokenType === 'HYBRID' ? 'HYBRID' : item.tokenType === 'MEMECOIN' ? 'MEME' : 'UTIL'}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-center">

@@ -265,7 +265,7 @@ export const tokenAnalyses = pgTable("token_analyses", {
   xSentiment: text("x_sentiment"), // positive/mixed/negative (deprecated, often N/A)
   xTopKols: text("x_top_kols"), // influencer mentions
   communityStatus: text("community_status"), // Very Active/Active/Moderate/Low/Dead
-  accountQuality: text("account_quality"), // Builders/Researchers, Traders/Degens, Mixed Quality, etc.
+  accountQuality: text("account_quality"), // Aggregation v2: Builders-Researchers, Traders-Degens, Mixed Quality, Promoters-Shills, Bots-Spam (hyphenated)
 
   // X Research qualitative fields (NEW - replacing numeric versions)
   engagementQuality: text("engagement_quality"), // "High", "Moderate", "Low", "Bot-Heavy"
@@ -353,6 +353,16 @@ export const tokenAnalyses = pgTable("token_analyses", {
   scoreSpread: numeric("score_spread", { precision: 6, scale: 2 }), // Difference between highest and lowest model scores
   divergenceFlag: text("divergence_flag"), // "HIGH" (>15 pts), "MODERATE" (10-15 pts), "LOW" (<10 pts)
   divergenceNote: text("divergence_note"), // Explanation when divergence is HIGH
+
+  // Aggregation v2 fields (Final Aggregation upgrade — added 2026-04-29, see migration 0010)
+  vaporCapApplied: text("vapor_cap_applied"),                                       // "YES: score capped at 45" or "NO"
+  teamActivity: text("team_activity"),                                              // Active | Regular | Quiet | Abandoned
+  fudSignals: text("fud_signals"),                                                  // "None observed" | "Minor (...)" | "Material (...)"
+  consensusPenaltyModifier: numeric("consensus_penalty_modifier", { precision: 5, scale: 2 }), // Aggregation-stage penalty (e.g., -5.00)
+  relativeSpread: text("relative_spread"),                                          // Percentage string (e.g., "18.5%")
+  ceilingConfidence: text("ceiling_confidence"),                                    // High | Medium | Low (with optional reasoning)
+  ceilingDivergence: text("ceiling_divergence"),                                    // "HIGH" or null
+  bearCase: text("bear_case"),                                                      // 1-2 sentence per-model bear case (Stage 1/2)
 
   // Market data snapshot
   currentPrice: numeric("current_price", { precision: 20, scale: 10 }),
