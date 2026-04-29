@@ -2288,13 +2288,16 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                   <div className={`w-8 h-8 rounded-full ${palette.chipBg} flex items-center justify-center shrink-0`}>
                     <Unlock className={`w-4 h-4 ${palette.icon}`} />
                   </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
+                  {/* min-w-0 lets this flex child shrink below intrinsic content width
+                      so long descriptions wrap instead of pushing past the viewport. */}
+                  <div className="flex-1 min-w-0">
+                    {/* flex-wrap so the severity badge can drop to a second line on narrow screens. */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1">
                       <div className={`text-sm font-medium ${palette.label}`}>Upcoming Token Unlock</div>
                       <Badge variant="outline" className={`text-[10px] uppercase ${palette.label}`}>{displaySeverity}</Badge>
                     </div>
                     {description && (
-                      <div className="text-sm text-muted-foreground">{description}</div>
+                      <div className="text-sm text-muted-foreground break-words">{description}</div>
                     )}
                   </div>
                 </div>
