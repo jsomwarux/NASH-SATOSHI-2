@@ -88,7 +88,7 @@ export default function Account() {
 
   // Handle share to Twitter - must open window synchronously to avoid popup blocker
   const handleShareToTwitter = async () => {
-    const shareText = `The first-ever crypto game theory rankings. It has GPT-5.4, Opus 4.6, Gemini 3.1 Pro, and Grok 4 work together and cross check each other with a focus on game theory positioning to produce an overall score for each coin. Check it out.`;
+    const shareText = `The first-ever crypto game theory rankings. It has GPT-5.5, Opus 4.7, Gemini 3.1 Pro, and Grok 4 work together and cross check each other with a focus on game theory positioning to produce an overall score for each coin. Check it out.`;
     const shareUrl = referralData?.referralUrl || window.location.origin;
 
     // Build Twitter intent URL

@@ -724,8 +724,8 @@ function AnalysisLoadingScreen({ analysis, startTime, elapsedSeconds: serverElap
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { name: "ChatGPT-5.4", color: "emerald", bgClass: "bg-emerald-500/10", borderClass: "border-emerald-500/30", textClass: "text-emerald-400" },
-              { name: "Claude Opus 4.6", color: "orange", bgClass: "bg-orange-500/10", borderClass: "border-orange-500/30", textClass: "text-orange-400" },
+              { name: "ChatGPT-5.5", color: "emerald", bgClass: "bg-emerald-500/10", borderClass: "border-emerald-500/30", textClass: "text-emerald-400" },
+              { name: "Claude Opus 4.7", color: "orange", bgClass: "bg-orange-500/10", borderClass: "border-orange-500/30", textClass: "text-orange-400" },
               { name: "Gemini 3.1 Pro", color: "blue", bgClass: "bg-blue-500/10", borderClass: "border-blue-500/30", textClass: "text-blue-400" },
               { name: "Grok 4", color: "purple", bgClass: "bg-purple-500/10", borderClass: "border-purple-500/30", textClass: "text-purple-400" },
             ].map((model) => {
@@ -1687,7 +1687,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                     onClick={() => setSelectedModel('gpt')}
                     className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.gpt)} text-left transition-all hover:scale-[1.02] hover:shadow-lg cursor-pointer`}
                   >
-                    <div className="text-xs text-muted-foreground mb-1">ChatGPT-5.4</div>
+                    <div className="text-xs text-muted-foreground mb-1">ChatGPT-5.5</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.gpt)}`}>
                       {formatScore(modelScores.gpt)}
                     </div>
@@ -1699,7 +1699,7 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
                     onClick={() => setSelectedModel('claude')}
                     className={`p-4 rounded-xl border ${getScoreBgColor(modelScores.claude)} text-left transition-all hover:scale-[1.02] hover:shadow-lg cursor-pointer`}
                   >
-                    <div className="text-xs text-muted-foreground mb-1">Claude Opus 4.6</div>
+                    <div className="text-xs text-muted-foreground mb-1">Claude Opus 4.7</div>
                     <div className={`text-3xl font-bold font-mono ${getScoreColor(modelScores.claude)}`}>
                       {formatScore(modelScores.claude)}
                     </div>
@@ -2762,8 +2762,8 @@ export function ScoreCard({ analysis, isPolling, elapsedSeconds, nodesCompleted,
         isOpen={selectedModel !== null}
         onClose={() => setSelectedModel(null)}
         modelName={
-          selectedModel === 'gpt' ? 'ChatGPT-5.4' :
-          selectedModel === 'claude' ? 'Claude Opus 4.6' :
+          selectedModel === 'gpt' ? 'ChatGPT-5.5' :
+          selectedModel === 'claude' ? 'Claude Opus 4.7' :
           selectedModel === 'gemini' ? 'Gemini 3.1 Pro' :
           selectedModel === 'grok' ? 'Grok 4' : ''
         }

@@ -337,8 +337,8 @@ export function Layout({ children }: LayoutProps) {
         {/* Center - LLM Indicators */}
         <div className="hidden md:flex items-center gap-3">
           {[
-            { name: "GPT-5.4", color: "text-green-400" },
-            { name: "CLAUDE 4.6", color: "text-orange-400" },
+            { name: "GPT-5.5", color: "text-green-400" },
+            { name: "CLAUDE 4.7", color: "text-orange-400" },
             { name: "GEMINI 3.1", color: "text-blue-400" },
             { name: "GROK 4", color: "text-purple-400" },
           ].map((llm) => (
