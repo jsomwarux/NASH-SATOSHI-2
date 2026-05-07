@@ -4,6 +4,41 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
+## Session: 2026-05-07 - Add Methodology SEO Page
+
+### Summary
+Added a public `/methodology` page explaining Nash Satoshi's 4-model crypto game-theory ranking methodology for SEO/AI visibility, with clear research-only disclaimers and internal links from the homepage.
+
+### Changes Made
+- Created a new cyber-styled methodology page with H1 `How Nash Satoshi ranks crypto tokens`.
+- Explained the multi-model workflow across narrative strength, incentives, coordination dynamics, liquidity context, and game-theory positioning.
+- Added clear disclaimers that scores are not price predictions, financial advice, or buy/sell signals.
+- Included required sections for single-model fragility, 4-model workflow, evaluated signals, game-theory positioning, score interpretation, consensus/disagreement, FAQ, and rankings CTA.
+- Added the `/methodology` route to the React router.
+- Added homepage internal link to `/methodology` where scoring methodology is discussed while preserving primary product CTAs.
+- Added `/methodology` to robots, sitemap, and `llms.txt` citation facts.
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `client/src/pages/Methodology.tsx` | New public methodology page |
+| `client/src/App.tsx` | Added `/methodology` route |
+| `client/src/pages/Home.tsx` | Added methodology internal link and safer positioning copy while preserving product CTAs |
+| `server/static.ts` | Added methodology page to robots, sitemap, and `llms.txt` facts |
+| `CHANGELOG.md` | Documented this session |
+
+### Commands Run
+- `npm run check` — passes
+- `npm run build` — passes; Vite reports existing bundle-size warning
+
+### Current State
+The methodology page is implemented, routed, internally linked from the homepage, exposed through AI/SEO crawl surfaces, and production build succeeds after rebasing on the Aggregation v2 schema upgrade.
+
+### Still Broken
+No known TypeScript/build blockers from this session. Vite still reports an existing bundle-size warning.
+
+
+
 ## Session: 2026-04-29 - Aggregation v2 Schema Upgrade (Final Aggregation node) (Latest)
 
 ### Summary

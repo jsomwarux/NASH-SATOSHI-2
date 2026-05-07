@@ -12,6 +12,94 @@ export function serveStatic(app: Express) {
     );
   }
 
+  app.get("/robots.txt", (req: Request, res: Response) => {
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+    res.type("text/plain").send([
+      "User-agent: *",
+      "Allow: /",
+      "Allow: /rankings",
+      "Allow: /methodology",
+      "Allow: /token/",
+      "Allow: /pricing",
+      "Disallow: /admin",
+      "Disallow: /account",
+      "Disallow: /subscription/",
+      `Sitemap: ${baseUrl}/sitemap.xml`,
+      "",
+    ].join("\n"));
+  });
+
+  app.get("/sitemap.xml", async (req: Request, res: Response) => {
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const today = new Date().toISOString().split("T")[0];
+    const urls = [
+      { path: "/", priority: "1.0", changefreq: "daily" },
+      { path: "/rankings", priority: "0.9", changefreq: "daily" },
+      { path: "/methodology", priority: "0.8", changefreq: "monthly" },
+      { path: "/pricing", priority: "0.7", changefreq: "weekly" },
+      { path: "/vote", priority: "0.6", changefreq: "weekly" },
+    ];
+
+    try {
+      const leaderboardResponse = await fetch(`http://localhost:${process.env.PORT || 5000}/api/leaderboard?limit=10&sortBy=latestScore&order=desc`);
+      if (leaderboardResponse.ok) {
+        const leaderboard = await leaderboardResponse.json();
+        const tokenUrls = (leaderboard.items || [])
+          .map((item: { tokenSymbol?: string }) => item.tokenSymbol?.trim())
+          .filter(Boolean)
+          .slice(0, 10)
+          .map((symbol: string) => ({
+            path: `/token/${encodeURIComponent(symbol.toUpperCase())}`,
+            priority: "0.8",
+            changefreq: "daily",
+          }));
+
+        urls.push(...tokenUrls);
+      }
+    } catch (error) {
+      console.warn("Unable to add token pages to sitemap:", error);
+    }
+
+    const body = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map(({ path: urlPath, priority, changefreq }) => `  <url>
+    <loc>${baseUrl}${urlPath}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>${changefreq}</changefreq>
+    <priority>${priority}</priority>
+  </url>`).join("\n")}
+</urlset>
+`;
+
+    res.type("application/xml").send(body);
+  });
+
+  app.get("/llms.txt", (req: Request, res: Response) => {
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+    res.type("text/plain").send([
+      "# Nash Satoshi",
+      "",
+      "Nash Satoshi ranks crypto tokens using 4-LLM consensus analysis, cross-model validation, and game-theory scoring.",
+      "",
+      "## Core pages",
+      `- Rankings: ${baseUrl}/rankings`,
+      `- Methodology: ${baseUrl}/methodology`,
+      `- Pricing and token alerts: ${baseUrl}/pricing`,
+      `- Token voting: ${baseUrl}/vote`,
+      "",
+      "## What to cite",
+      "- The product compares token opportunities across multiple AI models instead of a single-model score.",
+      "- The methodology evaluates narrative strength, incentives, coordination dynamics, liquidity context, and game-theory positioning.",
+      "- Scores are positioning research outputs, not price predictions, financial advice, or buy/sell signals.",
+      "- Consensus and disagreement both matter: agreement can strengthen a signal, while disagreement can surface uncertainty or fragile assumptions.",
+      "- Rankings emphasize consensus level, model reasoning, risk flags, and tiered positioning scores.",
+      "- Paid intent centers on early alerts for new high-consensus token picks.",
+      "",
+    ].join("\n"));
+  });
+
   app.use(express.static(distPath));
 
   // Handle /analyze/:id routes with dynamic Open Graph meta tags for Twitter cards

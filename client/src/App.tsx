@@ -12,6 +12,7 @@ import Token from "@/pages/Token";
 import Leaderboard from "@/pages/Leaderboard";
 import Vote from "@/pages/Vote";
 import Pricing from "@/pages/Pricing";
+import Methodology from "@/pages/Methodology";
 import Account from "@/pages/Account";
 import Admin from "@/pages/Admin";
 import NotFound from "@/pages/not-found";
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/analyze/:id" component={Analyze} />
       <Route path="/token/:symbol" component={Token} />
       <Route path="/rankings" component={Leaderboard} />
+      <Route path="/methodology" component={Methodology} />
       <Route path="/vote" component={Vote} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/account" component={Account} />

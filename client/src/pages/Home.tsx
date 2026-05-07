@@ -18,6 +18,7 @@ import {
   Vote,
   Users,
   TrendingUp,
+  Bell,
 } from "lucide-react";
 import { Layout } from "@/components/common/Layout";
 import { Button } from "@/components/ui/button";
@@ -375,9 +376,13 @@ export default function Home() {
             </h2>
             <p className="text-muted-foreground max-w-2xl mx-auto font-mono text-sm leading-relaxed">
               Our system combines <span className="text-foreground">traditional crypto research</span> with
-              proprietary <span className="text-foreground">game-theoretic analysis</span> to surface
-              asymmetric opportunities.
+              proprietary <span className="text-foreground">game-theoretic analysis</span> to compare
+              token positioning across narrative, incentives, coordination, and liquidity context.
             </p>
+            <Link href="/methodology" className="inline-flex items-center gap-2 mt-5 text-primary hover:text-primary/80 font-mono text-xs tracking-wider transition-colors">
+              READ FULL METHODOLOGY
+              <ArrowRight className="w-3 h-3" />
+            </Link>
           </motion.div>
 
           {/* Four Methodology Pillars */}
@@ -559,7 +564,7 @@ export default function Home() {
             </h2>
             <p className="text-muted-foreground mb-10 max-w-xl mx-auto font-mono text-sm">
               {">"} Browse our curated rankings of game-theory analyzed tokens.
-              Vote for tokens you want to see analyzed next.
+              Upgrade when you want early alerts on new S-tier consensus picks.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -570,10 +575,10 @@ export default function Home() {
                   <ArrowRight className="w-4 h-4" />
                 </Button>
               </Link>
-              <Link href="/vote">
+              <Link href="/pricing?intent=alerts">
                 <Button size="lg" variant="outline" className="font-mono text-sm gap-2 border-accent/50 text-accent hover:bg-accent/10">
-                  <Vote className="w-4 h-4" />
-                  VOTE FOR TOKENS
+                  <Bell className="w-4 h-4" />
+                  GET TOKEN ALERTS
                 </Button>
               </Link>
             </div>
