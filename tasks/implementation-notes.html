@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Nash Weekly Receipt Generator — Implementation Notes</title>
+  <style>
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #080a12; color: #e5f7ff; line-height: 1.55; }
+    main { max-width: 920px; margin: 0 auto; padding: 32px; }
+    .box { border: 1px solid rgba(34,211,238,.35); background: rgba(8,145,178,.12); border-radius: 16px; padding: 18px 20px; box-shadow: 0 0 30px rgba(34,211,238,.08); }
+    h1, h2 { color: #67e8f9; }
+    h1 { margin-top: 0; }
+    code { color: #a7f3d0; }
+    li { margin: 6px 0; }
+    .muted { color: #93a4b8; }
+    .pass { color: #86efac; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="box">
+      <h1>Weekly Ranking Receipt Generator</h1>
+      <p><strong>Status:</strong> <span class="pass">Implemented and verified</span></p>
+      <p><strong>Date:</strong> 2026-05-19</p>
+      <p><strong>Task:</strong> Build MVP <code>/receipts/weekly</code> page using live leaderboard data and PNG export.</p>
+      <p><strong>Top 3 notes:</strong></p>
+      <ol>
+        <li>The build is intentionally frontend-only; no receipt archive, cron, or server upload was added.</li>
+        <li>Exact AI-agent category matching uses current leaderboard narrative fields. If fewer than five matches exist, the card visibly labels a curated fallback from current ranking rows.</li>
+        <li>Rank delta uses available score-trend data because historical rank movement is not present in the existing leaderboard response.</li>
+      </ol>
+    </div>
+
+    <h2>Design Decisions</h2>
+    <ul>
+      <li>Added route <code>/receipts/weekly</code> through the existing Wouter router.</li>
+      <li>Used <code>useLeaderboard</code> instead of a new endpoint to keep MVP static/frontend-first as specified.</li>
+      <li>Generated a 1200x1200 receipt card for X image use, with dark cyber styling matching Nash's existing visual language.</li>
+      <li>Kept caption and footer language research-safe: no price targets, no trade recommendations, no performance promises.</li>
+    </ul>
+
+    <h2>Deviations</h2>
+    <ul>
+      <li>No full backend/public archive was added because the spec explicitly placed that out of scope for MVP.</li>
+      <li>No exact prior-week rank delta was implemented because the current frontend leaderboard data exposes score trend, not prior rank history. The card labels rows as <code>+/- score</code>, <code>flat</code>, or <code>tracked</code>.</li>
+      <li>External token images are filtered during PNG capture if CORS would taint the canvas, matching the defensive pattern used by existing share-card capture.</li>
+    </ul>
+
+    <h2>Tradeoffs</h2>
+    <ul>
+      <li>Chose current leaderboard reuse over API expansion: faster, safer, and enough for an acquisition artifact MVP.</li>
+      <li>Chose explicit source-mode labeling over pretending category coverage is exact when narrative metadata is incomplete.</li>
+      <li>Skipped adding the route to top navigation to avoid promoting an internal marketing generator as a core user feature before two polished receipts exist.</li>
+    </ul>
+
+    <h2>Open Questions</h2>
+    <ul>
+      <li>Should this become a public archive later after two polished receipts exist?</li>
+      <li>Should the backend store weekly rank snapshots so future cards can show true rank deltas?</li>
+      <li>Should a 1080x1920 story variant be added next?</li>
+    </ul>
+
+    <h2>Files Changed</h2>
+    <ul>
+      <li><code>client/src/App.tsx</code> — registered route.</li>
+      <li><code>client/src/pages/WeeklyReceipt.tsx</code> — new page.</li>
+      <li><code>client/src/components/receipts/WeeklyReceiptCard.tsx</code> — new receipt card and row builders.</li>
+      <li><code>client/src/components/receipts/WeeklyReceiptGenerator.tsx</code> — PNG export and caption copy UI.</li>
+      <li><code>CHANGELOG.md</code>, <code>tasks/todo.md</code>, and this file — implementation documentation.</li>
+    </ul>
+
+    <h2>Verification</h2>
+    <ul>
+      <li><code>npm run check</code> — <span class="pass">passed</span>.</li>
+      <li><code>npm run build</code> — <span class="pass">passed</span>; existing Vite chunk-size warning and Browserslist staleness notice remain.</li>
+      <li>No Playwright/browser screenshot was run in this subagent session.</li>
+    </ul>
+  </main>
+</body>
+</html>

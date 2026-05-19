@@ -4,6 +4,44 @@ This file tracks changes made during Claude Code sessions. New agents should rea
 
 ---
 
+## Session: 2026-05-19 - Weekly AI Agents Receipt Generator
+
+### Summary
+Added a public/internal `/receipts/weekly` route that generates a square Weekly AI Agents Ranking Receipt card from current leaderboard data. The MVP is frontend-only, reuses the existing `html-to-image` PNG capture pattern, includes safe caption copy and source tags, and labels the data source when it falls back from exact AI-agent matches to curated current ranking rows.
+
+### Changes Made
+- Added `/receipts/weekly` to the Wouter router.
+- Created a Weekly Receipt page using existing leaderboard data via `useLeaderboard({ limit: 100, sortBy: "latestScore", order: "desc" })`.
+- Created a 1200x1200 receipt card component with Nash cyber styling, week/category labels, 5-7 token rows, ranks, score/tier, thesis notes, model-disagreement/confidence lines, methodology footer, and source tags.
+- Added AI-agent category selection logic using `latestPrimaryNarrative`, `latestSubNarrative`, and `latestNarrative`; if fewer than five rows match, the card clearly labels a curated fallback from current top rankings.
+- Added generator controls for PNG download and caption copy using `html-to-image`.
+- Kept caption/footer language research-safe: no price targets, no trade instruction, no performance promise.
+- Added implementation audit files under `tasks/` for this build.
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `client/src/App.tsx` | Registered `/receipts/weekly` route |
+| `client/src/pages/WeeklyReceipt.tsx` | New receipt generator page with loading/error/refresh states |
+| `client/src/components/receipts/WeeklyReceiptCard.tsx` | New 1200x1200 receipt card and leaderboard-to-receipt row builders |
+| `client/src/components/receipts/WeeklyReceiptGenerator.tsx` | New PNG download/caption-copy controls and safe caption generation |
+| `tasks/todo.md` | Build checklist for the receipt generator task |
+| `tasks/implementation-notes.html` | Implementation notes, design decisions, tradeoffs, and verification record |
+| `CHANGELOG.md` | Documented this session |
+
+### Commands Run
+- `npm run check` — passes
+- `npm run build` — passes; Vite still reports the existing large chunk warning and Browserslist staleness notice
+
+### Current State
+The weekly receipt generator route is implemented and build-verified. It renders from live leaderboard data when API data is available, exports a square PNG, and provides a safe X caption with `nash_aiagents_receipt_x_20260519` and `nash_weekly_receipt_ai_agents` source tags.
+
+### Still Broken / Remaining Work
+- No backend receipt archive, automated weekly cron, or historical rank-delta storage in this MVP by design.
+- Rank delta currently uses available score trend labels (`+/- score`, `flat`, or `tracked`) because prior-week rank history is not stored in the existing leaderboard response.
+- Exact visual/browser export was verified by build/typecheck only; no Playwright screenshot was run in this subagent session.
+
+
 ## Session: 2026-05-07 - Add Methodology SEO Page
 
 ### Summary
